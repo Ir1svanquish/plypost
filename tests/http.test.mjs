@@ -45,8 +45,8 @@ test("serves the composer", async () => {
   const response = await fetch(baseUrl);
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Make every post feel native/);
-  assert.match(html, /Simulation \+ assisted/);
+  assert.match(html, /One idea\. Made for every feed\./);
+  assert.match(html, /Demo workspace/);
   assert.match(html, /Assisted publishing/);
 });
 

@@ -1,4 +1,4 @@
-# SocialFlow AI
+# Plypost
 
 A responsive Next.js MVP for drafting one message, adapting it for Bluesky, Mastodon, LinkedIn and Threads, and reviewing each version before a **simulated** publishing run or a manual assisted publishing workflow.
 
@@ -8,13 +8,16 @@ A responsive Next.js MVP for drafting one message, adapting it for Bluesky, Mast
 - Preview and edit a separate version for each platform. Local edits, selections and demo activity are saved in your browser.
 - Save named drafts, reopen or update them, and export/import a JSON backup of the saved library and publishing plan.
 - Add selected platform drafts to a dated local publishing plan. Due items can be run manually through the simulation endpoint; nothing executes automatically when the app is closed.
-- Prepare assisted publishing checklists for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit, and the original four platforms. Each item saves a text snapshot and an optional reminder time. Copy the text, open the platform, post there yourself, then mark the item posted. SocialFlow does not verify that mark.
+- Prepare assisted publishing checklists for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit, and the original four platforms. Each item saves a text snapshot and an optional reminder time. Copy the text, open the platform, post there yourself, then mark the item posted. Plypost does not verify that mark.
 - Due assisted items appear in the app. Browser alerts are optional and are sent only while this page is open after you click **Enable browser alerts** and grant permission.
 - Ask a server-side Nebius Token Factory or NVIDIA Nemotron endpoint to create four tailored drafts. This is optional; the editor and simulation work without an API key.
 - Run a server-side publishing simulation that validates nonempty text and platform character limits, then returns clearly labeled demo receipts. **No social platform API is called and nothing is posted.**
 - Each platform has its own publishing adapter module under `src/lib/publishers`. The current adapters all use the simulation implementation, making real integrations an explicit future change.
+- Use a responsive workspace with light, dark, or system appearance. The selection stays in this browser and follows system changes when set to **System**.
 
 The saved library, publishing plan, and assisted publishing checklist live in this browser's local storage. Export a backup before clearing browser data or changing devices. Importing a backup replaces these saved lists after confirmation; it does not replace the current editor. Both publishing lists capture text snapshots, so later edits do not silently change them. Dates are entered in your device's local time. Version 2 backups remain importable.
+
+Plypost keeps the earlier browser storage keys after the rename, so existing SocialFlow AI drafts and plans remain available. The GitHub repository currently retains its original `socialflow-ai` URL.
 
 ## Assisted publishing
 
