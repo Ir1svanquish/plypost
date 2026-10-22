@@ -18,9 +18,11 @@ import {
   WandSparkles,
   Workflow,
 } from "lucide-react";
-import { adaptDraft, characterCount, platformIds, platforms, type PlatformId } from "@/lib/platforms";
+import { adaptDraft, characterCount, isPlatformId, platformIds, platforms, type PlatformId } from "@/lib/platforms";
 import { DraftLibraryPanel, SchedulePanel } from "@/components/workspace-panels";
-import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
+import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
+import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nSocialFlow helps you shape one draft for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
@@ -80,6 +82,11 @@ export default function Home() {
   const [activity, setActivity] = useState<Receipt[]>([]);
   const [drafts, setDrafts] = useState<SavedDraft[]>([]);
   const [schedule, setSchedule] = useState<ScheduledPost[]>([]);
+  const [assisted, setAssisted] = useState<AssistedPost[]>([]);
+  const [assistDestination, setAssistDestination] = useState<AssistedDestinationId>("x");
+  const [assistOverride, setAssistOverride] = useState<string | null>(null);
+  const [assistTime, setAssistTime] = useState("");
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [title, setTitle] = useState("");
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [scheduleTime, setScheduleTime] = useState("");
@@ -125,22 +132,24 @@ export default function Home() {
       const workspace = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
       setDrafts(workspace.drafts);
       setSchedule(workspace.schedule);
+      setAssisted(workspace.assisted);
     } catch {
       // Keep the editor usable if the browser holds an invalid workspace backup.
     }
     setHydrated(true);
+    if ("Notification" in window) setNotificationPermission(Notification.permission);
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
     try {
       localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, provider, activity, title, currentDraftId }));
-      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 2, drafts, schedule }));
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 3, drafts, schedule, assisted }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, provider, activity, title, currentDraftId, drafts, schedule, hydrated]);
+  }, [source, selected, variants, provider, activity, title, currentDraftId, drafts, schedule, assisted, hydrated]);
 
   useEffect(() => {
     setNow(Date.now());
@@ -154,6 +163,23 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    if (!hydrated || !now || notificationPermission !== "granted") return;
+    const due = assisted.filter((item) => item.status === "queued" && !item.notifiedAt && Date.parse(item.scheduledFor) <= now);
+    if (!due.length) return;
+    try {
+      new Notification("SocialFlow publishing reminder", {
+        body: due.length === 1 ? `${assistedDestinations[due[0].destination].name}: ${due[0].title}` : `${due.length} posts are ready for your review.`,
+        tag: "socialflow-assisted-due",
+      });
+      const notifiedAt = new Date().toISOString();
+      const dueIds = new Set(due.map((item) => item.id));
+      setAssisted((current) => current.map((item) => dueIds.has(item.id) ? { ...item, notifiedAt } : item));
+    } catch {
+      setNotificationPermission("unsupported");
+    }
+  }, [assisted, hydrated, now, notificationPermission]);
+
   const textFor = (id: PlatformId) => variants[id] ?? adaptDraft(source, id);
   const currentText = textFor(active);
   const currentCount = characterCount(currentText);
@@ -161,6 +187,8 @@ export default function Home() {
     (id) => !textFor(id).trim() || characterCount(textFor(id)) > platforms[id].limit,
   );
   const canPublish = selected.length > 0 && invalidSelected.length === 0 && !publishing;
+  const suggestedAssistText = isPlatformId(assistDestination) ? textFor(assistDestination) : source;
+  const assistText = assistOverride ?? suggestedAssistText;
 
   function togglePlatform(id: PlatformId) {
     setSelected((current) =>
@@ -342,7 +370,7 @@ export default function Home() {
   }
 
   function exportWorkspace() {
-    const backup = new Blob([JSON.stringify({ version: 2, drafts, schedule }, null, 2)], { type: "application/json" });
+    const backup = new Blob([JSON.stringify({ version: 3, drafts, schedule, assisted }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(backup);
     const link = document.createElement("a");
     link.href = url;
@@ -355,12 +383,13 @@ export default function Home() {
     try {
       if (file.size > 2_000_000) throw new Error("Backup file is too large (2 MB maximum).");
       const workspace = parseWorkspace(JSON.parse(await file.text()));
-      if (!workspace) throw new Error("This is not a SocialFlow v2 backup.");
-      if (!window.confirm("Replace the saved draft library and publishing plan in this browser with this backup?")) return;
+      if (!workspace) throw new Error("This is not a SocialFlow workspace backup.");
+      if (!window.confirm("Replace saved drafts, the publishing plan, and assisted posts in this browser with this backup?")) return;
       setDrafts(workspace.drafts);
       setSchedule(workspace.schedule);
+      setAssisted(workspace.assisted);
       setCurrentDraftId(null);
-      setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts and ${workspace.schedule.length} planned items.` });
+      setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts.` });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import backup." });
     }
@@ -375,6 +404,72 @@ export default function Home() {
     }
   }
 
+  function addAssistedPost() {
+    const text = assistText.trim();
+    const scheduledFor = assistTime ? new Date(assistTime) : new Date();
+    if (!text || characterCount(text) > 5000) {
+      setNotice({ kind: "error", text: "Add text of up to 5,000 characters before saving." });
+      return;
+    }
+    if (!Number.isFinite(scheduledFor.getTime()) || (assistTime && scheduledFor.getTime() <= Date.now())) {
+      setNotice({ kind: "error", text: "Choose a future reminder time, or leave it blank for now." });
+      return;
+    }
+    if (assisted.length >= 100) {
+      setNotice({ kind: "error", text: "The assisted publishing list is full. Remove an old item first." });
+      return;
+    }
+    const item: AssistedPost = {
+      id: crypto.randomUUID(),
+      title: draftTitle(title, text),
+      destination: assistDestination,
+      text,
+      scheduledFor: scheduledFor.toISOString(),
+      createdAt: new Date().toISOString(),
+      status: "queued",
+      ...(!assistTime ? { notifiedAt: new Date().toISOString() } : {}),
+    };
+    setAssisted((current) => [...current, item].sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor)));
+    setNow(Date.now());
+    setAssistTime("");
+    setNotice({ kind: "success", text: `Added ${assistedDestinations[assistDestination].name} to your assisted publishing list. You will publish it yourself.` });
+  }
+
+  async function copyAssisted(text: string, destination: AssistedDestinationId) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice({ kind: "success", text: `${assistedDestinations[destination].name} text copied. Open the platform and paste it there.` });
+    } catch {
+      setNotice({ kind: "error", text: "Clipboard access is unavailable. Expand Review saved text to select it manually." });
+    }
+  }
+
+  function markAssistedPosted(id: string) {
+    setAssisted((current) => current.map((item) => item.id === id ? { ...item, status: "posted", postedAt: new Date().toISOString() } : item));
+    setNotice({ kind: "success", text: "Marked as posted by you. SocialFlow did not verify the platform post." });
+  }
+
+  function undoAssistedPosted(id: string) {
+    setAssisted((current) => current.map((item) => {
+      if (item.id !== id) return item;
+      const restored: AssistedPost = { ...item, status: "queued" };
+      delete restored.postedAt;
+      return restored;
+    }));
+  }
+
+  function removeAssisted(id: string) {
+    if (!window.confirm("Remove this assisted post from this browser?")) return;
+    setAssisted((current) => current.filter((item) => item.id !== id));
+  }
+
+  async function enableNotifications() {
+    if (!("Notification" in window)) return;
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    if (permission !== "granted") setNotice({ kind: "error", text: "Browser alerts were not enabled. Due posts will still appear in this page." });
+  }
+
   return (
     <div className="min-h-screen lg:flex">
       <aside className="sidebar-glow hidden w-[242px] shrink-0 flex-col bg-[#181a31] px-5 py-7 text-white lg:sticky lg:top-0 lg:flex lg:h-screen">
@@ -387,6 +482,7 @@ export default function Home() {
           <a href="#compose" className="flex items-center gap-3 rounded-xl bg-[#302c61] px-3 py-3 text-[13px] font-semibold text-white"><FilePenLine size={18} className="text-[#aa9bff]" /> Composer <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#a38cff]" /></a>
           <a href="#drafts" className="flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium text-[#a6aac1] transition hover:bg-white/5 hover:text-white"><FilePenLine size={18} /> Draft library</a>
           <a href="#schedule" className="flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium text-[#a6aac1] transition hover:bg-white/5 hover:text-white"><Clock3 size={18} /> Publishing plan</a>
+          <a href="#assisted" className="flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium text-[#a6aac1] transition hover:bg-white/5 hover:text-white"><Copy size={18} /> Assisted publishing</a>
           <a href="#activity" className="flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium text-[#a6aac1] transition hover:bg-white/5 hover:text-white"><History size={18} /> Activity</a>
         </nav>
         <div className="mt-auto">
@@ -395,7 +491,7 @@ export default function Home() {
             <p className="text-[13px] font-semibold">One draft. Four voices.</p>
             <p className="mt-1.5 text-[12px] leading-[1.55] text-[#a5aac2]">Shape your message for every place your audience shows up.</p>
           </div>
-          <div className="mt-5 flex items-center gap-2 px-2 text-[11px] text-[#777d9e]"><span className="h-2 w-2 rounded-full bg-[#a999ff]" /> MVP · Simulation mode</div>
+          <div className="mt-5 flex items-center gap-2 px-2 text-[11px] text-[#777d9e]"><span className="h-2 w-2 rounded-full bg-[#a999ff]" /> MVP · Simulation + assisted</div>
         </div>
       </aside>
 
@@ -403,7 +499,7 @@ export default function Home() {
         <header className="flex h-[70px] items-center justify-between border-b border-[#e9eaf0] bg-white px-5 sm:px-8 lg:px-10">
           <div className="flex items-center gap-2.5 lg:hidden"><span className="gradient-button flex h-8 w-8 items-center justify-center rounded-[10px] text-white"><Workflow size={17} /></span><span className="font-bold tracking-[-0.04em]">socialflow<span className="text-[#7364ec]">.</span></span></div>
           <div className="hidden items-center gap-2 text-[13px] text-[#888ca1] lg:flex"><span>Workspace</span><span className="text-[#c4c7d2]">/</span><span className="font-semibold text-[#2b2b3d]">Composer</span></div>
-          <div className="flex items-center gap-2 rounded-full border border-[#e5e4f5] bg-[#f6f5ff] px-3 py-1.5 text-[11px] font-semibold text-[#675ae5]"><span className="h-1.5 w-1.5 rounded-full bg-[#796bf1]" /> Simulation mode</div>
+          <div className="flex items-center gap-2 rounded-full border border-[#e5e4f5] bg-[#f6f5ff] px-3 py-1.5 text-[11px] font-semibold text-[#675ae5]"><span className="h-1.5 w-1.5 rounded-full bg-[#796bf1]" /> Simulation + assisted</div>
         </header>
 
         <main id="compose" className="mx-auto max-w-[1480px] px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
@@ -464,6 +560,7 @@ export default function Home() {
 
           <DraftLibraryPanel drafts={drafts} title={title} currentDraftId={currentDraftId} onTitleChange={setTitle} onSave={saveDraft} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} />
           <SchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onRemove={removeScheduled} />
+          <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} />
           <section id="activity" className="panel-border soft-shadow mt-8 overflow-hidden rounded-[22px] bg-white" aria-labelledby="activity-heading"><div className="flex items-center justify-between border-b border-[#eff0f4] px-6 py-5 sm:px-7"><div><h2 id="activity-heading" className="text-[16px] font-bold tracking-[-0.025em]">Recent simulations</h2><p className="mt-1 text-[12px] text-[#989bad]">A local record of your demo publishing runs.</p></div>{activity.length > 0 && <button type="button" onClick={() => setActivity([])} className="text-[11px] font-semibold text-[#8d80dd] hover:text-[#6354db]">Clear history</button>}</div>{activity.length === 0 ? <div className="flex flex-col items-center px-6 py-10 text-center"><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-[#f1f1fb] text-[#8c8ee1]"><Clock3 size={20} /></span><p className="text-[13px] font-semibold text-[#55586d]">Nothing simulated yet</p><p className="mt-1 text-[11px] text-[#a0a4b4]">Your demo publishing activity will show up here.</p></div> : <div className="divide-y divide-[#f0f1f5]">{activity.map((item) => <div key={item.id} className="flex items-center gap-3 px-6 py-3.5 sm:px-7"><PlatformMark id={item.platform} size="small" /><span className="min-w-0 flex-1"><span className="block text-[12px] font-semibold text-[#46495c]">{platforms[item.platform].name} <span className="ml-1 rounded-full bg-[#f2efff] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#7969d5]">Simulated</span></span><span className="mt-0.5 block truncate text-[11px] text-[#a0a4b4]">{item.content}</span></span><span className="shrink-0 text-[10px] text-[#a8abba]">{formatTime(item.publishedAt)}</span></div>)}</div>}</section>
         </main>
       </div>

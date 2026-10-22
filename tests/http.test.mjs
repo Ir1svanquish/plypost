@@ -46,7 +46,8 @@ test("serves the composer", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Make every post feel native/);
-  assert.match(html, /Simulation mode/);
+  assert.match(html, /Simulation \+ assisted/);
+  assert.match(html, /Assisted publishing/);
 });
 
 test("publishes only simulated receipts for selected destinations", async () => {

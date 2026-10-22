@@ -1,4 +1,5 @@
 import { characterCount, platformIds, platforms, type PlatformId } from "./platforms.ts";
+import { isAssistedDestinationId, type AssistedDestinationId } from "./assisted.ts";
 
 export const WORKSPACE_KEY = "socialflow-workspace-v2";
 
@@ -23,13 +24,26 @@ export type ScheduledPost = {
   simulatedAt?: string;
 };
 
-export type Workspace = {
-  version: 2;
-  drafts: SavedDraft[];
-  schedule: ScheduledPost[];
+export type AssistedPost = {
+  id: string;
+  title: string;
+  destination: AssistedDestinationId;
+  text: string;
+  scheduledFor: string;
+  createdAt: string;
+  status: "queued" | "posted";
+  postedAt?: string;
+  notifiedAt?: string;
 };
 
-export const emptyWorkspace = (): Workspace => ({ version: 2, drafts: [], schedule: [] });
+export type Workspace = {
+  version: 3;
+  drafts: SavedDraft[];
+  schedule: ScheduledPost[];
+  assisted: AssistedPost[];
+};
+
+export const emptyWorkspace = (): Workspace => ({ version: 3, drafts: [], schedule: [], assisted: [] });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -96,13 +110,37 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
   };
 }
 
-export function parseWorkspace(value: unknown): Workspace | null {
-  if (!isRecord(value) || value.version !== 2 ||
-      !Array.isArray(value.drafts) || !Array.isArray(value.schedule)) return null;
+function parseAssistedPost(value: unknown): AssistedPost | null {
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id ||
+      typeof value.title !== "string" || characterCount(value.title) > 120 ||
+      !isAssistedDestinationId(value.destination) ||
+      typeof value.text !== "string" || !value.text.trim() || characterCount(value.text) > 5000 ||
+      !validDate(value.scheduledFor) || !validDate(value.createdAt) ||
+      (value.status !== "queued" && value.status !== "posted")) return null;
   return {
-    version: 2,
+    id: value.id,
+    title: value.title,
+    destination: value.destination,
+    text: value.text,
+    scheduledFor: value.scheduledFor,
+    createdAt: value.createdAt,
+    status: value.status,
+    ...(value.status === "posted" && validDate(value.postedAt) ? { postedAt: value.postedAt } : {}),
+    ...(validDate(value.notifiedAt) ? { notifiedAt: value.notifiedAt } : {}),
+  };
+}
+
+export function parseWorkspace(value: unknown): Workspace | null {
+  if (!isRecord(value) || (value.version !== 2 && value.version !== 3) ||
+      !Array.isArray(value.drafts) || !Array.isArray(value.schedule) ||
+      (value.version === 3 && !Array.isArray(value.assisted))) return null;
+  return {
+    version: 3,
     drafts: value.drafts.slice(0, 100).map(parseDraft).filter((draft): draft is SavedDraft => draft !== null),
     schedule: value.schedule.slice(0, 100).map(parseScheduledPost).filter((post): post is ScheduledPost => post !== null),
+    assisted: value.version === 3 && Array.isArray(value.assisted)
+      ? value.assisted.slice(0, 100).map(parseAssistedPost).filter((post): post is AssistedPost => post !== null)
+      : [],
   };
 }
 
@@ -112,6 +150,11 @@ export function draftTitle(title: string, source: string): string {
 
 export function scheduleState(post: ScheduledPost, now: number): "upcoming" | "due" | "simulated" {
   if (post.status === "simulated") return "simulated";
+  return Date.parse(post.scheduledFor) <= now ? "due" : "upcoming";
+}
+
+export function assistedState(post: AssistedPost, now: number): "upcoming" | "due" | "posted" {
+  if (post.status === "posted") return "posted";
   return Date.parse(post.scheduledFor) <= now ? "due" : "upcoming";
 }
 
