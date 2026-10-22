@@ -17,7 +17,7 @@ A responsive Next.js MVP for drafting one message, adapting it for Bluesky, Mast
 
 The saved library, publishing plan, and assisted publishing checklist live in this browser's local storage. Export a backup before clearing browser data or changing devices. Importing a backup replaces these saved lists after confirmation; it does not replace the current editor. Both publishing lists capture text snapshots, so later edits do not silently change them. Dates are entered in your device's local time. Version 2 backups remain importable.
 
-Plypost keeps the earlier browser storage keys after the rename, so existing SocialFlow AI drafts and plans remain available. The GitHub repository currently retains its original `socialflow-ai` URL.
+Plypost keeps the earlier browser storage keys after the rename, so existing SocialFlow AI drafts and plans remain available. The source repository is [Ir1svanquish/plypost](https://github.com/Ir1svanquish/plypost).
 
 ## Assisted publishing
 
