@@ -1,1 +1,10 @@
-# Initial repository
+node_modules/
+.next/
+next-env.d.ts
+out/
+build/
+.env*
+!.env.example
+*.log
+.DS_Store
+*.tsbuildinfo
