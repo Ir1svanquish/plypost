@@ -19,6 +19,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { adaptDraft, characterCount, platformIds, platforms, type PlatformId } from "@/lib/platforms";
+import { DraftLibraryPanel, SchedulePanel } from "@/components/workspace-panels";
+import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nSocialFlow helps you shape one draft for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
@@ -76,6 +78,14 @@ export default function Home() {
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [activity, setActivity] = useState<Receipt[]>([]);
+  const [drafts, setDrafts] = useState<SavedDraft[]>([]);
+  const [schedule, setSchedule] = useState<ScheduledPost[]>([]);
+  const [title, setTitle] = useState("");
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [storageWarning, setStorageWarning] = useState(false);
+  const [now, setNow] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -88,6 +98,8 @@ export default function Home() {
           variants?: unknown;
           provider?: unknown;
           activity?: unknown;
+          title?: unknown;
+          currentDraftId?: unknown;
         };
         if (typeof data.source === "string") setSource(data.source);
         if (Array.isArray(data.selected)) {
@@ -103,20 +115,44 @@ export default function Home() {
         }
         if (data.provider === "nvidia" || data.provider === "nebius") setProvider(data.provider);
         if (Array.isArray(data.activity)) setActivity(data.activity.slice(0, 12));
+        if (typeof data.title === "string") setTitle(data.title.slice(0, 120));
+        if (typeof data.currentDraftId === "string") setCurrentDraftId(data.currentDraftId);
       }
     } catch {
       // A malformed local draft should never prevent the editor from opening.
+    }
+    try {
+      const workspace = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
+      setDrafts(workspace.drafts);
+      setSchedule(workspace.schedule);
+    } catch {
+      // Keep the editor usable if the browser holds an invalid workspace backup.
     }
     setHydrated(true);
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    localStorage.setItem(
-      "socialflow-mvp",
-      JSON.stringify({ source, selected, variants, provider, activity }),
-    );
-  }, [source, selected, variants, provider, activity, hydrated]);
+    try {
+      localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, provider, activity, title, currentDraftId }));
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 2, drafts, schedule }));
+      setStorageWarning(false);
+    } catch {
+      setStorageWarning(true);
+    }
+  }, [source, selected, variants, provider, activity, title, currentDraftId, drafts, schedule, hydrated]);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const textFor = (id: PlatformId) => variants[id] ?? adaptDraft(source, id);
   const currentText = textFor(active);
@@ -183,6 +219,153 @@ export default function Home() {
     }
   }
 
+  function saveDraft() {
+    if (!source.trim()) {
+      setNotice({ kind: "error", text: "Write a source draft before saving it." });
+      return;
+    }
+    if (!currentDraftId && drafts.length >= 100) {
+      setNotice({ kind: "error", text: "The local library is full. Delete an old draft before saving another." });
+      return;
+    }
+    const stamp = new Date().toISOString();
+    const existing = drafts.find((draft) => draft.id === currentDraftId);
+    const saved: SavedDraft = {
+      id: existing?.id ?? crypto.randomUUID(),
+      title: draftTitle(title, source),
+      source,
+      selected: [...selected],
+      variants: { ...variants },
+      createdAt: existing?.createdAt ?? stamp,
+      updatedAt: stamp,
+    };
+    setDrafts((current) => [saved, ...current.filter((draft) => draft.id !== saved.id)]);
+    setCurrentDraftId(saved.id);
+    setTitle(saved.title);
+    setNotice({ kind: "success", text: "Draft saved in this browser." });
+  }
+
+  function newDraft() {
+    setCurrentDraftId(null);
+    setTitle("");
+    setSource("");
+    setVariants({});
+    setSelected([...platformIds]);
+    setActive("bluesky");
+    setNotice(null);
+    document.getElementById("compose")?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function loadDraft(draft: SavedDraft) {
+    setCurrentDraftId(draft.id);
+    setTitle(draft.title);
+    setSource(draft.source);
+    setSelected(draft.selected);
+    setVariants(draft.variants);
+    setActive(draft.selected[0] ?? "bluesky");
+    setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
+    document.getElementById("compose")?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function deleteDraft(id: string) {
+    if (!window.confirm("Delete this saved draft from this browser?")) return;
+    setDrafts((current) => current.filter((draft) => draft.id !== id));
+    if (currentDraftId === id) setCurrentDraftId(null);
+    setNotice({ kind: "success", text: "Saved draft deleted. The current editor was kept." });
+  }
+
+  function addToPlan() {
+    const scheduledFor = new Date(scheduleTime);
+    if (!scheduleTime || !Number.isFinite(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now()) {
+      setNotice({ kind: "error", text: "Choose a future local date and time." });
+      return;
+    }
+    if (!source.trim() || selected.length === 0 || invalidSelected.length > 0) {
+      setNotice({ kind: "error", text: "Choose destinations and fix empty or over-limit drafts first." });
+      return;
+    }
+    if (schedule.length >= 100) {
+      setNotice({ kind: "error", text: "The local plan is full. Remove an old item before adding another." });
+      return;
+    }
+    const post: ScheduledPost = {
+      id: crypto.randomUUID(),
+      title: draftTitle(title, source),
+      source,
+      posts: Object.fromEntries(selected.map((id) => [id, textFor(id)])),
+      scheduledFor: scheduledFor.toISOString(),
+      createdAt: new Date().toISOString(),
+      status: "queued",
+    };
+    setSchedule((current) => [...current, post].sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor)));
+    setScheduleTime("");
+    setNotice({ kind: "success", text: "Added to your local publishing plan. It will need a manual demo run when due." });
+  }
+
+  function loadScheduled(post: ScheduledPost) {
+    setCurrentDraftId(null);
+    setTitle(post.title);
+    setSource(post.source);
+    setSelected(platformIds.filter((id) => post.posts[id] !== undefined));
+    setVariants({ ...post.posts });
+    setActive(platformIds.find((id) => post.posts[id] !== undefined) ?? "bluesky");
+    setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
+    document.getElementById("compose")?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  async function runScheduled(post: ScheduledPost) {
+    if (runningId || post.status !== "queued" || Date.parse(post.scheduledFor) > Date.now()) return;
+    setRunningId(post.id);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ posts: post.posts }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Simulation failed.");
+      setActivity((current) => [...data.results, ...current].slice(0, 12));
+      setSchedule((current) => current.map((item) => item.id === post.id ? { ...item, status: "simulated", simulatedAt: new Date().toISOString() } : item));
+      setNotice({ kind: "success", text: `Simulated ${data.results.length} planned post${data.results.length === 1 ? "" : "s"}. No external platform was contacted.` });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Simulation failed." });
+    } finally {
+      setRunningId(null);
+    }
+  }
+
+  function removeScheduled(id: string) {
+    if (!window.confirm("Remove this item from your local plan?")) return;
+    setSchedule((current) => current.filter((post) => post.id !== id));
+    setNotice({ kind: "success", text: "Item removed from your local plan." });
+  }
+
+  function exportWorkspace() {
+    const backup = new Blob([JSON.stringify({ version: 2, drafts, schedule }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(backup);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `socialflow-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function importWorkspace(file: File) {
+    try {
+      if (file.size > 2_000_000) throw new Error("Backup file is too large (2 MB maximum).");
+      const workspace = parseWorkspace(JSON.parse(await file.text()));
+      if (!workspace) throw new Error("This is not a SocialFlow v2 backup.");
+      if (!window.confirm("Replace the saved draft library and publishing plan in this browser with this backup?")) return;
+      setDrafts(workspace.drafts);
+      setSchedule(workspace.schedule);
+      setCurrentDraftId(null);
+      setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts and ${workspace.schedule.length} planned items.` });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import backup." });
+    }
+  }
+
   async function copyCurrent() {
     try {
       await navigator.clipboard.writeText(currentText);
@@ -202,6 +385,8 @@ export default function Home() {
         <div className="mt-14 px-3 text-[11px] font-bold uppercase tracking-[0.2em] text-[#757b9b]">Workspace</div>
         <nav className="mt-4 space-y-1.5" aria-label="Main navigation">
           <a href="#compose" className="flex items-center gap-3 rounded-xl bg-[#302c61] px-3 py-3 text-[13px] font-semibold text-white"><FilePenLine size={18} className="text-[#aa9bff]" /> Composer <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#a38cff]" /></a>
+          <a href="#drafts" className="flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium text-[#a6aac1] transition hover:bg-white/5 hover:text-white"><FilePenLine size={18} /> Draft library</a>
+          <a href="#schedule" className="flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium text-[#a6aac1] transition hover:bg-white/5 hover:text-white"><Clock3 size={18} /> Publishing plan</a>
           <a href="#activity" className="flex items-center gap-3 rounded-xl px-3 py-3 text-[13px] font-medium text-[#a6aac1] transition hover:bg-white/5 hover:text-white"><History size={18} /> Activity</a>
         </nav>
         <div className="mt-auto">
@@ -273,8 +458,12 @@ export default function Home() {
             </div>
           </div>
 
-          {notice && <div role="status" className={`mt-6 flex items-start gap-2 rounded-xl border px-4 py-3 text-[12px] leading-5 ${notice.kind === "success" ? "border-[#bde8cf] bg-[#f2fbf5] text-[#23764d]" : "border-[#f2ced0] bg-[#fff6f6] text-[#a94750]"}`}>{notice.kind === "success" ? <CheckCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}{notice.text}</div>}
+          {notice && <div role="status" className={`fixed bottom-4 left-4 right-4 z-50 flex items-start gap-2 rounded-xl border px-4 py-3 text-[12px] leading-5 shadow-xl sm:left-auto sm:max-w-md ${notice.kind === "success" ? "border-[#bde8cf] bg-[#f2fbf5] text-[#23764d]" : "border-[#f2ced0] bg-[#fff6f6] text-[#a94750]"}`}>{notice.kind === "success" ? <CheckCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}{notice.text}</div>}
 
+          {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[#f2ced0] bg-[#fff6f6] px-4 py-3 text-[12px] text-[#a94750]">Browser storage is unavailable or full. Your changes may not survive a reload. Export your saved library if possible.</div>}
+
+          <DraftLibraryPanel drafts={drafts} title={title} currentDraftId={currentDraftId} onTitleChange={setTitle} onSave={saveDraft} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} />
+          <SchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onRemove={removeScheduled} />
           <section id="activity" className="panel-border soft-shadow mt-8 overflow-hidden rounded-[22px] bg-white" aria-labelledby="activity-heading"><div className="flex items-center justify-between border-b border-[#eff0f4] px-6 py-5 sm:px-7"><div><h2 id="activity-heading" className="text-[16px] font-bold tracking-[-0.025em]">Recent simulations</h2><p className="mt-1 text-[12px] text-[#989bad]">A local record of your demo publishing runs.</p></div>{activity.length > 0 && <button type="button" onClick={() => setActivity([])} className="text-[11px] font-semibold text-[#8d80dd] hover:text-[#6354db]">Clear history</button>}</div>{activity.length === 0 ? <div className="flex flex-col items-center px-6 py-10 text-center"><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-[#f1f1fb] text-[#8c8ee1]"><Clock3 size={20} /></span><p className="text-[13px] font-semibold text-[#55586d]">Nothing simulated yet</p><p className="mt-1 text-[11px] text-[#a0a4b4]">Your demo publishing activity will show up here.</p></div> : <div className="divide-y divide-[#f0f1f5]">{activity.map((item) => <div key={item.id} className="flex items-center gap-3 px-6 py-3.5 sm:px-7"><PlatformMark id={item.platform} size="small" /><span className="min-w-0 flex-1"><span className="block text-[12px] font-semibold text-[#46495c]">{platforms[item.platform].name} <span className="ml-1 rounded-full bg-[#f2efff] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#7969d5]">Simulated</span></span><span className="mt-0.5 block truncate text-[11px] text-[#a0a4b4]">{item.content}</span></span><span className="shrink-0 text-[10px] text-[#a8abba]">{formatTime(item.publishedAt)}</span></div>)}</div>}</section>
         </main>
       </div>
