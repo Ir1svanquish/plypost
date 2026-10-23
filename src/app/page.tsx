@@ -25,6 +25,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
 import { PlatformPreview } from "@/components/platform-preview";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
+import { MastodonLivePanel, isMastodonConnection, type MastodonConnection } from "@/components/mastodon-live-panel";
 import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -124,6 +125,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [legacyWorkspace, setLegacyWorkspace] = useState<ReturnType<typeof emptyWorkspace> | null>(null);
   const [auditLog, setAuditLog] = useState<{ action: string; subject_id: string | null; detail: string | null; created_at: string }[]>([]);
   const [workerLastSeen, setWorkerLastSeen] = useState<string | null>(null);
+  const [mastodonConnection, setMastodonConnection] = useState<MastodonConnection | null>(null);
+  const [mastodonLoading, setMastodonLoading] = useState(true);
+  const [mastodonError, setMastodonError] = useState<string | null>(null);
 
   useEffect(() => {
     const syncView = () => setView(viewFromHash());
@@ -141,6 +145,41 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     if (window.location.hash !== `#${next}`) window.history.pushState(null, "", `#${next}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  async function refreshMastodonConnection() {
+    setMastodonLoading(true);
+    setMastodonError(null);
+    try {
+      const response = await fetch("/api/mastodon/connection", { cache: "no-store" });
+      const data: unknown = await response.json();
+      if (!response.ok || !isMastodonConnection(data)) {
+        const message = data && typeof data === "object" && "error" in data && typeof data.error === "string" ? data.error : "Could not load Mastodon connection.";
+        throw new Error(message);
+      }
+      setMastodonConnection(data);
+    } catch (cause) {
+      setMastodonError(cause instanceof Error ? cause.message : "Could not load Mastodon connection.");
+    } finally {
+      setMastodonLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshMastodonConnection();
+    const refreshOnFocus = () => { void refreshMastodonConnection(); };
+    window.addEventListener("focus", refreshOnFocus);
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("mastodon");
+    if (result === "connected" || result === "error") {
+      setNotice(result === "connected"
+        ? { kind: "success", text: "Mastodon connection completed. Check the account shown in Account before live posting." }
+        : { kind: "error", text: "Mastodon connection did not complete. Open Account to try again." });
+      url.searchParams.delete("mastodon");
+      window.history.replaceState(null, "", url.toString());
+      if (result === "connected") setView("account");
+    }
+    return () => window.removeEventListener("focus", refreshOnFocus);
+  }, []);
 
   useEffect(() => {
     if (restoringBackup) restoreOverlayRef.current?.focus();
@@ -864,7 +903,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                 <div className="px-6 pb-6 pt-5 sm:px-7 sm:pb-7"><div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">Edit {platforms[active].name} draft</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div><textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" /><div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${!currentValidation.valid ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{!currentValidation.valid ? "Needs attention" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${!currentValidation.valid ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div><button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button></div>
               </section>
 
-              <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your selected drafts first.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? selected.map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No destinations selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={simulatePublish} disabled={!canPublish} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> {publishing ? "Simulating..." : `Simulate publish to ${selected.length || 0} platform${selected.length === 1 ? "" : "s"}`} <ArrowRight size={15} className="ml-1" /></button><p className="mt-3 text-center text-[12px] text-[var(--text-soft)]">Demo action only. No post leaves this app.</p></section>
+              <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your selected drafts first.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? selected.map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No destinations selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={simulatePublish} disabled={!canPublish} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> {publishing ? "Simulating..." : `Simulate publish to ${selected.length || 0} platform${selected.length === 1 ? "" : "s"}`} <ArrowRight size={15} className="ml-1" /></button><p className="mt-3 text-center text-[12px] text-[var(--text-soft)]">The simulation button above never posts to a social platform.</p></section>
+              {selected.includes("mastodon") && <MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active={active === "mastodon"} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
             </div>
           </div>
           </div>}
@@ -886,7 +926,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
             <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} />
           </div>}
-          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} />}
+          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} />}
         </main>
       </div>
     </div>

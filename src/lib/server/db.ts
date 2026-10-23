@@ -55,7 +55,74 @@ export function database(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS worker_heartbeat (
       id INTEGER PRIMARY KEY CHECK(id=1), seen_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS mastodon_oauth_states (
+      state_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+      instance TEXT NOT NULL, redirect_uri TEXT NOT NULL,
+      client_id_cipher TEXT NOT NULL, client_secret_cipher TEXT NOT NULL,
+      verifier_cipher TEXT NOT NULL, nonce_hash TEXT NOT NULL,
+      session_hash TEXT, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS mastodon_oauth_states_expiry ON mastodon_oauth_states(expires_at);
+    CREATE TABLE IF NOT EXISTS mastodon_connections (
+      user_id TEXT PRIMARY KEY, instance TEXT NOT NULL,
+      account_id TEXT NOT NULL, username TEXT NOT NULL,
+      account_url TEXT NOT NULL, access_token_cipher TEXT NOT NULL,
+      client_id_cipher TEXT NOT NULL, client_secret_cipher TEXT NOT NULL,
+      connected_at TEXT NOT NULL, disconnecting INTEGER NOT NULL DEFAULT 0,
+      disconnect_started_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS mastodon_publish_attempts (
+      client_request_id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+      instance TEXT NOT NULL, account_id TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('inflight','posted','unknown','rejected')),
+      remote_id TEXT, remote_url TEXT, last_error TEXT,
+      text_excerpt TEXT,
+      resolution TEXT CHECK(resolution IN ('found','absent') OR resolution IS NULL),
+      resolved_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS mastodon_attempts_owner
+      ON mastodon_publish_attempts(user_id, created_at DESC);
   `);
+  const oauthColumns = db.prepare("PRAGMA table_info(mastodon_oauth_states)").all() as { name: string }[];
+  if (!oauthColumns.some((column) => column.name === "session_hash")) {
+    db.exec("ALTER TABLE mastodon_oauth_states ADD COLUMN session_hash TEXT");
+  }
+  const connectionColumns = db.prepare("PRAGMA table_info(mastodon_connections)").all() as { name: string }[];
+  if (!connectionColumns.some((column) => column.name === "disconnecting")) {
+    db.exec("ALTER TABLE mastodon_connections ADD COLUMN disconnecting INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!connectionColumns.some((column) => column.name === "disconnect_started_at")) {
+    db.exec("ALTER TABLE mastodon_connections ADD COLUMN disconnect_started_at TEXT");
+  }
+  const attemptColumns = db.prepare("PRAGMA table_info(mastodon_publish_attempts)").all() as { name: string }[];
+  if (!attemptColumns.some((column) => column.name === "text_excerpt")) {
+    db.exec("ALTER TABLE mastodon_publish_attempts ADD COLUMN text_excerpt TEXT");
+  }
+  if (!attemptColumns.some((column) => column.name === "resolution")) {
+    db.exec("ALTER TABLE mastodon_publish_attempts ADD COLUMN resolution TEXT CHECK(resolution IN ('found','absent') OR resolution IS NULL)");
+  }
+  if (!attemptColumns.some((column) => column.name === "resolved_at")) {
+    db.exec("ALTER TABLE mastodon_publish_attempts ADD COLUMN resolved_at TEXT");
+  }
+  const unresolvedIndex = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='mastodon_attempts_unresolved_content'")
+    .get() as { sql: string } | undefined;
+  if (!unresolvedIndex?.sql.includes("resolution='found'")) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`
+        DROP INDEX IF EXISTS mastodon_attempts_unresolved_content;
+        CREATE UNIQUE INDEX mastodon_attempts_unresolved_content
+          ON mastodon_publish_attempts(user_id, instance, account_id, content_hash)
+          WHERE status='inflight' OR (status='unknown' AND (resolution IS NULL OR resolution='found'));
+      `);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   connection = db;
   return db;
 }
