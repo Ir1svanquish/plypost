@@ -91,6 +91,21 @@ export function database(): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS mastodon_attempts_owner
       ON mastodon_publish_attempts(user_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS mastodon_scheduled_posts (
+      client_request_id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+      instance TEXT NOT NULL, account_id TEXT NOT NULL,
+      account_username TEXT NOT NULL, account_url TEXT NOT NULL,
+      text TEXT NOT NULL, content_hash TEXT NOT NULL,
+      scheduled_for TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('queued','inflight','posted','unknown','rejected','cancelled')),
+      claimed_at TEXT, remote_id TEXT, remote_url TEXT, last_error TEXT,
+      resolution TEXT CHECK(resolution IN ('found','absent') OR resolution IS NULL),
+      resolved_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS mastodon_scheduled_due
+      ON mastodon_scheduled_posts(status, scheduled_for);
+    CREATE INDEX IF NOT EXISTS mastodon_scheduled_owner
+      ON mastodon_scheduled_posts(user_id, scheduled_for DESC);
   `);
   const oauthColumns = db.prepare("PRAGMA table_info(mastodon_oauth_states)").all() as { name: string }[];
   if (!oauthColumns.some((column) => column.name === "session_hash")) {

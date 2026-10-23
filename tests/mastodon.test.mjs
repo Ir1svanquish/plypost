@@ -149,7 +149,7 @@ test("Mastodon OAuth, text publishing, unknown outcomes and revocation stay scop
   assert.equal((await connection(request("/api/mastodon/connection"))).status, 200);
   const linked = await (await connection(request("/api/mastodon/connection"))).json();
   assert.equal(linked.connected, true);
-  assert.deepEqual(linked.account, { username: "alice", url: `${mastodonOrigin}/@alice` });
+  assert.deepEqual(linked.account, { id: "account-42", username: "alice", url: `${mastodonOrigin}/@alice` });
 
   const firstId = randomUUID();
   const first = await publish(request("/api/mastodon/publish", "POST", { text: "Hello Mastodon", clientRequestId: firstId }));

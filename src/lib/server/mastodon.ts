@@ -143,7 +143,7 @@ export function mastodonConnection(userId: string) {
     configured: Boolean(config && (!connected || connected.instance === config.instance)),
     instance: connected?.instance ?? config?.instance,
     connected: Boolean(connected),
-    ...(connected ? { account: { username: connected.username, url: connected.account_url } } : {}),
+    ...(connected ? { account: { id: connected.account_id, username: connected.username, url: connected.account_url } } : {}),
   };
 }
 
@@ -352,6 +352,14 @@ export async function disconnectMastodon(userId: string): Promise<{ ok: true; re
   const connected = transaction((db) => {
     const row = db.prepare("SELECT * FROM mastodon_connections WHERE user_id=?").get(userId) as ConnectionRow | undefined;
     if (!row) return null;
+    const now = new Date();
+    db.prepare(`UPDATE mastodon_scheduled_posts SET status='unknown',
+      last_error='Publishing result was not confirmed. Check Mastodon before trying again.',updated_at=?
+      WHERE user_id=? AND status='inflight' AND claimed_at <= ?`)
+      .run(now.toISOString(), userId, new Date(now.getTime() - 2 * 60_000).toISOString());
+    if (db.prepare("SELECT 1 FROM mastodon_scheduled_posts WHERE user_id=? AND status='inflight' LIMIT 1").get(userId)) {
+      throw new MastodonError("Wait for the current scheduled Mastodon post to finish before disconnecting.", 409);
+    }
     if (db.prepare("SELECT 1 FROM mastodon_publish_attempts WHERE user_id=? AND status='inflight' LIMIT 1").get(userId)) {
       throw new MastodonError("Wait for the current Mastodon publishing request to finish before disconnecting.", 409);
     }
@@ -361,6 +369,10 @@ export async function disconnectMastodon(userId: string): Promise<{ ok: true; re
     }
     db.prepare("UPDATE mastodon_connections SET disconnecting=1,disconnect_started_at=? WHERE user_id=?")
       .run(new Date().toISOString(), userId);
+    const cancelled = db.prepare(`UPDATE mastodon_scheduled_posts SET status='cancelled',updated_at=?
+      WHERE user_id=? AND instance=? AND account_id=? AND status='queued'`)
+      .run(now.toISOString(), userId, row.instance, row.account_id);
+    if (cancelled.changes) audit(userId, "mastodon.schedule_cancelled_on_disconnect", undefined, String(cancelled.changes));
     return row;
   });
   if (!connected) return { ok: true, revoked: true };
@@ -415,7 +427,7 @@ function publishResult(row: AttemptRow): { status: "posted" | "unknown"; url?: s
   return { status: "unknown" };
 }
 
-export async function publishMastodonText(userId: string, body: unknown): Promise<{ status: "posted" | "unknown"; url?: string; id?: string }> {
+export async function publishMastodonText(userId: string, body: unknown, expectedAccountId?: string): Promise<{ status: "posted" | "unknown"; url?: string; id?: string }> {
   const config = requireConfiguration();
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new MastodonError("Invalid publishing request.", 400);
   const input = body as Record<string, unknown>;
@@ -431,8 +443,16 @@ export async function publishMastodonText(userId: string, body: unknown): Promis
   const reservation = transaction((db) => {
     const connected = db.prepare("SELECT * FROM mastodon_connections WHERE user_id=?")
       .get(userId) as ConnectionRow | undefined;
-    if (!connected || connected.instance !== config.instance || connected.disconnecting) {
+    if (!connected || connected.instance !== config.instance || connected.disconnecting ||
+        (expectedAccountId && connected.account_id !== expectedAccountId)) {
       throw new MastodonError("Connect a Mastodon account before publishing.", 409);
+    }
+    const scheduledRequest = db.prepare("SELECT * FROM mastodon_scheduled_posts WHERE client_request_id=?")
+      .get(requestId) as { user_id: string; instance: string; account_id: string; content_hash: string; status: string } | undefined;
+    if (scheduledRequest && (!expectedAccountId || scheduledRequest.status !== "inflight" ||
+        scheduledRequest.user_id !== userId || scheduledRequest.instance !== connected.instance ||
+        scheduledRequest.account_id !== connected.account_id || scheduledRequest.content_hash !== contentHash)) {
+      throw new MastodonError("This request ID belongs to a scheduled post and cannot be sent manually.", 409);
     }
     const prior = db.prepare("SELECT * FROM mastodon_publish_attempts WHERE client_request_id=?")
       .get(requestId) as AttemptRow | undefined;
@@ -450,6 +470,14 @@ export async function publishMastodonText(userId: string, body: unknown): Promis
       AND content_hash=? AND (status='inflight' OR (status='unknown' AND (resolution IS NULL OR resolution='found'))) LIMIT 1`)
       .get(userId, connected.instance, connected.account_id, contentHash)) {
       throw new MastodonError("A previous attempt for this text has an unconfirmed result. Check Mastodon before trying again.", 409);
+    }
+    if (db.prepare(`SELECT 1 FROM mastodon_scheduled_posts WHERE user_id=? AND instance=? AND account_id=?
+      AND content_hash=? AND client_request_id<>? AND
+      ((status='queued' AND ?=0) OR status='inflight' OR
+       (status='unknown' AND (resolution IS NULL OR resolution='found')))
+      LIMIT 1`).get(userId, connected.instance, connected.account_id, contentHash, requestId,
+        expectedAccountId ? 1 : 0)) {
+      throw new MastodonError("This text is already scheduled or has an uncertain scheduled result. Check it first.", 409);
     }
     db.prepare(`INSERT INTO mastodon_publish_attempts
       (client_request_id,user_id,instance,account_id,content_hash,text_excerpt,status,created_at,updated_at)
