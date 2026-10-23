@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { normalizePublicPostUrl, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { isPlatformId, platformIds } from "../platforms";
 import { validatePlatformText } from "../platform-validation";
 import { assertOwnedMedia } from "./media";
@@ -103,19 +103,31 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
   return item;
 }
 
-export function setAssistedStatus(userId: string, id: string, status: unknown): boolean {
+export function setAssistedStatus(userId: string, id: string, status: unknown, postUrl?: unknown): boolean {
   if (!validId(id) || (status !== "posted" && status !== "queued")) throw new Error("Invalid assisted status.");
+  if (status === "queued" && postUrl !== undefined) throw new Error("A post link requires a posted item.");
+  // Omission preserves the current link; only an explicit null removes it.
+  const normalizedUrl = status === "posted" && postUrl !== undefined && postUrl !== null
+    ? normalizePublicPostUrl(postUrl) : undefined;
+  if (normalizedUrl === null) throw new Error("Use a public HTTPS post link without credentials (maximum 2,048 characters).");
   return transaction((db) => {
     const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
     if (!row) return false;
     const current = JSON.parse(row.payload) as AssistedPost;
-    if (current.status === status) return true;
+    if (current.status === status && (postUrl === undefined ||
+        (postUrl === null && current.postUrl === undefined) || normalizedUrl === current.postUrl)) return true;
     const updated: AssistedPost = { ...current, status };
-    if (status === "posted") updated.postedAt = new Date().toISOString();
-    else delete updated.postedAt;
+    if (status === "posted") {
+      if (current.status !== "posted") updated.postedAt = new Date().toISOString();
+      if (postUrl === null) delete updated.postUrl;
+      else if (normalizedUrl !== undefined) updated.postUrl = normalizedUrl;
+    } else {
+      delete updated.postedAt;
+      delete updated.postUrl;
+    }
     db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
       .run(JSON.stringify(updated), new Date().toISOString(), id, userId);
-    audit(userId, status === "posted" ? "assisted.posted" : "assisted.unposted", id);
+    audit(userId, status === "posted" ? current.status === "posted" ? "assisted.post_link_updated" : "assisted.posted" : "assisted.unposted", id);
     return true;
   });
 }

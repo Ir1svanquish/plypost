@@ -2,67 +2,71 @@
 
 import { useState, type FormEvent } from "react";
 import { CalendarClock, ChevronLeft, ChevronRight, RotateCcw, Trash2 } from "lucide-react";
-import { localDateTimeValue, scheduleState, type ScheduledPost } from "@/lib/workspace";
+import { assistedState, localDateTimeValue, scheduleState, type AssistedPost, type ScheduledPost } from "@/lib/workspace";
 import { platformIds, platforms } from "@/lib/platforms";
+import { agendaForMonth, buildPlanAgenda, localAgendaDay, matchesPlanAgendaFilter, type PlanAgendaFilter } from "@/lib/plan-agenda";
+import { assistedDestinations } from "@/lib/assisted";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 
 type Props = {
-  schedule: ScheduledPost[]; value: string; now: number; canSchedule: boolean;
+  schedule: ScheduledPost[]; assisted: AssistedPost[]; value: string; now: number; canSchedule: boolean;
   runningId: string | null; onValueChange: (value: string) => void; onAdd: () => void;
   onLoad: (post: ScheduledPost) => void; onRun: (post: ScheduledPost) => void; onRemove: (id: string) => void;
   onReschedule: (post: ScheduledPost, scheduledForIso: string) => Promise<void>;
+  onOpenAssisted: (item: AssistedPost) => void;
 };
 
-type StatusFilter = "all" | ScheduledPost["status"];
 type Month = { year: number; index: number };
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const filters: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All statuses" }, { value: "queued", label: "Queued" },
-  { value: "running", label: "Running" }, { value: "failed", label: "Needs attention" },
-  { value: "simulated", label: "Simulated" },
+const filters: { value: PlanAgendaFilter; label: string }[] = [
+  { value: "all", label: "All activity" },
+  { value: "manual-pending", label: "Manual · pending" },
+  { value: "manual-posted", label: "Manual · marked posted" },
+  { value: "simulation-queued", label: "Simulation · queued" },
+  { value: "simulation-running", label: "Simulation · running" },
+  { value: "simulation-failed", label: "Simulation · needs attention" },
+  { value: "simulation-complete", label: "Simulation · complete" },
 ];
-
-function localDay(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
 
 function monthLabel(month: Month): string {
   return new Date(month.year, month.index, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-export function ServerSchedulePanel({ schedule, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule }: Props) {
+export function ServerSchedulePanel({ schedule, assisted, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onOpenAssisted }: Props) {
   const [month, setMonth] = useState<Month>(() => {
     const today = new Date(now || Date.now());
     return { year: today.getFullYear(), index: today.getMonth() };
   });
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [showAllDates, setShowAllDates] = useState(false);
-  const [filter, setFilter] = useState<StatusFilter>("all");
+  const [filter, setFilter] = useState<PlanAgendaFilter>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [editError, setEditError] = useState("");
   const [saving, setSaving] = useState(false);
   const queuedCount = schedule.filter((post) => post.status === "queued").length;
-  const filtered = schedule.filter((post) => filter === "all" || post.status === filter);
-  const monthPosts = filtered.filter((post) => {
-    const date = new Date(post.scheduledFor);
-    return date.getFullYear() === month.year && date.getMonth() === month.index;
-  });
-  const agenda = (showAllDates ? filtered : monthPosts.filter((post) => !selectedDay || localDay(new Date(post.scheduledFor)) === selectedDay))
-    .sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor));
+  const manualPendingCount = assisted.filter((post) => post.status === "queued").length;
+  const allItems = buildPlanAgenda(schedule, assisted);
+  const filtered = allItems.filter((item) => matchesPlanAgendaFilter(item, filter));
+  const monthItems = agendaForMonth(filtered, month.year, month.index);
+  const agenda = showAllDates ? filtered : monthItems.filter((item) => !selectedDay || localAgendaDay(item.scheduledFor) === selectedDay);
   const today = new Date(now || Date.now());
-  const todayKey = localDay(today);
+  const todayKey = localAgendaDay(today);
   const firstWeekday = (new Date(month.year, month.index, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(month.year, month.index + 1, 0).getDate();
   const cells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
-  const dayCounts = new Map<string, { total: number; needsAttention: boolean }>();
-  for (const post of monthPosts) {
-    const key = localDay(new Date(post.scheduledFor));
-    const count = dayCounts.get(key) ?? { total: 0, needsAttention: false };
-    count.total += 1;
-    count.needsAttention ||= post.status === "failed";
+  const dayCounts = new Map<string, { simulation: number; manual: number; simulationFailed: boolean; manualDue: boolean }>();
+  for (const item of monthItems) {
+    const key = localAgendaDay(item.scheduledFor);
+    const count = dayCounts.get(key) ?? { simulation: 0, manual: 0, simulationFailed: false, manualDue: false };
+    if (item.kind === "simulation") {
+      count.simulation += 1;
+      count.simulationFailed ||= item.post.status === "failed";
+    } else {
+      count.manual += 1;
+      count.manualDue ||= item.post.status === "queued" && Date.parse(item.scheduledFor) <= now;
+    }
     dayCounts.set(key, count);
   }
 
@@ -100,22 +104,22 @@ export function ServerSchedulePanel({ schedule, value, now, canSchedule, running
   }
   return <section id="schedule" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="schedule-heading">
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
-      <div><h2 id="schedule-heading" className="text-[17px] font-bold">Publishing plan</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">The worker simulates text. Saved images stay ready for manual handoff.</p></div>
-      <span className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-muted)]">{queuedCount} queued</span>
+      <div><h2 id="schedule-heading" className="text-[17px] font-bold">Publishing plan</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">See simulated jobs and your manual publishing reminders in one calendar.</p></div>
+      <div className="flex flex-wrap gap-2"><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--accent-text)]">{queuedCount} simulated queued</span><span className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--warning)]">{manualPendingCount} manual pending</span></div>
     </div>
     <div className="p-6 sm:p-7">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <div className="min-w-0 flex-1"><LocalDateTimeField id="schedule-time" label="Publish at" value={value} minTimestamp={now + 10_000} onChange={onValueChange} /></div>
-        <button type="button" onClick={onAdd} disabled={!canSchedule || !isValidLocalDateTime(value, now + 10_000)} className="gradient-button inline-flex h-[43px] items-center justify-center gap-2 rounded-xl px-4 text-[13px] font-bold text-white disabled:opacity-50 sm:mb-[22px]"><CalendarClock size={15} /> Add to plan</button>
+        <div className="min-w-0 flex-1"><LocalDateTimeField id="schedule-time" label="Simulation time" value={value} minTimestamp={now + 10_000} onChange={onValueChange} /></div>
+        <button type="button" onClick={onAdd} disabled={!canSchedule || !isValidLocalDateTime(value, now + 10_000)} className="gradient-button inline-flex h-[43px] items-center justify-center gap-2 rounded-xl px-4 text-[13px] font-bold text-white disabled:opacity-50 sm:mb-[22px]"><CalendarClock size={15} /> Add simulation</button>
       </div>
       <p className="mt-3 text-[12px] leading-5 text-[var(--text-soft)]">Keep <code>npm run worker</code> running on this computer. It simulates due items even after this browser closes. No social platform is contacted.</p>
     </div>
     <div className="border-t border-[var(--line)] px-4 py-5 sm:px-7 sm:py-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div><h3 className="text-[15px] font-bold text-[var(--text)]">Calendar</h3><p className="mt-1 text-[12px] text-[var(--text-muted)]">Your local time · select a day to inspect its items.</p></div>
+        <div><h3 className="text-[15px] font-bold text-[var(--text)]">Calendar</h3><p className="mt-1 text-[12px] text-[var(--text-muted)]">Your local time · select a day to inspect its items. S = simulation, M = manual handoff.</p></div>
         <label htmlFor="schedule-status-filter" className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-secondary)]">Status
-          <select id="schedule-status-filter" value={filter} onChange={(event) => setFilter(event.target.value as StatusFilter)} aria-label="Filter planned items by status" className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] sm:flex-none">
-            {filters.map((option) => <option key={option.value} value={option.value}>{option.label} ({option.value === "all" ? schedule.length : schedule.filter((post) => post.status === option.value).length})</option>)}
+          <select id="schedule-status-filter" value={filter} onChange={(event) => setFilter(event.target.value as PlanAgendaFilter)} aria-label="Filter planned items by status and publishing method" className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] sm:flex-none">
+            {filters.map((option) => <option key={option.value} value={option.value}>{option.label} ({allItems.filter((item) => matchesPlanAgendaFilter(item, option.value)).length})</option>)}
           </select>
         </label>
       </div>
@@ -134,25 +138,45 @@ export function ServerSchedulePanel({ schedule, value, now, canSchedule, running
             const dayNumber = index - firstWeekday + 1;
             if (dayNumber < 1 || dayNumber > daysInMonth) return <div key={`blank-${index}`} aria-hidden="true" className="min-h-14 bg-[var(--surface-muted)] sm:min-h-20" />;
             const date = new Date(month.year, month.index, dayNumber);
-            const key = localDay(date);
+            const key = localAgendaDay(date);
             const summary = dayCounts.get(key);
             const dateLabel = date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-            return <button key={key} type="button" onClick={() => { setSelectedDay(key); setShowAllDates(false); }} aria-label={`${dateLabel}, ${summary?.total ?? 0} planned ${summary?.total === 1 ? "item" : "items"}${summary?.needsAttention ? ", needs attention" : ""}`} aria-pressed={!showAllDates && selectedDay === key} className={`flex min-h-14 flex-col items-center gap-1 px-0.5 py-2 text-center sm:min-h-20 sm:items-start sm:px-2.5 ${!showAllDates && selectedDay === key ? "bg-[var(--accent-soft)] text-[var(--accent-text)] hover:bg-[var(--accent-soft)]" : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`}>
+            return <button key={key} type="button" onClick={() => { setSelectedDay(key); setShowAllDates(false); }} aria-label={`${dateLabel}, ${summary?.simulation ?? 0} simulated, ${summary?.manual ?? 0} manual${summary?.simulationFailed ? ", simulation needs attention" : ""}${summary?.manualDue ? ", manual publishing due" : ""}`} aria-pressed={!showAllDates && selectedDay === key} className={`flex min-h-14 flex-col items-center gap-1 px-0.5 py-2 text-center sm:min-h-20 sm:items-start sm:px-2.5 ${!showAllDates && selectedDay === key ? "bg-[var(--accent-soft)] text-[var(--accent-text)] hover:bg-[var(--accent-soft)]" : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`}>
               <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${key === todayKey ? "bg-[var(--accent)] text-white" : ""}`}>{dayNumber}</span>
-              {summary && <span aria-hidden="true" className={`flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold sm:h-auto sm:rounded-md sm:px-1.5 sm:py-0.5 sm:text-[10px] ${summary.needsAttention ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{summary.total}</span>}
+              {summary && <span aria-hidden="true" className="flex flex-wrap justify-center gap-0.5 sm:justify-start">
+                {summary.simulation > 0 && <span className={`rounded-md px-1 text-[9px] font-bold sm:px-1.5 sm:py-0.5 sm:text-[10px] ${summary.simulationFailed ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>S {summary.simulation}</span>}
+                {summary.manual > 0 && <span className={`rounded-md px-1 text-[9px] font-bold sm:px-1.5 sm:py-0.5 sm:text-[10px] ${summary.manualDue ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-secondary)]"}`}>M {summary.manual}</span>}
+              </span>}
             </button>;
           })}
         </div>
       </div>
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] pb-3">
-        <div><h3 className="text-[15px] font-bold text-[var(--text)]">{showAllDates ? "All dates" : selectedDay ? new Date(`${selectedDay}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : monthLabel(month)} agenda</h3><p className="mt-0.5 text-[12px] text-[var(--text-muted)]">{agenda.length} {agenda.length === 1 ? "item" : "items"} shown · simulated publishing only</p></div>
+        <div><h3 className="text-[15px] font-bold text-[var(--text)]">{showAllDates ? "All dates" : selectedDay ? new Date(`${selectedDay}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : monthLabel(month)} agenda</h3><p className="mt-0.5 text-[12px] text-[var(--text-muted)]">{agenda.length} {agenda.length === 1 ? "item" : "items"} shown · simulations and manual handoffs</p></div>
         <div className="flex items-center gap-2">{selectedDay && !showAllDates && <button type="button" onClick={() => setSelectedDay(null)} className="rounded-lg px-2 py-1.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Show month</button>}<button type="button" onClick={() => { setShowAllDates((current) => !current); setSelectedDay(null); }} aria-pressed={showAllDates} className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold ${showAllDates ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`}>{showAllDates ? "This month" : "All dates"}</button></div>
       </div>
-      {agenda.length === 0 ? <div className="py-10 text-center text-[13px] text-[var(--text-muted)]">{schedule.length === 0 ? "Nothing on your plan yet. Add a draft above to get started." : "No items match this date and status. Choose another day, month, or filter."}</div> :
-      <div className="divide-y divide-[var(--line)]">{agenda.map((post) => {
+      {agenda.length === 0 ? <div className="py-10 text-center text-[13px] text-[var(--text-muted)]">{allItems.length === 0 ? "Nothing on your plan yet. Add a simulation or manual handoff to get started." : "No items match this date and status. Choose another day, month, or filter."}</div> :
+      <div className="divide-y divide-[var(--line)]">{agenda.map((item) => {
+        if (item.kind === "manual") {
+          const manual = item.post;
+          const state = assistedState(manual, now);
+          const label = state === "posted" ? "Marked posted by you · unverified" : state === "due" ? "Manual · ready to post" : "Manual · upcoming";
+          return <article key={`manual-${manual.id}`} className="py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2"><h4 className="break-words text-[13px] font-bold text-[var(--text-secondary)]">{manual.title}</h4><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--field)] text-[var(--text-secondary)]"}`}>{label}</span></div>
+                <p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(manual.scheduledFor)} · {assistedDestinations[manual.destination].name} · manual handoff</p>
+                <p className="mt-1 text-[11px] text-[var(--text-soft)]">Plypost did not send or verify this post.</p>
+              </div>
+              <button type="button" onClick={() => onOpenAssisted(manual)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Open handoff</button>
+            </div>
+            <MediaHandoff mediaIds={manual.mediaIds} />
+          </article>;
+        }
+        const post = item.post;
         const state = scheduleState(post, now);
         const retryPending = post.status === "queued" && Boolean(post.attempts && post.nextAttemptAt && Date.parse(post.nextAttemptAt) > Date.parse(post.scheduledFor));
-        const label = state === "due" ? "Due · waiting for worker" : state === "running" ? "Running" : state === "failed" ? "Needs attention" : state === "simulated" ? "Simulated" : retryPending ? "Retry scheduled" : "Upcoming";
+        const label = state === "due" ? "Simulation · due, waiting for worker" : state === "running" ? "Simulation · running" : state === "failed" ? "Simulation · needs attention" : state === "simulated" ? "Simulated · no platform post" : retryPending ? "Simulation · retry scheduled" : "Simulation · upcoming";
         return <article key={post.id} className="py-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 flex-1">

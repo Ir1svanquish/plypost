@@ -55,6 +55,37 @@ type Receipt = {
   content: string;
 };
 type Notice = { kind: "success" | "error"; text: string } | null;
+type EditorContent = {
+  title: string;
+  source: string;
+  selected: readonly PlatformId[];
+  variants: Partial<Record<PlatformId, string>>;
+  mediaIds: readonly string[];
+};
+type EditorOrigin = "starter" | "new" | "planned";
+type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft } | { kind: "planned"; post: ScheduledPost };
+
+function sameItems(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function sameEditorContent(left: EditorContent, right: EditorContent | SavedDraft): boolean {
+  return left.title === right.title && left.source === right.source &&
+    sameItems(left.selected, right.selected) && sameItems(left.mediaIds, right.mediaIds ?? []) &&
+    platformIds.every((id) => left.variants[id] === right.variants[id]);
+}
+
+function hasUnsavedEditorChanges(editor: EditorContent, currentDraftId: string | null, drafts: SavedDraft[], origin: EditorOrigin): boolean {
+  if (currentDraftId) {
+    const saved = drafts.find((draft) => draft.id === currentDraftId);
+    return !saved || !sameEditorContent(editor, saved);
+  }
+  if (origin === "planned") return true;
+  return !sameEditorContent(editor, {
+    title: "", source: origin === "starter" ? sampleDraft : "",
+    selected: platformIds, variants: {}, mediaIds: [],
+  });
+}
 
 const platformGlyphs: Record<PlatformId, string> = {
   bluesky: "✦",
@@ -102,6 +133,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [schedule, setSchedule] = useState<ScheduledPost[]>([]);
   const [assisted, setAssisted] = useState<AssistedPost[]>([]);
   const [assistedBusy, setAssistedBusy] = useState(false);
+  const [focusedAssistedId, setFocusedAssistedId] = useState<string | null>(null);
   const assistedMutation = useRef(false);
   const [backupBusy, setBackupBusy] = useState(false);
   const backupMutation = useRef(false);
@@ -117,6 +149,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [title, setTitle] = useState("");
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [editorOrigin, setEditorOrigin] = useState<EditorOrigin>("starter");
+  const [pendingEditorSwitch, setPendingEditorSwitch] = useState<EditorSwitch | null>(null);
+  const [switchSaving, setSwitchSaving] = useState(false);
+  const switchSavingRef = useRef(false);
+  const [draftSaveBusy, setDraftSaveBusy] = useState(false);
+  const draftSaveBusyRef = useRef(false);
+  const switchDialogRef = useRef<HTMLDialogElement>(null);
   const [scheduleTime, setScheduleTime] = useState("");
   const [runningId, setRunningId] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState(false);
@@ -128,6 +167,25 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [mastodonConnection, setMastodonConnection] = useState<MastodonConnection | null>(null);
   const [mastodonLoading, setMastodonLoading] = useState(true);
   const [mastodonError, setMastodonError] = useState<string | null>(null);
+  const editorContent: EditorContent = { title, source, selected, variants, mediaIds };
+  const editorContentRef = useRef(editorContent);
+  editorContentRef.current = editorContent;
+  const editorDirty = hasUnsavedEditorChanges(editorContent, currentDraftId, drafts, editorOrigin);
+
+  useEffect(() => {
+    const dialog = switchDialogRef.current;
+    if (pendingEditorSwitch && dialog && !dialog.open) dialog.showModal();
+  }, [pendingEditorSwitch]);
+
+  useEffect(() => {
+    if (!hydrated || !editorDirty) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [editorDirty, hydrated]);
 
   useEffect(() => {
     const syncView = () => setView(viewFromHash());
@@ -227,6 +285,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           title?: unknown;
           currentDraftId?: unknown;
           mediaIds?: unknown;
+          editorOrigin?: unknown;
         };
         if (typeof data.source === "string") {
           const hasCustomVariants = data.variants && typeof data.variants === "object" &&
@@ -250,6 +309,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         if (typeof data.title === "string") setTitle(data.title.slice(0, 120));
         if (typeof data.currentDraftId === "string") setCurrentDraftId(data.currentDraftId);
         if (Array.isArray(data.mediaIds) && data.mediaIds.length <= 4 && data.mediaIds.every((id) => typeof id === "string")) setMediaIds(data.mediaIds);
+        if (data.editorOrigin === "starter" || data.editorOrigin === "new" || data.editorOrigin === "planned") setEditorOrigin(data.editorOrigin);
       }
     } catch {
       // A malformed local draft should never prevent the editor from opening.
@@ -283,12 +343,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, mediaIds, provider, activity, title, currentDraftId }));
+      localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, mediaIds, provider, activity, title, currentDraftId, editorOrigin }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, provider, activity, title, currentDraftId, hydrated]);
+  }, [source, selected, variants, mediaIds, provider, activity, title, currentDraftId, editorOrigin, hydrated]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -337,6 +397,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const assistText = assistOverride ?? suggestedAssistText;
 
   function togglePlatform(id: PlatformId) {
+    editorRevision.current += 1;
     setSelected((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     );
@@ -368,6 +429,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         return;
       }
       setAiUndo(previousVariants);
+      editorRevision.current += 1;
       setVariants(data.variants);
       const overLimit = data.overLimit ?? [];
       setNotice(overLimit.length ? {
@@ -409,18 +471,22 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function saveDraft() {
+  async function saveDraft(preserveTitle = false): Promise<boolean> {
+    if (draftSaveBusyRef.current) {
+      setNotice({ kind: "error", text: "Wait for the current draft save to finish." });
+      return false;
+    }
     if (mediaBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the image operation to finish before saving this draft." });
-      return;
+      return false;
     }
     if (!source.trim()) {
       setNotice({ kind: "error", text: "Write a source draft before saving it." });
-      return;
+      return false;
     }
     if (!currentDraftId && drafts.length >= 100) {
       setNotice({ kind: "error", text: "The library is full. Delete an old draft before saving another." });
-      return;
+      return false;
     }
     const stamp = new Date().toISOString();
     const existing = drafts.find((draft) => draft.id === currentDraftId);
@@ -434,13 +500,24 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       createdAt: existing?.createdAt ?? stamp,
       updatedAt: stamp,
     };
+    const revisionAtStart = editorRevision.current;
+    draftSaveBusyRef.current = true;
+    setDraftSaveBusy(true);
     try {
       await changeWorkspace("save-draft", { item: saved });
       setCurrentDraftId(saved.id);
-      setTitle(saved.title);
-      setNotice({ kind: "success", text: "Draft saved to your account." });
+      setEditorOrigin("new");
+      if (!preserveTitle && editorRevision.current === revisionAtStart) setTitle(saved.title);
+      setNotice({ kind: "success", text: editorRevision.current === revisionAtStart
+        ? "Draft saved to your account."
+        : "An earlier version was saved. Your newer edits remain unsaved." });
+      return true;
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save draft." });
+      return false;
+    } finally {
+      draftSaveBusyRef.current = false;
+      setDraftSaveBusy(false);
     }
   }
 
@@ -451,34 +528,92 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setMediaBusy(false);
   }
 
-  function newDraft() {
+  function applyEditorSwitch(next: EditorSwitch) {
     editorRevision.current += 1;
     resetMediaPicker();
     setAiUndo(null);
-    setCurrentDraftId(null);
-    setTitle("");
-    setSource("");
-    setVariants({});
-    setMediaIds([]);
-    setSelected([...platformIds]);
-    setActive("bluesky");
-    setNotice(null);
+    if (next.kind === "new") {
+      setCurrentDraftId(null);
+      setEditorOrigin("new");
+      setTitle("");
+      setSource("");
+      setVariants({});
+      setMediaIds([]);
+      setSelected([...platformIds]);
+      setActive("bluesky");
+      setNotice(null);
+    } else if (next.kind === "draft") {
+      const { draft } = next;
+      setCurrentDraftId(draft.id);
+      setEditorOrigin("new");
+      setTitle(draft.title);
+      setSource(draft.source);
+      setSelected([...draft.selected]);
+      setVariants({ ...draft.variants });
+      setMediaIds([...(draft.mediaIds ?? [])]);
+      setActive(draft.selected[0] ?? "bluesky");
+      setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
+    } else {
+      const { post } = next;
+      setCurrentDraftId(null);
+      setEditorOrigin("planned");
+      setTitle(post.title);
+      setSource(post.source);
+      setSelected(platformIds.filter((id) => post.posts[id] !== undefined));
+      setVariants({ ...post.posts });
+      setMediaIds([...(post.mediaIds ?? [])]);
+      setActive(platformIds.find((id) => post.posts[id] !== undefined) ?? "bluesky");
+      setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
+    }
     openView("compose");
   }
 
-  function loadDraft(draft: SavedDraft) {
-    editorRevision.current += 1;
-    resetMediaPicker();
-    setAiUndo(null);
-    setCurrentDraftId(draft.id);
-    setTitle(draft.title);
-    setSource(draft.source);
-    setSelected(draft.selected);
-    setVariants(draft.variants);
-    setMediaIds(draft.mediaIds ?? []);
-    setActive(draft.selected[0] ?? "bluesky");
-    setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
-    openView("compose");
+  function requestEditorSwitch(next: EditorSwitch) {
+    if (switchSavingRef.current) return;
+    if (draftSaveBusyRef.current || mediaBusyRef.current || generating || restoringBackupRef.current) {
+      setNotice({ kind: "error", text: draftSaveBusyRef.current
+        ? "Wait for the current draft save to finish before changing drafts."
+        : mediaBusyRef.current ? "Wait for the image operation to finish before changing drafts."
+        : generating ? "Wait for AI adaptation to finish before changing drafts."
+        : "Wait for backup restoration to finish before changing drafts." });
+      return;
+    }
+    if (editorDirty) {
+      setPendingEditorSwitch(next);
+      return;
+    }
+    applyEditorSwitch(next);
+  }
+
+  function newDraft() { requestEditorSwitch({ kind: "new" }); }
+
+  function loadDraft(draft: SavedDraft) { requestEditorSwitch({ kind: "draft", draft }); }
+
+  async function saveAndSwitch() {
+    if (!pendingEditorSwitch || switchSavingRef.current) return;
+    const target = pendingEditorSwitch;
+    const originalContent = editorContentRef.current;
+    const originalRevision = editorRevision.current;
+    switchSavingRef.current = true;
+    setSwitchSaving(true);
+    try {
+      if (!await saveDraft(true)) {
+        setPendingEditorSwitch(null);
+        openView("compose");
+        return;
+      }
+      if (editorRevision.current !== originalRevision || !sameEditorContent(editorContentRef.current, originalContent)) {
+        setPendingEditorSwitch(null);
+        setNotice({ kind: "error", text: "The earlier version was saved, but the editor changed during saving. Your new edits were kept; review them before changing drafts." });
+        openView("compose");
+        return;
+      }
+      setPendingEditorSwitch(null);
+      applyEditorSwitch(target);
+    } finally {
+      switchSavingRef.current = false;
+      setSwitchSaving(false);
+    }
   }
 
   async function deleteDraft(id: string) {
@@ -530,18 +665,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   function loadScheduled(post: ScheduledPost) {
-    editorRevision.current += 1;
-    resetMediaPicker();
-    setAiUndo(null);
-    setCurrentDraftId(null);
-    setTitle(post.title);
-    setSource(post.source);
-    setSelected(platformIds.filter((id) => post.posts[id] !== undefined));
-    setVariants({ ...post.posts });
-    setMediaIds(post.mediaIds ?? []);
-    setActive(platformIds.find((id) => post.posts[id] !== undefined) ?? "bluesky");
-    setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
-    openView("compose");
+    requestEditorSwitch({ kind: "planned", post });
   }
 
   async function runScheduled(post: ScheduledPost) {
@@ -782,8 +906,14 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function markAssistedPosted(id: string) {
-    await runAssistedAction("set-assisted-status", { id, status: "posted" }, "Marked as posted by you. Plypost did not verify the platform post.");
+  async function markAssistedPosted(id: string, postUrl?: string) {
+    await runAssistedAction("set-assisted-status", { id, status: "posted", ...(postUrl ? { postUrl } : {}) }, "Marked as posted by you. Plypost did not verify the platform post.");
+  }
+
+  async function updateAssistedPostUrl(id: string, postUrl: string | null): Promise<boolean> {
+    return runAssistedAction("set-assisted-status", { id, status: "posted", postUrl }, postUrl === null
+      ? "Recorded link removed. Your posted mark and completion time were kept."
+      : "Recorded link saved. Plypost did not verify the platform post.");
   }
 
   async function undoAssistedPosted(id: string) {
@@ -815,7 +945,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <a href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} aria-current={view === "compose" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Create</a>
           <a href="#drafts" onClick={(event) => { event.preventDefault(); openView("drafts"); }} aria-current={view === "drafts" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Drafts <span className="ml-auto text-[11px] tabular-nums opacity-70">{drafts.length}</span></a>
           <a href="#schedule" onClick={(event) => { event.preventDefault(); openView("schedule"); }} aria-current={view === "schedule" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Clock3 size={18} /> Plan</a>
-          <a href="#assisted" onClick={(event) => { event.preventDefault(); openView("assisted"); }} aria-current={view === "assisted" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Copy size={18} /> Assisted</a>
+          <a href="#assisted" onClick={(event) => { event.preventDefault(); setFocusedAssistedId(null); openView("assisted"); }} aria-current={view === "assisted" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Copy size={18} /> Assisted</a>
           <a href="#account" onClick={(event) => { event.preventDefault(); openView("account"); }} aria-current={view === "account" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><UserRound size={18} /> Account</a>
         </nav>
         <div className="sidebar-footer mt-auto border-t px-3 pt-5">
@@ -833,7 +963,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <a className="shrink-0 py-3" href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} aria-current={view === "compose" ? "page" : undefined}>Create</a>
           <a className="shrink-0 py-3" href="#drafts" onClick={(event) => { event.preventDefault(); openView("drafts"); }} aria-current={view === "drafts" ? "page" : undefined}>Drafts</a>
           <a className="shrink-0 py-3" href="#schedule" onClick={(event) => { event.preventDefault(); openView("schedule"); }} aria-current={view === "schedule" ? "page" : undefined}>Plan</a>
-          <a className="shrink-0 py-3" href="#assisted" onClick={(event) => { event.preventDefault(); openView("assisted"); }} aria-current={view === "assisted" ? "page" : undefined}>Assisted</a>
+          <a className="shrink-0 py-3" href="#assisted" onClick={(event) => { event.preventDefault(); setFocusedAssistedId(null); openView("assisted"); }} aria-current={view === "assisted" ? "page" : undefined}>Assisted</a>
           <a className="shrink-0 py-3" href="#account" onClick={(event) => { event.preventDefault(); openView("account"); }} aria-current={view === "account" ? "page" : undefined}>Account</a>
         </nav>
 
@@ -851,11 +981,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
                 <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
                   <div><h2 id="draft-heading" className="text-[17px] font-bold tracking-[-0.025em]">Draft editor</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Your message and its destinations, in one place.</p></div>
-                  <button type="button" onClick={newDraft} className="shrink-0 text-[12px] font-semibold text-[var(--accent-text)]">New draft</button>
+                  <div className="flex shrink-0 items-center gap-3">{editorDirty && <span role="status" className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--warning)]">Unsaved changes</span>}<button type="button" onClick={newDraft} className="text-[12px] font-semibold text-[var(--accent-text)]">New draft</button></div>
                 </div>
                 <div className="p-6 sm:p-7">
                   <label htmlFor="draft-name" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Draft name <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
-                  <input id="draft-name" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Give this idea a name" className="mb-5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" />
+                  <input id="draft-name" value={title} onChange={(event) => { editorRevision.current += 1; setTitle(event.target.value); }} maxLength={120} placeholder="Give this idea a name" className="mb-5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" />
                   <label htmlFor="source-draft" className="mb-2 block text-[13px] font-bold text-[var(--text)]">Your message</label>
                   <textarea id="source-draft" value={source} onChange={(event) => { editorRevision.current += 1; setSource(event.target.value); setNotice(null); }} placeholder="What's on your mind? Add a launch update, insight, or idea to share..." maxLength={3000} className="min-h-[194px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[15px] leading-[1.75] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
                   <div className="mt-2 flex items-center justify-between text-[12px] text-[var(--text-soft)]"><span>Fine-tune each version in the preview.</span><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
@@ -863,7 +993,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     key={mediaPickerEpoch}
                     selectedIds={mediaIds}
                     disabled={restoringBackup}
-                    onChange={(ids) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) setMediaIds(ids); }}
+                    onChange={(ids) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) { editorRevision.current += 1; setMediaIds(ids); } }}
                     onBusyChange={(busy) => {
                       if (mediaPickerEpochRef.current !== mediaPickerEpoch) return;
                       mediaBusyRef.current = busy;
@@ -884,7 +1014,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
                     {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   </details>
-                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={saveDraft} disabled={!source.trim() || mediaBusy} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
+                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!source.trim() || mediaBusy || draftSaveBusy} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
                 </div>
               </section>
             </div>
@@ -920,11 +1050,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           {view === "schedule" && <div>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Schedule a snapshot of the draft currently in your editor.</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
-            <ServerSchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} />
+            <ServerSchedulePanel schedule={schedule} assisted={assisted} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} />
           </div>}
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} />
+            <AssistedPublishPanel items={assisted} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdatePostUrl={updateAssistedPostUrl} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} />}
         </main>
@@ -936,6 +1066,16 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         <p className="mt-2 text-[13px] leading-6 text-[var(--text-muted)]">Please wait while drafts, plans and images are checked and restored.</p>
       </div>
     </div>}
+    {pendingEditorSwitch && <dialog ref={switchDialogRef} onCancel={(event) => { event.preventDefault(); if (!switchSaving) setPendingEditorSwitch(null); }} aria-labelledby="unsaved-editor-title" aria-describedby="unsaved-editor-description" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
+      <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">Unsaved changes</h2>
+      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">Your current text, platform versions, and image choices have changed. Save them before {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : "opening a copy of this planned post"}, or discard these edits.</p>
+      {!source.trim() && <p className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Add a message before saving, or keep editing.</p>}
+      <div className="mt-6 flex flex-wrap justify-end gap-2">
+        <button type="button" autoFocus onClick={() => setPendingEditorSwitch(null)} disabled={switchSaving} className="rounded-lg px-3 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Keep editing</button>
+        <button type="button" onClick={() => { const target = pendingEditorSwitch; setPendingEditorSwitch(null); applyEditorSwitch(target); }} disabled={switchSaving} className="rounded-lg border border-[var(--danger)] px-3 py-2.5 text-[12px] font-semibold text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50">Discard changes</button>
+        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !source.trim()} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving…" : "Save and continue"}</button>
+      </div>
+    </dialog>}
     </>
   );
 }

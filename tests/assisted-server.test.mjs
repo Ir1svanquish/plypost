@@ -41,9 +41,35 @@ test("assisted items persist and status, notification, and deletion are scoped t
 
   assert.equal(setAssistedStatus(owner, post.id, "posted"), true);
   assert.equal(listWorkspace(owner).assisted[0].status, "posted");
-  assert.ok(listWorkspace(owner).assisted[0].postedAt);
+  const postedAt = listWorkspace(owner).assisted[0].postedAt;
+  assert.ok(postedAt);
+  assert.equal(listWorkspace(owner).assisted[0].postUrl, undefined);
+  const link = "https://social.example/creator/post/123";
+  assert.equal(setAssistedStatus(other, post.id, "posted", link), false);
+  assert.equal(setAssistedStatus(owner, post.id, "posted", link), true);
+  assert.equal(listWorkspace(owner).assisted[0].postUrl, link);
+  assert.equal(listWorkspace(owner).assisted[0].postedAt, postedAt);
+  const corrected = "https://social.example/creator/post/456";
+  assert.equal(setAssistedStatus(owner, post.id, "posted", corrected), true);
+  assert.equal(listWorkspace(owner).assisted[0].postUrl, corrected);
+  assert.equal(setAssistedStatus(owner, post.id, "posted"), true);
+  assert.equal(listWorkspace(owner).assisted[0].postUrl, corrected);
+  assert.equal(listWorkspace(owner).assisted[0].postedAt, postedAt);
+  assert.throws(() => setAssistedStatus(owner, post.id, "posted", "https://user:password@social.example/post/123"), /public HTTPS/);
+  assert.throws(() => setAssistedStatus(owner, post.id, "posted", ""), /public HTTPS/);
+  assert.equal(listWorkspace(owner).assisted[0].postUrl, corrected);
+  assert.equal(setAssistedStatus(owner, post.id, "posted", null), true);
+  assert.equal(listWorkspace(owner).assisted[0].postUrl, undefined);
+  assert.equal(listWorkspace(owner).assisted[0].status, "posted");
+  assert.equal(listWorkspace(owner).assisted[0].postedAt, postedAt);
+  assert.equal(setAssistedStatus(owner, post.id, "posted", null), true);
+  assert.equal(listWorkspace(owner).assisted[0].postedAt, postedAt);
+  assert.equal(setAssistedStatus(owner, post.id, "posted", link), true);
+  assert.equal(listWorkspace(owner).assisted[0].postUrl, link);
+  assert.equal(listWorkspace(owner).assisted[0].postedAt, postedAt);
   assert.equal(setAssistedStatus(owner, post.id, "queued"), true);
   assert.equal(listWorkspace(owner).assisted[0].postedAt, undefined);
+  assert.equal(listWorkspace(owner).assisted[0].postUrl, undefined);
   assert.equal(deleteAssisted(owner, post.id), true);
   assert.deepEqual(listWorkspace(owner).assisted, []);
 });
@@ -68,7 +94,7 @@ test("browser migration merges missing IDs idempotently and enforces the list ca
 });
 
 test("workspace backup replaces assisted items with the saved snapshot", () => {
-  const replacement = { ...item("Backed up"), status: "posted", postedAt: new Date().toISOString() };
+  const replacement = { ...item("Backed up"), status: "posted", postedAt: new Date().toISOString(), postUrl: "https://social.example/post/789" };
   importLibrary(owner, { version: 3, drafts: [], schedule: [], assisted: [replacement] });
   assert.deepEqual(listWorkspace(owner).assisted, [replacement]);
   assert.deepEqual(listWorkspace(other).assisted.length, 100);

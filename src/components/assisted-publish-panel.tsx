@@ -1,10 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Bell, CalendarClock, Check, Copy, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 import { assistedDestinations, assistedIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isPlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
-import { assistedState, type AssistedPost } from "@/lib/workspace";
+import { assistedState, normalizePublicPostUrl, type AssistedPost } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 
@@ -23,17 +24,45 @@ type Props = {
   onTimeChange: (time: string) => void;
   onAdd: () => void;
   onCopy: (text: string, destination: AssistedDestinationId) => void;
-  onMarkPosted: (id: string) => void;
+  onMarkPosted: (id: string, postUrl?: string) => void;
+  onUpdatePostUrl: (id: string, postUrl: string | null) => Promise<boolean>;
   onUndo: (id: string) => void;
   onRemove: (id: string) => void;
   onEnableNotifications: () => void;
   onEditImages: () => void;
+  focusItemId?: string;
 };
 
-export function AssistedPublishPanel({ items, destination, text, time, now, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUndo, onRemove, onEnableNotifications, onEditImages }: Props) {
+export function AssistedPublishPanel({ items, destination, text, time, now, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdatePostUrl, onUndo, onRemove, onEnableNotifications, onEditImages, focusItemId }: Props) {
+  const [postUrls, setPostUrls] = useState<Record<string, string>>({});
+  const [editingLinks, setEditingLinks] = useState<Record<string, boolean>>({});
+  const [linkSavingId, setLinkSavingId] = useState<string | null>(null);
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const selected = assistedDestinations[destination];
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
+  const hasFocusedItem = Boolean(focusItemId && items.some((item) => item.id === focusItemId));
+
+  useEffect(() => {
+    if (!focusItemId || !hasFocusedItem) return;
+    const element = document.getElementById(`assisted-item-${focusItemId}`);
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    element?.focus({ preventScroll: true });
+  }, [focusItemId, hasFocusedItem]);
+
+  function closeLinkEditor(id: string) {
+    setEditingLinks((current) => { const next = { ...current }; delete next[id]; return next; });
+    setPostUrls((current) => { const next = { ...current }; delete next[id]; return next; });
+  }
+
+  async function updateLink(id: string, postUrl: string | null) {
+    if (busy || linkSavingId) return;
+    setLinkSavingId(id);
+    try {
+      if (await onUpdatePostUrl(id, postUrl)) closeLinkEditor(id);
+    } finally {
+      setLinkSavingId(null);
+    }
+  }
 
   return (
     <section id="assisted" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="assisted-heading">
@@ -79,18 +108,48 @@ export function AssistedPublishPanel({ items, destination, text, time, now, busy
           {items.map((item) => {
             const state = assistedState(item, now);
             const target = assistedDestinations[item.destination];
-            return <article key={item.id} className="px-6 py-4 sm:px-7">
+            const enteredUrl = postUrls[item.id] ?? "";
+            const normalizedUrl = enteredUrl ? normalizePublicPostUrl(enteredUrl) : undefined;
+            const invalidUrl = normalizedUrl === null;
+            const savedUrl = item.postUrl && normalizePublicPostUrl(item.postUrl) === item.postUrl ? item.postUrl : undefined;
+            const editingLink = item.status === "posted" && Boolean(editingLinks[item.id]);
+            const editedLink = postUrls[item.id] ?? savedUrl ?? "";
+            const normalizedEditedLink = editedLink ? normalizePublicPostUrl(editedLink) : undefined;
+            const invalidEditedLink = normalizedEditedLink === null;
+            return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[13px] font-bold text-[var(--text-secondary)]">{item.title}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{target.name} · {formatLocalDateTime(item.scheduledFor)}</p></div>
                 <button type="button" aria-label={`Remove ${item.title} from assisted publishing`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
               <details className="mt-2 text-[12px] text-[var(--text-muted)]"><summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Review saved text</summary><p className="mt-2 whitespace-pre-wrap break-words rounded-xl bg-[var(--accent-soft)] p-3 leading-5">{item.text}</p></details>
               <MediaHandoff mediaIds={item.mediaIds} />
+              {item.status === "queued" && <div className="mt-3 max-w-xl">
+                <label htmlFor={`assisted-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Public post link · optional</label>
+                <input id={`assisted-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={enteredUrl} placeholder="https://social.example/your-post" aria-invalid={invalidUrl} aria-describedby={`assisted-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
+                <p id={`assisted-post-url-hint-${item.id}`} className={`mt-1 text-[11px] leading-4 ${invalidUrl ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{invalidUrl ? "Use a public HTTPS post link with no embedded username or password." : "After posting, paste its link here if you have one. Plypost checks the link format, not the post or account."}</p>
+              </div>}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {target.name}</a>
-                {item.status === "queued" ? <button type="button" onClick={() => onMarkPosted(item.id)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => onUndo(item.id)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+                {item.status === "queued" ? <button type="button" onClick={() => onMarkPosted(item.id, normalizedUrl ?? undefined)} disabled={busy || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => onUndo(item.id)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
+              {item.status === "posted" && <div className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">
+                <p>Marked posted by you{item.postedAt ? ` · ${formatLocalDateTime(item.postedAt)}` : ""} · not verified by Plypost.</p>
+                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+                  {savedUrl && <a href={savedUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)] underline underline-offset-2"><ExternalLink size={11} /> Link you recorded · not verified</a>}
+                  {!editingLink && <button type="button" onClick={() => { setPostUrls((current) => ({ ...current, [item.id]: savedUrl ?? "" })); setEditingLinks((current) => ({ ...current, [item.id]: true })); }} disabled={busy || linkSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedUrl ? "Edit recorded link" : "Add recorded link"}</button>}
+                </div>
+                {editingLink && <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
+                  <label htmlFor={`assisted-edit-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Public post link · self-reported</label>
+                  <input id={`assisted-edit-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={editedLink} placeholder="https://social.example/your-post" aria-invalid={invalidEditedLink} aria-describedby={`assisted-edit-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} disabled={busy || linkSavingId === item.id} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
+                  <p id={`assisted-edit-post-url-hint-${item.id}`} className={`mt-1 text-[11px] leading-4 ${invalidEditedLink ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{invalidEditedLink ? "Use a public HTTPS post link with no embedded username or password." : "Plypost checks the link format, not the post or account. Your posted mark and completion time stay unchanged."}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button type="button" onClick={() => { if (normalizedEditedLink) void updateLink(item.id, normalizedEditedLink); }} disabled={busy || linkSavingId !== null || !normalizedEditedLink || normalizedEditedLink === savedUrl} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{linkSavingId === item.id ? "Saving…" : "Save link"}</button>
+                    {savedUrl && <button type="button" onClick={() => { void updateLink(item.id, null); }} disabled={busy || linkSavingId !== null} className="text-[12px] font-semibold text-[var(--danger)] disabled:opacity-50">Remove recorded link</button>}
+                    <button type="button" onClick={() => closeLinkEditor(item.id)} disabled={busy || linkSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
+                  </div>
+                </div>}
+              </div>}
             </article>;
           })}
         </div>

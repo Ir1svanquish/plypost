@@ -8,7 +8,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createMedia, getMedia, listMedia } from "../src/lib/server/media.ts";
-import { addSchedule, listWorkspace, saveDraft } from "../src/lib/server/workspace.ts";
+import { addSchedule, listWorkspace, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { GET, POST } from "../src/app/api/backup/route.ts";
@@ -50,6 +50,8 @@ test("portable backup restores image pixels and saved records in a fresh databas
     scheduledFor: new Date(Date.now() + 7_200_000).toISOString(), createdAt: stamp(), status: "queued" };
   database().prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
     .run(assisted.id, owner, JSON.stringify(assisted), assisted.scheduledFor, stamp());
+  const postUrl = "https://social.example/creator/post/2026";
+  assert.equal(setAssistedStatus(owner, assisted.id, "posted", postUrl), true);
 
   const exported = exportPortableBackup(owner);
   const archive = JSON.parse(exported);
@@ -58,6 +60,8 @@ test("portable backup restores image pixels and saved records in a fresh databas
   assert.equal(archive.media.length, 1);
   assert.equal(archive.drafts[0].mediaIds[0], image.id);
   assert.equal(archive.jobs[0].timezone, "Asia/Hong_Kong");
+  assert.equal(archive.assisted[0].postUrl, postUrl);
+  assert.ok(archive.assisted[0].postedAt);
   assert.ok(!exported.includes("configured"));
 
   closeDatabase();
@@ -71,6 +75,8 @@ test("portable backup restores image pixels and saved records in a fresh databas
   assert.equal(restored.schedule[0].scheduledFor, plan.scheduledFor);
   assert.deepEqual(restored.schedule[0].mediaIds, restored.drafts[0].mediaIds);
   assert.equal(restored.assisted[0].text, assisted.text);
+  assert.equal(restored.assisted[0].postUrl, postUrl);
+  assert.equal(restored.assisted[0].postedAt, archive.assisted[0].postedAt);
   assert.deepEqual(restored.assisted[0].mediaIds, restored.drafts[0].mediaIds);
   const restoredImage = getMedia(owner, restored.drafts[0].mediaIds[0]);
   assert.ok(restoredImage);
@@ -109,6 +115,9 @@ test("tampered or incomplete archives fail without changing saved work", async (
   const droppedHistory = globalThis.structuredClone(original);
   droppedHistory.assisted[0].postedAt = "not-a-date";
   await assert.rejects(importPortableBackup(owner, droppedHistory), /assisted item history/);
+  const unsafePostUrl = globalThis.structuredClone(original);
+  unsafePostUrl.assisted[0].postUrl = "javascript:alert(1)";
+  await assert.rejects(importPortableBackup(owner, unsafePostUrl), /invalid assisted items/);
   const missingPlannedImage = globalThis.structuredClone(original);
   missingPlannedImage.jobs[0].post.mediaIds = [randomUUID()];
   await assert.rejects(importPortableBackup(owner, missingPlannedImage), /missing from the archive/);

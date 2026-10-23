@@ -119,6 +119,7 @@ function validateCollection<T extends { id: string }>(raw: unknown, parsed: T[],
     }
     if (label === "assisted items" &&
         ((item.postedAt !== undefined && item.postedAt !== normalized.postedAt) ||
+          (item.postUrl !== undefined && item.postUrl !== normalized.postUrl) ||
           (item.notifiedAt !== undefined && item.notifiedAt !== normalized.notifiedAt))) {
       invalid("Backup contains invalid assisted item history.");
     }

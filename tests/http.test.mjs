@@ -157,8 +157,16 @@ test("stores assisted checklist actions behind the owner session", async () => {
   assert.equal((await added.json()).assisted[0].id, assisted.id);
   const notified = await post("/api/workspace", { action: "mark-assisted-notified", ids: [assisted.id] });
   assert.ok((await notified.json()).assisted[0].notifiedAt);
-  const posted = await post("/api/workspace", { action: "set-assisted-status", id: assisted.id, status: "posted" });
-  assert.equal((await posted.json()).assisted[0].status, "posted");
+  const postUrl = "https://social.example/creator/post/42";
+  assert.equal((await post("/api/workspace", { action: "set-assisted-status", id: assisted.id, status: "posted", postUrl }, false)).status, 401);
+  for (const invalidUrl of ["javascript:alert(1)", "http://social.example/post/42", "https://user:pass@social.example/post/42"]) {
+    assert.equal((await post("/api/workspace", { action: "set-assisted-status", id: assisted.id, status: "posted", postUrl: invalidUrl })).status, 400);
+  }
+  const posted = await post("/api/workspace", { action: "set-assisted-status", id: assisted.id, status: "posted", postUrl });
+  const postedItem = (await posted.json()).assisted[0];
+  assert.equal(postedItem.status, "posted");
+  assert.equal(postedItem.postUrl, postUrl);
+  assert.ok(postedItem.postedAt);
   const migratedItem = { ...assisted, id: randomUUID() };
   const migration = await post("/api/workspace", { action: "migrate-assisted", items: [assisted, migratedItem] });
   const migrationData = await migration.json();

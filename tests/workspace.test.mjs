@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assistedState, draftTitle, emptyWorkspace, localDateTimeValue, parseWorkspace, scheduleState } from "../src/lib/workspace.ts";
+import { assistedState, draftTitle, emptyWorkspace, localDateTimeValue, normalizePublicPostUrl, parseWorkspace, scheduleState } from "../src/lib/workspace.ts";
 
 const stamp = "2026-10-22T12:00:00.000Z";
 
@@ -37,6 +37,23 @@ test("assisted posts round trip and invalid destinations are skipped", () => {
   assert.equal(assistedState(post, dueAt - 1), "upcoming");
   assert.equal(assistedState(post, dueAt), "due");
   assert.equal(assistedState({ ...post, status: "posted" }, dueAt + 1), "posted");
+});
+
+test("assisted post links accept public HTTPS format while preserving legacy items", () => {
+  const post = { id: "a-link", title: "Launch", destination: "mastodon", text: "Hello", scheduledFor: stamp,
+    createdAt: stamp, status: "posted", postedAt: stamp, postUrl: "https://mastodon.social/@creator/12345" };
+  const backup = { version: 3, drafts: [], schedule: [], assisted: [post] };
+  assert.deepEqual(parseWorkspace(backup), backup);
+  assert.equal(normalizePublicPostUrl("  https://bsky.app/profile/creator/post/abc  "), "https://bsky.app/profile/creator/post/abc");
+  for (const url of ["javascript:alert(1)", "http://social.example/post/1", "https://user:secret@social.example/post/1",
+    "https://localhost/post/1", "https://192.168.1.1/post/1", "https://social.example/", `https://social.example/post/${"x".repeat(2050)}`]) {
+    assert.equal(normalizePublicPostUrl(url), null, url);
+    assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...post, postUrl: url }] })?.assisted, []);
+  }
+  assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...post, status: "queued" }] })?.assisted, []);
+  const legacy = { ...post };
+  delete legacy.postUrl;
+  assert.deepEqual(parseWorkspace({ ...backup, assisted: [legacy] })?.assisted, [legacy]);
 });
 
 test("plan and assisted image snapshots round trip while malformed references are rejected", () => {

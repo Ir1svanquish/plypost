@@ -41,6 +41,7 @@ export type AssistedPost = {
   createdAt: string;
   status: "queued" | "posted";
   postedAt?: string;
+  postUrl?: string;
   notifiedAt?: string;
 };
 
@@ -62,6 +63,24 @@ const validDate = (value: unknown): value is string =>
 const validUtcInstant = (value: unknown): value is string =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
   Number.isFinite(new Date(value).getTime()) && new Date(value).toISOString() === value;
+
+/** Checks the shape of a public HTTPS post link. This does not verify that a post exists. */
+export function normalizePublicPostUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length > 2048 || !/^https:\/\/\S+$/i.test(trimmed)) return null;
+  try {
+    const url = new URL(trimmed);
+    const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+    if (url.protocol !== "https:" || url.username || url.password || !hostname.includes(".") ||
+        /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":") ||
+        /(?:^|\.)(?:localhost|local|internal)$/.test(hostname) ||
+        (url.pathname === "/" && !url.search) || url.toString().length > 2048) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
 
 function validMediaIds(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= 4 && new Set(value).size === value.length &&
@@ -164,6 +183,8 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
       !validUtcInstant(value.scheduledFor) || !validDate(value.createdAt) ||
       (value.status !== "queued" && value.status !== "posted")) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
+  if (value.postUrl !== undefined && (value.status !== "posted" ||
+      normalizePublicPostUrl(value.postUrl) !== value.postUrl)) return null;
   return {
     id: value.id,
     title: value.title,
@@ -174,6 +195,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
     createdAt: value.createdAt,
     status: value.status,
     ...(value.status === "posted" && validDate(value.postedAt) ? { postedAt: value.postedAt } : {}),
+    ...(value.postUrl !== undefined ? { postUrl: value.postUrl as string } : {}),
     ...(validDate(value.notifiedAt) ? { notifiedAt: value.notifiedAt } : {}),
   };
 }
