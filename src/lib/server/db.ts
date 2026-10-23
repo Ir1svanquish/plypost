@@ -24,6 +24,11 @@ export function database(): DatabaseSync {
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS drafts_owner ON drafts(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS assisted (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, payload TEXT NOT NULL,
+      scheduled_for TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS assisted_owner ON assisted(user_id, scheduled_for);
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, payload TEXT NOT NULL,
       scheduled_for TEXT NOT NULL, timezone TEXT NOT NULL,

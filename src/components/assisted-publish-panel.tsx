@@ -11,6 +11,7 @@ type Props = {
   text: string;
   time: string;
   now: number;
+  busy: boolean;
   notificationPermission: NotificationPermission | "unsupported";
   onDestinationChange: (destination: AssistedDestinationId) => void;
   onTextChange: (text: string) => void;
@@ -23,7 +24,7 @@ type Props = {
   onEnableNotifications: () => void;
 };
 
-export function AssistedPublishPanel({ items, destination, text, time, now, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUndo, onRemove, onEnableNotifications }: Props) {
+export function AssistedPublishPanel({ items, destination, text, time, now, busy, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUndo, onRemove, onEnableNotifications }: Props) {
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const selected = assistedDestinations[destination];
 
@@ -52,7 +53,7 @@ export function AssistedPublishPanel({ items, destination, text, time, now, noti
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint}{selected.needsMedia ? " Plypost saves the text only; add the media on the platform." : ""}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <button type="button" onClick={onAdd} disabled={!text.trim() || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {time ? "Save reminder" : "Add to checklist"}</button>
+          <button type="button" onClick={onAdd} disabled={busy || !text.trim() || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
           {notificationPermission === "default" && <button type="button" onClick={onEnableNotifications} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Bell size={14} /> Enable browser alerts</button>}
           <span className="text-[12px] leading-5 text-[var(--text-soft)]">{notificationPermission === "granted" ? "Browser alerts enabled while this page is open." : "Due items appear here while this page is open."}</span>
         </div>
@@ -69,13 +70,13 @@ export function AssistedPublishPanel({ items, destination, text, time, now, noti
             return <article key={item.id} className="px-6 py-4 sm:px-7">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[13px] font-bold text-[var(--text-secondary)]">{item.title}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{target.name} · {formatLocalDateTime(item.scheduledFor)}</p></div>
-                <button type="button" aria-label={`Remove ${item.title} from assisted publishing`} onClick={() => onRemove(item.id)} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash2 size={14} /></button>
+                <button type="button" aria-label={`Remove ${item.title} from assisted publishing`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
               <details className="mt-2 text-[12px] text-[var(--text-muted)]"><summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Review saved text</summary><p className="mt-2 whitespace-pre-wrap break-words rounded-xl bg-[var(--accent-soft)] p-3 leading-5">{item.text}</p></details>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {target.name}</a>
-                {item.status === "queued" ? <button type="button" onClick={() => onMarkPosted(item.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)]"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => onUndo(item.id)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)]"><RotateCcw size={13} /> Undo mark</button>}
+                {item.status === "queued" ? <button type="button" onClick={() => onMarkPosted(item.id)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => onUndo(item.id)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
             </article>;
           })}

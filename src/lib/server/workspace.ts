@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { parseWorkspace, type SavedDraft, type ScheduledPost } from "../workspace";
+import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { platformIds } from "../platforms";
 
 type DraftRow = { payload: string };
@@ -34,12 +34,14 @@ export function listWorkspace(userId: string) {
   const db = database();
   const drafts = db.prepare("SELECT payload FROM drafts WHERE user_id=? ORDER BY updated_at DESC LIMIT 100")
     .all(userId).map((row) => JSON.parse((row as DraftRow).payload) as SavedDraft);
+  const assisted = db.prepare("SELECT payload FROM assisted WHERE user_id=? ORDER BY scheduled_for ASC,id LIMIT 100")
+    .all(userId).map((row) => JSON.parse((row as DraftRow).payload) as AssistedPost);
   const schedule = db.prepare("SELECT id,payload,status,attempts,next_attempt_at,last_error,completed_at,receipts FROM jobs WHERE user_id=? ORDER BY scheduled_for ASC LIMIT 100")
     .all(userId).map((row) => mapJob(row as JobRow));
   const log = db.prepare("SELECT action,subject_id,detail,created_at FROM audit WHERE user_id=? ORDER BY id DESC LIMIT 30")
     .all(userId);
   const heartbeat = db.prepare("SELECT seen_at FROM worker_heartbeat WHERE id=1").get() as { seen_at: string } | undefined;
-  return { drafts, schedule, log, workerLastSeen: heartbeat?.seen_at ?? null };
+  return { drafts, schedule, assisted, log, workerLastSeen: heartbeat?.seen_at ?? null };
 }
 
 function validDraft(value: unknown): SavedDraft | null {
@@ -50,6 +52,93 @@ function validDraft(value: unknown): SavedDraft | null {
 function validSchedule(value: unknown): ScheduledPost | null {
   const result = parseWorkspace({ version: 3, drafts: [], schedule: [value], assisted: [] });
   return result?.schedule[0] ?? null;
+}
+
+function validAssisted(value: unknown): AssistedPost | null {
+  const result = parseWorkspace({ version: 3, drafts: [], schedule: [], assisted: [value] });
+  return result?.assisted[0] ?? null;
+}
+
+const validId = (id: string) => /^[a-f0-9-]{36}$/i.test(id);
+
+export function addAssisted(userId: string, value: unknown): AssistedPost {
+  const item = validAssisted(value);
+  if (!item || !validId(item.id) || item.status !== "queued") throw new Error("Invalid assisted item.");
+  transaction((db) => {
+    if (db.prepare("SELECT id FROM assisted WHERE id=?").get(item.id)) throw new Error("Assisted item already exists.");
+    const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
+    if (count.count >= 100) throw new Error("Assisted publishing list is full.");
+    db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
+      .run(item.id, userId, JSON.stringify(item), item.scheduledFor, new Date().toISOString());
+    audit(userId, "assisted.created", item.id);
+  });
+  return item;
+}
+
+export function setAssistedStatus(userId: string, id: string, status: unknown): boolean {
+  if (!validId(id) || (status !== "posted" && status !== "queued")) throw new Error("Invalid assisted status.");
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
+    if (!row) return false;
+    const current = JSON.parse(row.payload) as AssistedPost;
+    if (current.status === status) return true;
+    const updated: AssistedPost = { ...current, status };
+    if (status === "posted") updated.postedAt = new Date().toISOString();
+    else delete updated.postedAt;
+    db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(JSON.stringify(updated), new Date().toISOString(), id, userId);
+    audit(userId, status === "posted" ? "assisted.posted" : "assisted.unposted", id);
+    return true;
+  });
+}
+
+export function markAssistedNotified(userId: string, ids: unknown): void {
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100 || ids.some((id) => typeof id !== "string" || !validId(id))) {
+    throw new Error("Invalid assisted item IDs.");
+  }
+  const stamp = new Date().toISOString();
+  transaction((db) => {
+    for (const id of new Set(ids as string[])) {
+      const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
+      if (!row) continue;
+      const item = JSON.parse(row.payload) as AssistedPost;
+      if (item.status !== "queued" || item.notifiedAt) continue;
+      db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
+        .run(JSON.stringify({ ...item, notifiedAt: stamp }), stamp, id, userId);
+    }
+  });
+}
+
+export function deleteAssisted(userId: string, id: string): boolean {
+  if (!validId(id)) return false;
+  const result = database().prepare("DELETE FROM assisted WHERE id=? AND user_id=?").run(id, userId);
+  if (result.changes) audit(userId, "assisted.deleted", id);
+  return Boolean(result.changes);
+}
+
+export function migrateAssisted(userId: string, raw: unknown): "imported" | "skipped" {
+  if (!Array.isArray(raw) || raw.length > 100) throw new Error("Invalid assisted migration.");
+  const items = raw.map(validAssisted);
+  if (items.some((item) => !item || !validId(item.id)) || new Set(items.map((item) => item?.id)).size !== items.length) {
+    throw new Error("Invalid assisted migration.");
+  }
+  return transaction((db) => {
+    const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
+    const missing = (items as AssistedPost[]).filter((item) => {
+      const existing = db.prepare("SELECT user_id FROM assisted WHERE id=?").get(item.id) as { user_id: string } | undefined;
+      if (existing && existing.user_id !== userId) throw new Error("Invalid assisted migration.");
+      return !existing;
+    });
+    if (!missing.length) return "skipped";
+    if (count.count + missing.length > 100) throw new Error("Assisted publishing list is full.");
+    const stamp = new Date().toISOString();
+    for (const item of missing) {
+      db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
+        .run(item.id, userId, JSON.stringify(item), item.scheduledFor, stamp);
+    }
+    audit(userId, "assisted.migrated", undefined, `${missing.length} items`);
+    return "imported";
+  });
 }
 
 export function saveDraft(userId: string, value: unknown): SavedDraft {
@@ -106,18 +195,22 @@ export function retrySchedule(userId: string, id: string) {
   return Boolean(result.changes);
 }
 
-export function importLibrary(userId: string, raw: unknown) {
+type ImportMode = "replace-all" | "preserve-assisted";
+
+function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
   const workspace = parseWorkspace(raw);
   if (!workspace || !raw || typeof raw !== "object" || !Array.isArray((raw as { drafts?: unknown }).drafts) || !Array.isArray((raw as { schedule?: unknown }).schedule) ||
       workspace.drafts.length !== (raw as { drafts: unknown[] }).drafts.length ||
-      workspace.schedule.length !== (raw as { schedule: unknown[] }).schedule.length) throw new Error("Invalid workspace backup.");
-  const ids = [...workspace.drafts, ...workspace.schedule].map((item) => item.id);
+      workspace.schedule.length !== (raw as { schedule: unknown[] }).schedule.length ||
+      (Array.isArray((raw as { assisted?: unknown }).assisted) && workspace.assisted.length !== (raw as { assisted: unknown[] }).assisted.length)) throw new Error("Invalid workspace backup.");
+  const ids = [...workspace.drafts, ...workspace.schedule, ...workspace.assisted].map((item) => item.id);
   if (new Set(ids).size !== ids.length || ids.some((id) => !/^[a-f0-9-]{36}$/i.test(id))) throw new Error("Backup has invalid IDs.");
   transaction((db) => {
     db.prepare("DELETE FROM drafts WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM jobs WHERE user_id=? AND status != 'running'").run(userId);
     const running = db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE user_id=?").get(userId) as { count: number };
     if (running.count) throw new Error("Wait for running jobs before importing.");
+    if (mode === "replace-all") db.prepare("DELETE FROM assisted WHERE user_id=?").run(userId);
     for (const draft of workspace.drafts) {
       db.prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?)")
         .run(draft.id, userId, JSON.stringify(draft), draft.updatedAt);
@@ -127,9 +220,24 @@ export function importLibrary(userId: string, raw: unknown) {
       db.prepare("INSERT INTO jobs(id,user_id,payload,scheduled_for,timezone,status,next_attempt_at,completed_at,receipts) VALUES (?,?,?,?,?,?,?,?,?)")
         .run(post.id, userId, JSON.stringify(post), post.scheduledFor, "UTC", status, post.scheduledFor, post.simulatedAt ?? null, JSON.stringify(post.receipts ?? []));
     }
-    audit(userId, "workspace.imported", randomUUID(), `${workspace.drafts.length} drafts; ${workspace.schedule.length} jobs`);
+    if (mode === "replace-all") {
+      for (const item of workspace.assisted) {
+        db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
+          .run(item.id, userId, JSON.stringify(item), item.scheduledFor, new Date().toISOString());
+      }
+    }
+    audit(userId, mode === "replace-all" ? "workspace.imported" : "workspace.legacy_imported", randomUUID(),
+      `${workspace.drafts.length} drafts; ${workspace.schedule.length} jobs; ${mode === "replace-all" ? workspace.assisted.length : "preserved"} assisted`);
   });
   return workspace;
+}
+
+export function importLibrary(userId: string, raw: unknown) {
+  return importWorkspace(userId, raw, "replace-all");
+}
+
+export function importLegacyLibrary(userId: string, raw: unknown) {
+  return importWorkspace(userId, raw, "preserve-assisted");
 }
 
 export function aiRateAllowed(userId: string): boolean {

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-labelledby="title desc">
+  <title id="title">Plypost — folded gradient P without a tile</title>
+  <desc id="desc">A transparent-background P tilted clockwise 20 degrees, filled with indigo and violet, with closely stacked cyan and lavender layers and a pale folded corner.</desc>
+  <defs>
+    <linearGradient id="body" x1="75" y1="62" x2="170" y2="187" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#484CB5"/>
+      <stop offset=".48" stop-color="#625FD1"/>
+      <stop offset="1" stop-color="#817CE5"/>
+    </linearGradient>
+    <linearGradient id="rear" x1="84" y1="194" x2="185" y2="95" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#64C8D0"/>
+      <stop offset=".52" stop-color="#72B6E2"/>
+      <stop offset="1" stop-color="#9A91DA"/>
+    </linearGradient>
+    <linearGradient id="middle" x1="89" y1="190" x2="180" y2="86" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#99E0E1"/>
+      <stop offset=".5" stop-color="#A4CFF0"/>
+      <stop offset="1" stop-color="#C1BAF0"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="142" y1="58" x2="178" y2="95" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E7E8FF"/>
+      <stop offset="1" stop-color="#B3C3F0"/>
+    </linearGradient>
+    <path id="letter-p" fill-rule="evenodd" d="M86 57h55l36 36v14c0 29-20 47-51 47h-18v27c0 6-5 11-11 11H86c-6 0-11-5-11-11V68c0-6 5-11 11-11Zm22 27v43h17c18 0 29-8 29-22 0-13-11-21-29-21h-17Z"/>
+    <mask id="outer-edge-only" maskUnits="userSpaceOnUse">
+      <rect width="240" height="240" fill="#fff"/>
+      <path d="M105 80h22c24 0 36 11 36 27s-12 30-36 30h-22Z" fill="#000"/>
+    </mask>
+  </defs>
+  <g transform="translate(120 120) rotate(20) scale(.88) translate(-120 -120)">
+    <use href="#letter-p" transform="translate(7 7)" fill="url(#rear)" mask="url(#outer-edge-only)"/>
+    <use href="#letter-p" transform="translate(3 3)" fill="url(#middle)" mask="url(#outer-edge-only)"/>
+    <use href="#letter-p" fill="url(#body)"/>
+    <path d="M141 57v25c0 6 5 11 11 11h25L141 57Z" fill="url(#fold)"/>
+    <path d="m142 58 35 35" fill="none" stroke="#9C9CE0" stroke-width="1.7" stroke-linecap="round"/>
+  </g>
+</svg>

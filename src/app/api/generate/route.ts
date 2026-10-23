@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { characterCount, platformIds, platforms, type PlatformId } from "@/lib/platforms";
+import { parseGeneratedVariants } from "@/lib/generated-variants";
+import { characterCount, platforms } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { aiRateAllowed } from "@/lib/server/workspace";
 
@@ -20,24 +21,6 @@ function providerConfig(provider: Provider) {
     model: process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b",
     url: "https://integrate.api.nvidia.com/v1/chat/completions",
   };
-}
-
-function parseVariants(content: string): Record<PlatformId, string> | null {
-  const json = content.match(/\{[\s\S]*\}/)?.[0];
-  if (!json) return null;
-  try {
-    const value: unknown = JSON.parse(json);
-    if (!value || typeof value !== "object") return null;
-    const variants = {} as Record<PlatformId, string>;
-    for (const platform of platformIds) {
-      const text = (value as Record<string, unknown>)[platform];
-      if (typeof text !== "string" || !text.trim() || characterCount(text) > 5000) return null;
-      variants[platform] = text.trim();
-    }
-    return variants;
-  } catch {
-    return null;
-  }
 }
 
 export async function POST(request: Request) {
@@ -111,8 +94,8 @@ export async function POST(request: Request) {
 
     const data: unknown = await response.json();
     const content = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content;
-    const variants = typeof content === "string" ? parseVariants(content) : null;
-    if (!variants) {
+    const parsed = typeof content === "string" ? parseGeneratedVariants(content) : null;
+    if (!parsed) {
       return NextResponse.json(
         { error: "The model did not return four usable drafts. Please try again." },
         { status: 502 },
@@ -120,7 +103,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { provider, variants },
+      { provider, ...parsed },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {

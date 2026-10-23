@@ -5,19 +5,19 @@ A responsive Next.js workspace for drafting one message, adapting it for Bluesky
 ## What works
 
 - Write a source draft and select one to four destinations.
-- Preview and edit a separate version for each platform. Unsaved editor text, selections and immediate demo activity stay in your browser.
-- Sign in to the local app. Named drafts and scheduled plans are stored in a local SQLite database, so another device can read them if it can reach this same computer and signs in with the owner account.
-- Export/import a JSON backup. Existing browser drafts and plans can be moved into the owner account after confirmation.
+- Preview and edit a separate version for each platform. Each preview is illustrative and does not imply a connected account. Unsaved editor text, selections and immediate demo activity stay in your browser.
+- Sign in to the local app. Named drafts, scheduled plans and assisted publishing items are stored in a local SQLite database, so another browser can read them if it can reach this same computer and signs in with the owner account.
+- Export/import a JSON backup. Earlier browser assisted items merge by ID on first load; importing older browser drafts and plans preserves the account's current assisted list. Restoring an explicit JSON backup replaces all three saved collections after confirmation.
 - Add selected platform drafts to a dated plan. A separate worker process simulates due items even when the browser is closed, as long as the computer and worker keep running. Jobs have recorded receipts, automatic retries and an activity log.
 - Prepare assisted publishing checklists for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit, and the original four platforms. Each item saves a text snapshot and an optional reminder time. Copy the text, open the platform, post there yourself, then mark the item posted. Plypost does not verify that mark.
 - Due assisted items appear in the app. Browser alerts are optional and are sent only while this page is open after you click **Enable browser alerts** and grant permission.
-- Ask a server-side Nebius Token Factory or NVIDIA Nemotron endpoint to create four tailored drafts. This is optional; the editor and simulation work without an API key.
+- Ask a server-side Nebius Token Factory or NVIDIA Nemotron endpoint to create four tailored drafts. Existing platform edits require confirmation before replacement and can be undone; over-limit AI results are flagged for editing. This is optional; the editor and simulation work without an API key.
 - Run a server-side publishing simulation that validates nonempty text and platform character limits, then returns clearly labeled demo receipts. **No social platform API is called and nothing is posted.**
 - Each platform has its own publishing adapter module under `src/lib/publishers`. The current adapters all use the simulation implementation, making real integrations an explicit future change.
 - Use a responsive workspace with light, dark, or system appearance. The selection stays in this browser and follows system changes when set to **System**.
 - Move between **Create**, **Drafts**, **Plan**, **Assisted**, and **Account**. The Create editor keeps destination choices and optional AI adaptation beside the draft; account changes and simulation history are in Account.
 
-Named drafts and scheduled plans live in `data/plypost.sqlite` by default. The unsaved editor and assisted publishing checklist remain in this browser's local storage. Back up both the database and an exported JSON copy. Importing a backup replaces saved account drafts and plans plus this browser's assisted checklist after confirmation; it does not replace the current editor. Both publishing lists capture text snapshots. Enter dates as `YYYY-MM-DD` and times in 24-hour `HH:mm` format. These are local times, stored as UTC instants; the plan also records the source time zone. Version 2 backups remain importable. Importing an overdue queued plan can cause the worker to simulate it promptly.
+Saved drafts, scheduled plans and assisted publishing items live in `data/plypost.sqlite` by default. The unsaved editor remains in this browser's local storage. Back up the database or export a JSON copy; a JSON export does not include unsaved editor text. Importing a backup replaces all saved account drafts, plans and assisted items after confirmation. Both publishing lists capture text snapshots. Enter dates as `YYYY-MM-DD` and times in 24-hour `HH:mm` format. These are local times, stored as UTC instants; the plan also records the source time zone. Version 2 backups remain importable. Importing an overdue queued plan can cause the worker to simulate it promptly.
 
 Plypost keeps the earlier browser storage keys after the rename, so existing SocialFlow AI drafts and plans remain available. The source repository is [Ir1svanquish/plypost](https://github.com/Ir1svanquish/plypost).
 
@@ -26,7 +26,7 @@ Plypost keeps the earlier browser storage keys after the rename, so existing Soc
 1. Write a draft, then go to **Assisted**. Select a platform and edit the text to copy. For the original four platforms, the field starts with that platform's current draft.
 2. Leave the reminder time blank for an item ready now, or choose a future local time. Add it to the checklist.
 3. When ready, click **Copy text**, then **Open platform**. Paste and review it on the platform, add media where required, and publish from your own account.
-4. Click **I posted it** only after you have posted it yourself. This is a self-reported local status, and **Undo mark** is available.
+4. Click **I posted it** only after you have posted it yourself. This is a self-reported status saved in your local account database, and **Undo mark** is available.
 
 The open links go to the platforms' public websites; some require further navigation to the correct account, Page, community or composer. The text is **not** passed in those links. Instagram, TikTok, YouTube and Pinterest require you to add suitable media on the destination platform. Browser alerts require permission and do not run while the app or browser is closed; the due list remains visible when you return.
 

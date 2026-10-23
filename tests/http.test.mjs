@@ -119,6 +119,31 @@ test("stores account drafts and scheduled snapshots", async () => {
   assert.equal((await loaded.json()).drafts[0].id, draft.id);
 });
 
+test("stores assisted checklist actions behind the owner session", async () => {
+  const stamp = new Date().toISOString();
+  const assisted = { id: randomUUID(), title: "Share an update", destination: "x", text: "Hello X", scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  assert.equal((await post("/api/workspace", { action: "add-assisted", item: assisted }, false)).status, 401);
+  const added = await post("/api/workspace", { action: "add-assisted", item: assisted });
+  assert.equal(added.status, 200);
+  assert.equal((await added.json()).assisted[0].id, assisted.id);
+  const notified = await post("/api/workspace", { action: "mark-assisted-notified", ids: [assisted.id] });
+  assert.ok((await notified.json()).assisted[0].notifiedAt);
+  const posted = await post("/api/workspace", { action: "set-assisted-status", id: assisted.id, status: "posted" });
+  assert.equal((await posted.json()).assisted[0].status, "posted");
+  const migratedItem = { ...assisted, id: randomUUID() };
+  const migration = await post("/api/workspace", { action: "migrate-assisted", items: [assisted, migratedItem] });
+  const migrationData = await migration.json();
+  assert.equal(migrationData.assistedMigration, "imported");
+  assert.equal(migrationData.assisted.length, 2);
+  assert.equal((await (await post("/api/workspace", { action: "migrate-assisted", items: [migratedItem] })).json()).assistedMigration, "skipped");
+  const legacyImport = await post("/api/workspace", { action: "import-legacy", backup: { version: 3, drafts: [], schedule: [], assisted: [] } });
+  assert.equal(legacyImport.status, 200);
+  assert.equal((await legacyImport.json()).assisted.length, 2);
+  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: assisted.id })).status, 200);
+  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: migratedItem.id })).status, 200);
+  assert.deepEqual((await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json()).assisted, []);
+});
+
 test("rejects cross-origin changes and revokes logout session", async () => {
   const attack = await fetch(`${baseUrl}/api/workspace`, { method: "POST", headers: { Origin: "https://evil.example", Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ action: "unknown" }) });
   assert.equal(attack.status, 403);

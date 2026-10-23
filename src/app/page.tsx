@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -14,7 +15,6 @@ import {
   Send,
   UserRound,
   WandSparkles,
-  Workflow,
 } from "lucide-react";
 import { adaptDraft, characterCount, isPlatformId, platformIds, platforms, type PlatformId } from "@/lib/platforms";
 import { DraftLibraryPanel } from "@/components/workspace-panels";
@@ -22,6 +22,7 @@ import { ServerSchedulePanel } from "@/components/server-schedule-panel";
 import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
+import { PlatformPreview } from "@/components/platform-preview";
 import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -82,6 +83,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [selected, setSelected] = useState<PlatformId[]>([...platformIds]);
   const [active, setActive] = useState<PlatformId>("bluesky");
   const [variants, setVariants] = useState<Partial<Record<PlatformId, string>>>({});
+  const [aiUndo, setAiUndo] = useState<Partial<Record<PlatformId, string>> | null>(null);
+  const editorRevision = useRef(0);
   const [provider, setProvider] = useState<Provider>("nvidia");
   const [notice, setNotice] = useState<Notice>(null);
   const [generating, setGenerating] = useState(false);
@@ -90,6 +93,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [drafts, setDrafts] = useState<SavedDraft[]>([]);
   const [schedule, setSchedule] = useState<ScheduledPost[]>([]);
   const [assisted, setAssisted] = useState<AssistedPost[]>([]);
+  const [assistedBusy, setAssistedBusy] = useState(false);
+  const assistedMutation = useRef(false);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const initialWorkspaceLoad = useRef(true);
+  const pendingNotificationIds = useRef(new Set<string>());
   const [assistDestination, setAssistDestination] = useState<AssistedDestinationId>("x");
   const [assistOverride, setAssistOverride] = useState<string | null>(null);
   const [assistTime, setAssistTime] = useState("");
@@ -128,8 +136,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     const data = await response.json();
     setDrafts(data.drafts);
     setSchedule(data.schedule);
+    setAssisted(data.assisted);
     setAuditLog(data.log);
     setWorkerLastSeen(data.workerLastSeen);
+    return data;
   }
 
   async function changeWorkspace(action: string, extra: Record<string, unknown>) {
@@ -141,12 +151,14 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     if (!response.ok) throw new Error(data.error || "Could not update workspace.");
     setDrafts(data.drafts);
     setSchedule(data.schedule);
+    setAssisted(data.assisted);
     setAuditLog(data.log);
     setWorkerLastSeen(data.workerLastSeen);
     return data;
   }
 
   useEffect(() => {
+    let browserAssisted: AssistedPost[] = [];
     try {
       const saved = localStorage.getItem("socialflow-mvp");
       if (saved) {
@@ -186,30 +198,42 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
     try {
       const workspace = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
-      if (workspace.drafts.length || workspace.schedule.length) setLegacyWorkspace(workspace);
-      setAssisted(workspace.assisted);
+      if (workspace.drafts.length || workspace.schedule.length) setLegacyWorkspace({ ...workspace, assisted: [] });
+      browserAssisted = workspace.assisted;
     } catch {
       // Keep the editor usable if the browser holds an invalid workspace backup.
     }
     setHydrated(true);
     if ("Notification" in window) setNotificationPermission(Notification.permission);
-    void refreshWorkspace().catch(() => setNotice({ kind: "error", text: "Could not load server workspace. Check that the server is running." }));
+    void (async () => {
+      try {
+        await refreshWorkspace();
+        if (browserAssisted.length) {
+          await changeWorkspace("migrate-assisted", { items: browserAssisted });
+          const previous = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
+          localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ ...previous, assisted: [] }));
+        }
+        setWorkspaceReady(true);
+      } catch {
+        setNotice({ kind: "error", text: "Could not load or move browser items into your account. Your browser copy was kept." });
+      } finally {
+        initialWorkspaceLoad.current = false;
+      }
+    })();
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
     try {
       localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, provider, activity, title, currentDraftId }));
-      const previous = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
-      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ ...previous, assisted }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, provider, activity, title, currentDraftId, assisted, hydrated]);
+  }, [source, selected, variants, provider, activity, title, currentDraftId, hydrated]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => { void refreshWorkspace().catch(() => {}); }, 15_000);
+    const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -226,21 +250,22 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }, [notice]);
 
   useEffect(() => {
-    if (!hydrated || !now || notificationPermission !== "granted") return;
-    const due = assisted.filter((item) => item.status === "queued" && !item.notifiedAt && Date.parse(item.scheduledFor) <= now);
+    if (!hydrated || !workspaceReady || !now || notificationPermission !== "granted") return;
+    const due = assisted.filter((item) => item.status === "queued" && !item.notifiedAt && !pendingNotificationIds.current.has(item.id) && Date.parse(item.scheduledFor) <= now);
     if (!due.length) return;
     try {
       new Notification("Plypost publishing reminder", {
         body: due.length === 1 ? `${assistedDestinations[due[0].destination].name}: ${due[0].title}` : `${due.length} posts are ready for your review.`,
         tag: "socialflow-assisted-due",
       });
-      const notifiedAt = new Date().toISOString();
-      const dueIds = new Set(due.map((item) => item.id));
-      setAssisted((current) => current.map((item) => dueIds.has(item.id) ? { ...item, notifiedAt } : item));
+      for (const item of due) pendingNotificationIds.current.add(item.id);
+      void changeWorkspace("mark-assisted-notified", { ids: due.map((item) => item.id) }).catch(() => {
+        setNotice({ kind: "error", text: "Reminder was shown, but its status could not be saved. Check the server connection." });
+      });
     } catch {
       setNotificationPermission("unsupported");
     }
-  }, [assisted, hydrated, now, notificationPermission]);
+  }, [assisted, hydrated, workspaceReady, now, notificationPermission]);
 
   const textFor = (id: PlatformId) => variants[id] ?? adaptDraft(source, id);
   const currentText = textFor(active);
@@ -265,6 +290,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Add a source draft before asking AI to adapt it." });
       return;
     }
+    if (platformIds.some((id) => variants[id] !== undefined) && !window.confirm("Replace the current platform drafts with new AI versions? You can undo this change afterward.")) return;
+    const revisionAtStart = editorRevision.current;
+    const previousVariants = { ...variants };
     setGenerating(true);
     setNotice(null);
     try {
@@ -273,10 +301,20 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source, provider }),
       });
-      const data = await response.json();
+      const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: { platform: PlatformId; count: number; limit: number }[] } = await response.json();
       if (!response.ok) throw new Error(data.error || "AI adaptation failed.");
+      if (!data.variants) throw new Error("AI adaptation returned no drafts.");
+      if (editorRevision.current !== revisionAtStart) {
+        setNotice({ kind: "error", text: "The editor changed while AI was working, so your edits were kept. Generate again when ready." });
+        return;
+      }
+      setAiUndo(previousVariants);
       setVariants(data.variants);
-      setNotice({ kind: "success", text: "Four platform drafts are ready to review and edit." });
+      const overLimit = data.overLimit ?? [];
+      setNotice(overLimit.length ? {
+        kind: "error",
+        text: `AI drafts are ready, but ${overLimit.map(({ platform, count, limit }) => `${platforms[platform].name} is ${count}/${limit} characters`).join("; ")}. Shorten them before sharing.`,
+      } : { kind: "success", text: "Four platform drafts are ready to review and edit." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "AI adaptation failed." });
     } finally {
@@ -340,6 +378,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   function newDraft() {
+    editorRevision.current += 1;
+    setAiUndo(null);
     setCurrentDraftId(null);
     setTitle("");
     setSource("");
@@ -351,6 +391,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   function loadDraft(draft: SavedDraft) {
+    editorRevision.current += 1;
+    setAiUndo(null);
     setCurrentDraftId(draft.id);
     setTitle(draft.title);
     setSource(draft.source);
@@ -405,6 +447,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   function loadScheduled(post: ScheduledPost) {
+    editorRevision.current += 1;
+    setAiUndo(null);
     setCurrentDraftId(null);
     setTitle(post.title);
     setSource(post.source);
@@ -454,10 +498,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       if (file.size > 2_000_000) throw new Error("Backup file is too large (2 MB maximum).");
       const workspace = parseWorkspace(JSON.parse(await file.text()));
       if (!workspace) throw new Error("This is not a Plypost workspace backup.");
-      if (!window.confirm("Replace your account's drafts and publishing plan, and this browser's assisted posts, with this backup?")) return;
+      if (!window.confirm("Replace your account's drafts, publishing plan, and assisted posts with this backup?")) return;
       await changeWorkspace("import", { backup: workspace });
-      setAssisted(workspace.assisted);
-      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 3, drafts: [], schedule: [], assisted: workspace.assisted }));
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace()));
       setLegacyWorkspace(null);
       setCurrentDraftId(null);
       setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts.` });
@@ -470,8 +513,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     if (!legacyWorkspace) return;
     if (!window.confirm("Move the browser's saved drafts and plan into your account? This replaces the account library and overdue queued items may be simulated by the worker.")) return;
     try {
-      await changeWorkspace("import", { backup: legacyWorkspace });
-      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 3, drafts: [], schedule: [], assisted }));
+      await changeWorkspace("import-legacy", { backup: legacyWorkspace });
+      const previous = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ ...emptyWorkspace(), assisted: previous.assisted }));
       setLegacyWorkspace(null);
       setNotice({ kind: "success", text: "Browser drafts and plan moved into your account." });
     } catch (error) {
@@ -488,7 +532,24 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  function addAssistedPost() {
+  async function runAssistedAction(action: string, extra: Record<string, unknown>, success: string): Promise<boolean> {
+    if (assistedMutation.current) return false;
+    assistedMutation.current = true;
+    setAssistedBusy(true);
+    try {
+      await changeWorkspace(action, extra);
+      setNotice({ kind: "success", text: success });
+      return true;
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not update assisted publishing." });
+      return false;
+    } finally {
+      assistedMutation.current = false;
+      setAssistedBusy(false);
+    }
+  }
+
+  async function addAssistedPost() {
     const text = assistText.trim();
     const scheduledFor = assistTime ? new Date(assistTime) : new Date();
     if (!text || characterCount(text) > 5000) {
@@ -513,10 +574,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       status: "queued",
       ...(!assistTime ? { notifiedAt: new Date().toISOString() } : {}),
     };
-    setAssisted((current) => [...current, item].sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor)));
-    setNow(Date.now());
-    setAssistTime("");
-    setNotice({ kind: "success", text: `Added ${assistedDestinations[assistDestination].name} to your assisted publishing list. You will publish it yourself.` });
+    if (await runAssistedAction("add-assisted", { item }, `Added ${assistedDestinations[assistDestination].name} to your assisted publishing list. You will publish it yourself.`)) {
+      setNow(Date.now());
+      setAssistTime("");
+    }
   }
 
   async function copyAssisted(text: string, destination: AssistedDestinationId) {
@@ -528,23 +589,17 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  function markAssistedPosted(id: string) {
-    setAssisted((current) => current.map((item) => item.id === id ? { ...item, status: "posted", postedAt: new Date().toISOString() } : item));
-    setNotice({ kind: "success", text: "Marked as posted by you. Plypost did not verify the platform post." });
+  async function markAssistedPosted(id: string) {
+    await runAssistedAction("set-assisted-status", { id, status: "posted" }, "Marked as posted by you. Plypost did not verify the platform post.");
   }
 
-  function undoAssistedPosted(id: string) {
-    setAssisted((current) => current.map((item) => {
-      if (item.id !== id) return item;
-      const restored: AssistedPost = { ...item, status: "queued" };
-      delete restored.postedAt;
-      return restored;
-    }));
+  async function undoAssistedPosted(id: string) {
+    await runAssistedAction("set-assisted-status", { id, status: "queued" }, "Post returned to your assisted publishing checklist.");
   }
 
-  function removeAssisted(id: string) {
-    if (!window.confirm("Remove this assisted post from this browser?")) return;
-    setAssisted((current) => current.filter((item) => item.id !== id));
+  async function removeAssisted(id: string) {
+    if (!window.confirm("Remove this assisted post from your account?")) return;
+    await runAssistedAction("delete-assisted", { id }, "Assisted post removed from your account.");
   }
 
   async function enableNotifications() {
@@ -558,7 +613,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     <div className="app-shell min-h-screen lg:flex">
       <aside className="app-sidebar sidebar-glow hidden w-[232px] shrink-0 flex-col border-r px-4 py-7 lg:sticky lg:top-0 lg:flex lg:h-screen">
         <a href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} className="flex items-center gap-3 px-2" aria-label="Plypost home">
-          <span className="gradient-button flex h-10 w-10 items-center justify-center rounded-[11px] text-white"><Workflow size={21} strokeWidth={2.3} /></span>
+          <Image src="/plypost-mark.svg" alt="" width={40} height={40} className="h-10 w-10 shrink-0" />
           <span className="text-[21px] font-bold tracking-[-0.055em]">Plypost<span className="sidebar-accent">.</span></span>
         </a>
         <div className="sidebar-muted mt-12 px-3 text-[11px] font-bold uppercase tracking-[0.17em]">Workspace</div>
@@ -576,7 +631,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
       <div className="min-w-0 flex-1">
         <header className="app-header sticky top-0 z-30 flex min-h-[66px] items-center justify-between gap-3 border-b px-5 sm:px-8 lg:px-10">
-          <div className="flex items-center gap-2.5 lg:hidden"><span className="gradient-button flex h-8 w-8 items-center justify-center rounded-[9px] text-white"><Workflow size={17} /></span><span className="text-[18px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
+          <div className="flex items-center gap-2.5 lg:hidden"><Image src="/plypost-mark.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" /><span className="text-[18px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
           <div className="hidden items-center gap-2 text-[13px] text-[var(--text-muted)] lg:flex"><span>Workspace</span><span>/</span><span className="font-semibold text-[var(--text)]">{viewLabels[view]}</span></div>
           <div className="ml-auto flex items-center gap-3"><ThemeSwitcher /><button type="button" onClick={() => openView("account")} aria-label="Open account" className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] text-[var(--text-secondary)]"><UserRound size={17} /></button></div>
         </header>
@@ -598,7 +653,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             <p className="mt-1 text-[14px] text-[var(--text-muted)]">Write once, choose channels, then review each version.</p>
           </div>
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(370px,.95fr)]">
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
                 <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
                   <div><h2 id="draft-heading" className="text-[17px] font-bold tracking-[-0.025em]">Draft editor</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Your message and its destinations, in one place.</p></div>
@@ -608,32 +663,33 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   <label htmlFor="draft-name" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Draft name <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
                   <input id="draft-name" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Give this idea a name" className="mb-5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" />
                   <label htmlFor="source-draft" className="mb-2 block text-[13px] font-bold text-[var(--text)]">Your message</label>
-                  <textarea id="source-draft" value={source} onChange={(event) => { setSource(event.target.value); setNotice(null); }} placeholder="What's on your mind? Add a launch update, insight, or idea to share..." maxLength={3000} className="min-h-[194px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[15px] leading-[1.75] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                  <textarea id="source-draft" value={source} onChange={(event) => { editorRevision.current += 1; setSource(event.target.value); setNotice(null); }} placeholder="What's on your mind? Add a launch update, insight, or idea to share..." maxLength={3000} className="min-h-[194px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[15px] leading-[1.75] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
                   <div className="mt-2 flex items-center justify-between text-[12px] text-[var(--text-soft)]"><span>Fine-tune each version in the preview.</span><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
                   <div className="mt-6 border-t border-[var(--line)] pt-5">
                     <div className="mb-3 flex items-center justify-between"><h3 className="text-[13px] font-bold text-[var(--text)]">Destinations</h3><span className="text-[12px] text-[var(--text-muted)]">{selected.length} selected</span></div>
-                    <div role="group" aria-label="Destinations" className="flex flex-wrap gap-2">
+                    <div role="group" aria-label="Destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                       {platformIds.map((id) => {
                         const isSelected = selected.includes(id);
-                        return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[12px] font-semibold transition ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" />{platforms[id].name}<span className={`flex h-4 w-4 items-center justify-center rounded border ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
+                        return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition sm:gap-2 sm:px-3 ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" /><span className="min-w-0 truncate">{platforms[id].name}</span><span className={`ml-auto hidden h-4 w-4 shrink-0 items-center justify-center rounded border sm:flex ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
                       })}
                     </div>
                   </div>
                   <details className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
                     <summary className="cursor-pointer text-[13px] font-bold text-[var(--text-secondary)]">Adapt with AI <span className="ml-1 text-[11px] font-normal text-[var(--text-soft)]">Optional · Nemotron</span></summary>
                     <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
+                    {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   </details>
                   <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={saveDraft} disabled={!source.trim()} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white"><FilePenLine size={15} />{currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
                 </div>
               </section>
             </div>
 
-            <div className="space-y-6 xl:sticky xl:top-6">
+            <div className="min-w-0 space-y-6 xl:sticky xl:top-6">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="preview-heading">
-                <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="preview-heading" className="text-[17px] font-bold tracking-[-0.025em]">Live preview</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">See exactly what each draft says.</p></div><span className="flex items-center gap-1.5 rounded-full bg-[var(--positive-soft)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--positive)]"><span className="h-1.5 w-1.5 rounded-full bg-[var(--positive)]" /> LIVE</span></div>
+                <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="preview-heading" className="text-[17px] font-bold tracking-[-0.025em]">Platform preview</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your text before sharing.</p></div><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--accent-text)]">EXAMPLE</span></div>
                 <div className="mobile-x-scroll flex gap-1 border-b border-[var(--line)] px-4 sm:px-6" role="tablist" aria-label="Platform previews">{platformIds.map((id) => <button key={id} type="button" role="tab" aria-selected={active === id} onClick={() => setActive(id)} className={`relative flex shrink-0 items-center gap-1.5 px-3 py-4 text-[12px] font-semibold transition sm:text-[13px] ${active === id ? "text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}><span className={`${selected.includes(id) ? "" : "opacity-40"}`}>{platforms[id].name}</span>{active === id && <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--accent)]" />}</button>)}</div>
-                <div className="dot-grid bg-[var(--surface-muted)] p-5 sm:p-7"><div className="mx-auto max-w-[500px] overflow-hidden rounded-[18px] border border-[var(--line)] bg-[var(--surface)] soft-shadow"><div className="flex items-center gap-3 px-5 pt-5"><PlatformMark id={active} /><div className="min-w-0 flex-1"><div className="text-[14px] font-bold text-[var(--text)]">Your brand <span className="ml-1 text-[11px] text-[var(--text-muted)]">●</span></div><div className="mt-0.5 truncate text-[12px] text-[var(--text-muted)]">{platforms[active].handle} · now</div></div><span className="text-[17px] tracking-[2px] text-[var(--text-soft)]">···</span></div><div className="post-body min-h-[142px] px-5 pb-4 pt-4 text-[14px] leading-[1.75] text-[var(--text)]">{currentText || <span className="text-[var(--text-soft)]">Your {platforms[active].name} preview will appear here.</span>}</div><div className="flex items-center gap-5 border-t border-[var(--line)] px-5 py-3.5 text-[12px] text-[var(--text-soft)]"><span>♡ &nbsp;Like</span><span>◌ &nbsp;Reply</span><span>↗ &nbsp;Share</span></div></div><div className="mt-4 text-center text-[12px] text-[var(--text-soft)]">Preview only · No account connected</div></div>
-                <div className="px-6 pb-6 pt-5 sm:px-7 sm:pb-7"><div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">Edit {platforms[active].name} draft</label><button type="button" onClick={() => setVariants((current) => { const next = { ...current }; delete next[active]; return next; })} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div><textarea id="platform-draft" value={currentText} onChange={(event) => setVariants((current) => ({ ...current, [active]: event.target.value }))} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" /><div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${currentCount > platforms[active].limit ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{currentCount > platforms[active].limit ? "Over platform limit" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${currentCount > platforms[active].limit ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div><button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button></div>
+                <div className="dot-grid bg-[var(--surface-muted)] p-5 sm:p-7"><PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} /></div>
+                <div className="px-6 pb-6 pt-5 sm:px-7 sm:pb-7"><div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">Edit {platforms[active].name} draft</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div><textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" /><div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${currentCount > platforms[active].limit ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{currentCount > platforms[active].limit ? "Over platform limit" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${currentCount > platforms[active].limit ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div><button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button></div>
               </section>
 
               <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your selected drafts first.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? selected.map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No destinations selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={simulatePublish} disabled={!canPublish} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> {publishing ? "Simulating..." : `Simulate publish to ${selected.length || 0} platform${selected.length === 1 ? "" : "s"}`} <ArrowRight size={15} className="ml-1" /></button><p className="mt-3 text-center text-[12px] text-[var(--text-soft)]">Demo action only. No post leaves this app.</p></section>
@@ -656,7 +712,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           </div>}
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} />
+            <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} />}
         </main>
@@ -701,7 +757,7 @@ export default function Home() {
 
   if (session?.email) return <WorkspaceApp email={session.email} onLogout={signOut} />;
   return <div className="app-shell flex min-h-screen items-center justify-center px-5 py-10"><div className="panel-border soft-shadow w-full max-w-md rounded-[22px] bg-[var(--surface)] p-8">
-    <div className="mb-7 flex items-center gap-3"><span className="gradient-button flex h-11 w-11 items-center justify-center rounded-xl text-white"><Workflow size={22} /></span><span className="text-[25px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
+    <div className="mb-7 flex items-center gap-3"><Image src="/plypost-mark.svg" alt="" width={44} height={44} className="h-11 w-11 shrink-0" /><span className="text-[25px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
     <h1 className="text-[22px] font-bold text-[var(--text)]">Your workspace, ready when you are.</h1>
     <p className="mt-2 text-[13px] leading-5 text-[var(--text-muted)]">Sign in to save drafts and run scheduled simulations on this computer.</p>
     {!session?.configured && session !== null ? <p role="alert" className="mt-5 rounded-xl bg-[var(--warning-soft)] p-3 text-[13px] text-[var(--warning)]">Owner sign-in is not configured. Follow the setup steps in README.md.</p> : <form onSubmit={signIn} className="mt-7 space-y-4">
