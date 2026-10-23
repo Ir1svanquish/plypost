@@ -8,7 +8,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { assertOwnedMedia, createMedia, deleteMedia, getMedia, listMedia, MAX_IMAGE_BYTES, MAX_OWNER_MEDIA_BYTES } from "../src/lib/server/media.ts";
-import { importLibrary, saveDraft } from "../src/lib/server/workspace.ts";
+import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, importLibrary, listWorkspace, migrateAssisted, saveDraft } from "../src/lib/server/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-media-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "media.sqlite");
@@ -93,4 +93,53 @@ test("saved drafts and imports reject image IDs that the account does not own", 
   assert.throws(() => importLibrary(other, { version: 3, drafts: [{ ...draft, id: randomUUID() }], schedule: [], assisted: [] }), /missing from your media library/);
   assert.equal(database().prepare("SELECT COUNT(*) AS count FROM drafts WHERE user_id=?").get(other).count, before);
   assert.throws(() => deleteMedia(owner, image.id), /Remove this image from saved drafts/);
+});
+
+test("planned and assisted snapshots keep images after their source draft changes", async () => {
+  const bytes = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#19a4b5" } }).png().toBuffer();
+  const image = (await createMedia(owner, { name: "handoff.png", type: "image/png", bytes })).media;
+  const stamp = new Date().toISOString();
+  const draft = { id: randomUUID(), title: "Original", source: "Text", selected: ["bluesky"], variants: {}, mediaIds: [image.id], createdAt: stamp, updatedAt: stamp };
+  saveDraft(owner, draft);
+  const plan = { id: randomUUID(), title: "Plan", source: "Text", posts: { bluesky: "Text" }, mediaIds: [image.id], scheduledFor: new Date(Date.now() + 60_000).toISOString(), createdAt: stamp, status: "queued" };
+  const assisted = { id: randomUUID(), title: "Handoff", destination: "instagram", text: "Caption", mediaIds: [image.id], scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  assert.deepEqual(addSchedule(owner, plan, "UTC").mediaIds, [image.id]);
+  assert.deepEqual(addAssisted(owner, assisted).mediaIds, [image.id]);
+  assert.throws(() => addSchedule(other, { ...plan, id: randomUUID() }, "UTC"), /missing from your media library/);
+  assert.throws(() => addAssisted(other, { ...assisted, id: randomUUID() }), /missing from your media library/);
+  assert.equal(listWorkspace(other).schedule.some((item) => item.mediaIds?.includes(image.id)), false);
+  assert.equal(listWorkspace(other).assisted.some((item) => item.mediaIds?.includes(image.id)), false);
+
+  saveDraft(owner, { ...draft, mediaIds: [], source: "Edited source" });
+  deleteDraft(owner, draft.id);
+  assert.deepEqual(listWorkspace(owner).schedule.find((item) => item.id === plan.id)?.mediaIds, [image.id]);
+  assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === assisted.id)?.mediaIds, [image.id]);
+  assert.throws(() => deleteMedia(owner, image.id), /planned posts/);
+  assert.equal(deleteSchedule(owner, plan.id), true);
+  assert.throws(() => deleteMedia(owner, image.id), /assisted items/);
+  assert.equal(deleteAssisted(owner, assisted.id), true);
+  assert.equal(deleteMedia(owner, image.id), true);
+});
+
+test("image references in imported and migrated handoffs are owner-checked atomically", async () => {
+  const bytes = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#9abc34" } }).png().toBuffer();
+  const image = (await createMedia(owner, { name: "import.png", type: "image/png", bytes })).media;
+  const stamp = new Date().toISOString();
+  const plan = { id: randomUUID(), title: "Imported plan", source: "Text", posts: { bluesky: "Text" }, mediaIds: [image.id], scheduledFor: new Date(Date.now() + 60_000).toISOString(), createdAt: stamp, status: "queued" };
+  const assisted = { id: randomUUID(), title: "Imported handoff", destination: "x", text: "Text", mediaIds: [image.id], scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  const backup = { version: 3, drafts: [], schedule: [plan], assisted: [assisted] };
+  importLibrary(owner, backup);
+  assert.deepEqual(listWorkspace(owner).schedule.find((item) => item.id === plan.id)?.mediaIds, [image.id]);
+  assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === assisted.id)?.mediaIds, [image.id]);
+  const missing = randomUUID();
+  assert.throws(() => importLibrary(owner, { ...backup, assisted: [{ ...assisted, mediaIds: [missing] }] }), /missing from your media library/);
+  assert.deepEqual(listWorkspace(owner).schedule.find((item) => item.id === plan.id)?.mediaIds, [image.id]);
+  assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === assisted.id)?.mediaIds, [image.id]);
+
+  const otherBefore = listWorkspace(other);
+  assert.throws(() => importLibrary(other, backup), /missing from your media library/);
+  assert.deepEqual(listWorkspace(other).schedule, otherBefore.schedule);
+  assert.deepEqual(listWorkspace(other).assisted, otherBefore.assisted);
+  assert.throws(() => migrateAssisted(other, [{ ...assisted, id: randomUUID() }]), /missing from your media library/);
+  assert.deepEqual(listWorkspace(other).assisted, otherBefore.assisted);
 });

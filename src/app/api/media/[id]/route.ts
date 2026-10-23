@@ -19,8 +19,14 @@ export async function GET(request: Request, context: Context) {
   const { id } = await context.params;
   const found = getMedia(user, id);
   if (!found) return NextResponse.json({ error: "Image not found." }, { status: 404, headers: noStore });
+  const download = new URL(request.url).searchParams.has("download");
   return new Response(new Uint8Array(found.bytes), {
-    headers: { ...noStore, "Content-Type": found.media.mimeType, "Content-Length": String(found.bytes.length) },
+    headers: {
+      ...noStore,
+      "Content-Type": found.media.mimeType,
+      "Content-Length": String(found.bytes.length),
+      ...(download ? { "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(found.media.name)}` } : {}),
+    },
   });
 }
 

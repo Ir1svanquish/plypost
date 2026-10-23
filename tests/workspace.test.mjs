@@ -39,6 +39,18 @@ test("assisted posts round trip and invalid destinations are skipped", () => {
   assert.equal(assistedState({ ...post, status: "posted" }, dueAt + 1), "posted");
 });
 
+test("plan and assisted image snapshots round trip while malformed references are rejected", () => {
+  const imageId = "5be12631-17ee-4ec5-98f3-9756a0b3f57b";
+  const plan = { id: "s-images", title: "Illustrated", source: "Text", posts: { bluesky: "Text" }, mediaIds: [imageId], scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  const assisted = { id: "a-images", title: "Illustrated", destination: "instagram", text: "Text", mediaIds: [imageId], scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  const backup = { version: 3, drafts: [], schedule: [plan], assisted: [assisted] };
+  assert.deepEqual(parseWorkspace(backup), backup);
+  assert.deepEqual(parseWorkspace({ ...backup, schedule: [{ ...plan, mediaIds: [imageId, imageId] }] })?.schedule, []);
+  assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...assisted, mediaIds: ["not-a-uuid"] }] })?.assisted, []);
+  assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...assisted, mediaIds: ["-".repeat(36)] }] })?.assisted, []);
+  assert.deepEqual(parseWorkspace({ ...backup, schedule: [{ ...plan, mediaIds: Array.from({ length: 5 }, (_, index) => `${index}be12631-17ee-4ec5-98f3-9756a0b3f57b`) }] })?.schedule, []);
+});
+
 test("plan items become due only at their local instant and remain simulated", () => {
   const post = { id: "s1", title: "Post", source: "Post", posts: { bluesky: "Post" }, scheduledFor: stamp, createdAt: stamp, status: "queued" };
   const dueAt = Date.parse(stamp);

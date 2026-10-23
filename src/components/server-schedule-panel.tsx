@@ -5,6 +5,7 @@ import { CalendarClock, ChevronLeft, ChevronRight, RotateCcw, Trash2 } from "luc
 import { localDateTimeValue, scheduleState, type ScheduledPost } from "@/lib/workspace";
 import { platformIds, platforms } from "@/lib/platforms";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
+import { MediaHandoff } from "@/components/media-handoff";
 
 type Props = {
   schedule: ScheduledPost[]; value: string; now: number; canSchedule: boolean;
@@ -99,7 +100,7 @@ export function ServerSchedulePanel({ schedule, value, now, canSchedule, running
   }
   return <section id="schedule" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="schedule-heading">
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
-      <div><h2 id="schedule-heading" className="text-[17px] font-bold">Publishing plan</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Scheduled snapshots run through the simulation worker.</p></div>
+      <div><h2 id="schedule-heading" className="text-[17px] font-bold">Publishing plan</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">The worker simulates text. Saved images stay ready for manual handoff.</p></div>
       <span className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-muted)]">{queuedCount} queued</span>
     </div>
     <div className="p-6 sm:p-7">
@@ -168,6 +169,7 @@ export function ServerSchedulePanel({ schedule, value, now, canSchedule, running
               <button type="button" disabled={state === "running" || saving} aria-label={`Remove ${post.title} from plan`} onClick={() => onRemove(post.id)} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-40"><Trash2 size={14} /></button>
             </div>
           </div>
+          <MediaHandoff mediaIds={post.mediaIds} />
           {editingId === post.id && <form onSubmit={(event) => void saveReschedule(event, post)} className="mt-4 rounded-xl border border-[var(--accent-border)] bg-[var(--surface-muted)] p-4">
             <LocalDateTimeField id={`move-${post.id}`} label="New simulation time" value={editValue} minTimestamp={now + 10_000} onChange={(next) => { setEditValue(next); setEditError(""); }} />
             {!!post.receipts?.length && <p className="mt-2 text-[12px] leading-5 text-[var(--warning)]">Existing simulated receipts stay recorded; only remaining destinations are queued for the new time.</p>}

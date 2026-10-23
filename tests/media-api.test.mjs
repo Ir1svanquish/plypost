@@ -50,6 +50,10 @@ test("media routes require the owner session and same-origin uploads", async () 
   assert.equal(image.status, 200);
   assert.equal(image.headers.get("content-type"), "image/png");
   assert.equal((await sharp(new Uint8Array(await image.arrayBuffer())).metadata()).width, 3);
+  const download = await read(new globalThis.Request(`${base}/${media.id}?download=1`, { headers: { cookie } }), routeContext(media.id));
+  assert.equal(download.status, 200);
+  assert.match(download.headers.get("content-disposition"), /attachment; filename\*=UTF-8''example\.png/);
+  assert.match(download.headers.get("cache-control"), /no-store/);
 
   assert.equal((await remove(new globalThis.Request(`${base}/${media.id}`, { method: "DELETE", headers: { cookie, origin: "https://evil.example" } }), routeContext(media.id))).status, 403);
   const draftId = randomUUID();

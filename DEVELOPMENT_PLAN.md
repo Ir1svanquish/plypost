@@ -18,10 +18,14 @@
 
 竞品的官方资料显示，[Buffer](https://buffer.com/publish)、[Publer](https://publer.com/features/curate-posts) 和 [Typefully](https://typefully.com/) 都已提供按平台定制的编辑与排程；[Later](https://later.com/social-media-scheduler/) 和 [Sprout Social](https://sproutsocial.com/features/social-media-calendar/) 突出日历、素材和协作；[Metricool](https://help.metricool.com/how-to-manually-publish-via-notification-5ds3m) 对需原生操作的内容采用提醒和人工完成；[Postiz](https://postiz.com/about) 已提供开源自托管选择。Plypost 目前不具备同等覆盖，下一步优先把个人用户的编辑保护、状态透明和低配置辅助发布做扎实。
 
+AI 文案已是常见能力：[Buffer](https://buffer.com/ai-assistant) 支持按平台改写和语气、长度调整；[Metricool](https://metricool.com/ai-social-media-post-generator/) 在计划器中生成并润色文案；[Typefully](https://support.typefully.com/en/articles/14756434-writing-assistant) 的编辑助手可参考写作样本；[Later](https://later.com/social-media-ai-tools/) 提供文案、灵感和发布时间建议；[Hootsuite](https://www.hootsuite.com/platform/ai) 还结合社交聆听。Plypost 不应把一个 AI 按钮当作竞争优势，应优先验证按平台可编辑版本、手改保护、图片交接和发布状态能否明显减少操作。
+
+规模口径也需分开：[Buffer 2025 年 12 月披露](https://buffer.com/shareholders/december-2025) 198,537 月活用户和 69,760 付费客户；[Hootsuite 帮助页](https://help.hootsuite.com/s/article/what-does-Hootsuite-do) 称超过 20 万付费客户；[Metricool 官网](https://metricool.com/about-us/) 称超过 400 万使用者，但没有说明月活口径。[Similarweb 对 buffer.com 的估算](https://www.similarweb.com/website/buffer.com/) 为最近三个月约 450 万次网站访问，包含博客等页面，不能解释为产品用户数。这些数据说明市场存在，但不代表 Plypost 已有同等产品能力或客流。
+
 | 优先级 | 下一阶段交付 | 验收方式 |
 | --- | --- | --- |
 | P0 | 透明 20° P 品牌、平台可辨的示意预览、AI 覆盖保护、辅助发布服务端保存 | 明暗主题和手机布局已检查；AI 覆盖可撤销；服务端保存与旧数据迁移通过自动测试。本机验收通过 |
-| P1 | 计划日历、直接改期和筛选；各平台内容检查；素材附件与备份 | 日历、改期和内容检查已实现；图片可附到已保存草稿；图片随备份迁移、排程及人工交接仍待完成 |
+| P1 | 计划日历、直接改期和筛选；各平台内容检查；素材附件与备份 | 日历、改期和内容检查已实现；图片随草稿、计划和辅助清单保存；完整备份可带图片迁移，需持续做真实使用验收 |
 | P2 | 一个官方平台的账号连接与真实发布闭环 | 测试账号授权、撤销、发布、失败重试和回执核对均通过 |
 | P3 | 按真实使用反馈决定分析、审批、团队和更多官方连接 | 有明确用户场景与验收数据后再实施 |
 
@@ -71,7 +75,11 @@
 
 编辑和辅助发布对原有四个平台做文本预检。Bluesky 同时检查 300 个字素和 3,000 个 UTF-8 字节；其他提示区分硬性长度错误与需要在目标平台核对的标签、链接和服务器差异。模拟发布和创建计划在服务端再次检查，不依赖页面按钮状态。
 
-草稿现可选择最多四张私有图片。服务端只接受 JPEG、PNG、WebP，验证实际图片内容和像素规模，重新编码移除图片元数据，并限制单张和账号容量。图片只保存在所有者的本机数据库中，删除仍被已保存草稿引用的图片会被拒绝。排程和辅助发布目前仍只保存文案快照；用户在目标平台发帖时需自行添加图片。JSON 备份不包含图片像素，跨安装恢复带图片的草稿会被拒绝；下一步要做图片完整备份及恢复，再将图片快照接到排程与人工交接。
+草稿现可选择最多四张私有图片。服务端只接受 JPEG、PNG、WebP，验证实际图片内容和像素规模，重新编码移除图片元数据，并限制单张和账号容量。图片只保存在所有者的本机数据库中；计划项和辅助发布清单保留创建时的图片顺序，供用户预览、下载后在目标平台自行上传。仍被草稿、计划或辅助清单引用的图片不能删除。模拟任务只处理文字，绝不把图片发送到社交平台。
+
+完整便携备份包含已保存的文字、计划、辅助清单和图片，不包含登录会话或密码配置；恢复时要先验证文件和图片，再一次性替换该账号的数据，失败则保留原数据。旧版纯文字 JSON 仍可导入，但不带图片像素，不能作为跨安装迁移图片的备份。下一步要在不同浏览器、手机布局及全新数据库上做持续的恢复与交接验收，并根据真实用户反馈改善流程。
+
+竞品的具体交接流程可作验收参照：[Buffer 的访客手动分享](https://support.buffer.com/articles/trying-buffer-without-an-account-guest-mode-OqAelsSVYu)会提供复制文案及下载图片；[Metricool 的通知发布](https://help.metricool.com/how-to-manually-publish-via-notification-5ds3m)把媒体和文案交给用户完成平台操作；[Typefully 的 Planned 状态](https://support.typefully.com/en/articles/16213506-planned-posts)明确区分计划与自动执行。Plypost 是本机 Web 工作台，验收以可下载的图片和清楚的模拟状态为准，不承诺浏览器关闭后的手机推送。
 
 ## 真实平台接入顺序
 

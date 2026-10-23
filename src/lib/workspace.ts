@@ -20,6 +20,7 @@ export type ScheduledPost = {
   title: string;
   source: string;
   posts: Partial<Record<PlatformId, string>>;
+  mediaIds?: string[];
   scheduledFor: string;
   createdAt: string;
   status: "queued" | "running" | "simulated" | "failed";
@@ -35,6 +36,7 @@ export type AssistedPost = {
   title: string;
   destination: AssistedDestinationId;
   text: string;
+  mediaIds?: string[];
   scheduledFor: string;
   createdAt: string;
   status: "queued" | "posted";
@@ -60,6 +62,11 @@ const validDate = (value: unknown): value is string =>
 const validUtcInstant = (value: unknown): value is string =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
   Number.isFinite(new Date(value).getTime()) && new Date(value).toISOString() === value;
+
+function validMediaIds(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= 4 && new Set(value).size === value.length &&
+    value.every((id) => typeof id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id));
+}
 
 function selectedPlatforms(value: unknown): PlatformId[] {
   if (!Array.isArray(value)) return [];
@@ -100,9 +107,7 @@ function parseDraft(value: unknown): SavedDraft | null {
       typeof value.title !== "string" || typeof value.source !== "string" ||
       characterCount(value.title) > 120 || characterCount(value.source) > 3000 ||
       !validDate(value.createdAt) || !validDate(value.updatedAt)) return null;
-  if (value.mediaIds !== undefined && (!Array.isArray(value.mediaIds) || value.mediaIds.length > 4 ||
-      new Set(value.mediaIds).size !== value.mediaIds.length ||
-      value.mediaIds.some((id) => typeof id !== "string" || !/^[a-f0-9-]{36}$/i.test(id)))) return null;
+  if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   return {
     id: value.id,
     title: value.title,
@@ -122,6 +127,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
     !validUtcInstant(value.scheduledFor) || !validDate(value.createdAt) ||
       (value.status !== "queued" && value.status !== "running" && value.status !== "simulated" && value.status !== "failed") ||
       !isRecord(value.posts)) return null;
+  if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   const posts: Partial<Record<PlatformId, string>> = {};
   for (const id of Object.keys(value.posts)) {
     if (!isPlatformId(id)) return null;
@@ -138,6 +144,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
     title: value.title,
     source: value.source,
     posts,
+    ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     scheduledFor: value.scheduledFor,
     createdAt: value.createdAt,
     status: value.status,
@@ -156,11 +163,13 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
       typeof value.text !== "string" || !value.text.trim() || characterCount(value.text) > 5000 ||
       !validUtcInstant(value.scheduledFor) || !validDate(value.createdAt) ||
       (value.status !== "queued" && value.status !== "posted")) return null;
+  if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   return {
     id: value.id,
     title: value.title,
     destination: value.destination,
     text: value.text,
+    ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     scheduledFor: value.scheduledFor,
     createdAt: value.createdAt,
     status: value.status,

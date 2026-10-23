@@ -92,6 +92,7 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
     throw new Error("Fix platform draft limits before adding to assisted publishing.");
   }
   transaction((db) => {
+    assertOwnedMedia(userId, item.mediaIds ?? []);
     if (db.prepare("SELECT id FROM assisted WHERE id=?").get(item.id)) throw new Error("Assisted item already exists.");
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
     if (count.count >= 100) throw new Error("Assisted publishing list is full.");
@@ -150,6 +151,7 @@ export function migrateAssisted(userId: string, raw: unknown): "imported" | "ski
     throw new Error("Invalid assisted migration.");
   }
   return transaction((db) => {
+    for (const item of items as AssistedPost[]) assertOwnedMedia(userId, item.mediaIds ?? []);
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
     const missing = (items as AssistedPost[]).filter((item) => {
       const existing = db.prepare("SELECT user_id FROM assisted WHERE id=?").get(item.id) as { user_id: string } | undefined;
@@ -203,6 +205,7 @@ export function addSchedule(userId: string, value: unknown, timezone: unknown): 
   }
   const now = new Date().toISOString();
   transaction((db) => {
+    assertOwnedMedia(userId, post.mediaIds ?? []);
     const count = db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE user_id=?").get(userId) as { count: number };
     if (count.count >= 100) throw new Error("Publishing plan is full.");
     db.prepare("INSERT INTO jobs(id,user_id,payload,scheduled_for,timezone,status,next_attempt_at) VALUES (?,?,?,?,?,'queued',?)")
@@ -270,12 +273,14 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
         .run(draft.id, userId, JSON.stringify(draft), draft.updatedAt);
     }
     for (const post of workspace.schedule) {
+      assertOwnedMedia(userId, post.mediaIds ?? []);
       const status = post.status === "simulated" ? "simulated" : "queued";
       db.prepare("INSERT INTO jobs(id,user_id,payload,scheduled_for,timezone,status,next_attempt_at,completed_at,receipts) VALUES (?,?,?,?,?,?,?,?,?)")
         .run(post.id, userId, JSON.stringify(post), post.scheduledFor, "UTC", status, post.scheduledFor, post.simulatedAt ?? null, JSON.stringify(post.receipts ?? []));
     }
     if (mode === "replace-all") {
       for (const item of workspace.assisted) {
+        assertOwnedMedia(userId, item.mediaIds ?? []);
         db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
           .run(item.id, userId, JSON.stringify(item), item.scheduledFor, new Date().toISOString());
       }

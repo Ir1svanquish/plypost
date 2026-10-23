@@ -6,6 +6,7 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const MAX_IMAGE_PIXELS = 20_000_000;
 export const MAX_OWNER_MEDIA_BYTES = 64 * 1024 * 1024;
 export const MAX_OWNER_MEDIA_COUNT = 200;
+const MEDIA_ID_PATTERN = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 
 type SupportedImageFormat = "jpeg" | "png" | "webp";
 type MediaRow = {
@@ -86,7 +87,7 @@ export function listMedia(userId: string): MediaItem[] {
 }
 
 export function getMedia(userId: string, id: string): { media: MediaItem; bytes: Buffer } | null {
-  if (!/^[a-f0-9-]{36}$/i.test(id)) return null;
+  if (!MEDIA_ID_PATTERN.test(id)) return null;
   const row = mediaDatabase().prepare("SELECT id,original_name,mime_type,byte_size,width,height,created_at,body FROM media WHERE id=? AND user_id=?")
     .get(id, userId) as (MediaRow & { body: Uint8Array }) | undefined;
   return row ? { media: itemFromRow(row), bytes: Buffer.from(row.body) } : null;
@@ -94,7 +95,7 @@ export function getMedia(userId: string, id: string): { media: MediaItem; bytes:
 
 export function assertOwnedMedia(userId: string, mediaIds: unknown): asserts mediaIds is string[] {
   if (!Array.isArray(mediaIds) || mediaIds.length > 4 || new Set(mediaIds).size !== mediaIds.length ||
-      mediaIds.some((id) => typeof id !== "string" || !/^[a-f0-9-]{36}$/i.test(id))) {
+      mediaIds.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id))) {
     throw new MediaError("Choose up to four distinct images from your media library.");
   }
   const db = mediaDatabase();
@@ -106,15 +107,19 @@ export function assertOwnedMedia(userId: string, mediaIds: unknown): asserts med
 }
 
 export function deleteMedia(userId: string, id: string): boolean {
-  if (!/^[a-f0-9-]{36}$/i.test(id)) return false;
+  if (!MEDIA_ID_PATTERN.test(id)) return false;
   mediaDatabase();
   const result = transaction((db) => {
     if (!db.prepare("SELECT id FROM media WHERE id=? AND user_id=?").get(id, userId)) return { changes: 0 };
-    const drafts = db.prepare("SELECT payload FROM drafts WHERE user_id=?").all(userId) as { payload: string }[];
-    if (drafts.some((row) => {
-      const draft = JSON.parse(row.payload) as { mediaIds?: unknown };
-      return Array.isArray(draft.mediaIds) && draft.mediaIds.includes(id);
-    })) throw new MediaError("Remove this image from saved drafts before deleting it.", 409);
+    for (const [collection, label] of [["drafts", "saved drafts"], ["jobs", "planned posts"], ["assisted", "assisted items"]] as const) {
+      const rows = db.prepare(`SELECT payload FROM ${collection} WHERE user_id=?`).all(userId) as { payload: string }[];
+      if (rows.some((row) => {
+        const item = JSON.parse(row.payload) as { mediaIds?: unknown };
+        return Array.isArray(item.mediaIds) && item.mediaIds.includes(id);
+      })) {
+        throw new MediaError(`Remove this image from ${label} before deleting it.`, 409);
+      }
+    }
     const deleted = db.prepare("DELETE FROM media WHERE id=? AND user_id=?").run(id, userId);
     if (deleted.changes) audit(userId, "media.deleted", id);
     return deleted;

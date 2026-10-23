@@ -6,6 +6,7 @@ import { isPlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
 import { assistedState, type AssistedPost } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
+import { MediaHandoff } from "@/components/media-handoff";
 
 type Props = {
   items: AssistedPost[];
@@ -14,6 +15,8 @@ type Props = {
   time: string;
   now: number;
   busy: boolean;
+  mediaBusy: boolean;
+  imageCount: number;
   notificationPermission: NotificationPermission | "unsupported";
   onDestinationChange: (destination: AssistedDestinationId) => void;
   onTextChange: (text: string) => void;
@@ -24,9 +27,10 @@ type Props = {
   onUndo: (id: string) => void;
   onRemove: (id: string) => void;
   onEnableNotifications: () => void;
+  onEditImages: () => void;
 };
 
-export function AssistedPublishPanel({ items, destination, text, time, now, busy, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUndo, onRemove, onEnableNotifications }: Props) {
+export function AssistedPublishPanel({ items, destination, text, time, now, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUndo, onRemove, onEnableNotifications, onEditImages }: Props) {
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const selected = assistedDestinations[destination];
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
@@ -53,20 +57,21 @@ export function AssistedPublishPanel({ items, destination, text, time, now, busy
         <div className="sm:col-span-2">
           <label htmlFor="assisted-text" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Text to copy</label>
           <textarea id="assisted-text" value={text} maxLength={5000} onChange={(event) => onTextChange(event.target.value)} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
-          <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint}{selected.needsMedia ? " Plypost saves the text only; add the media on the platform." : ""}</p>
+          <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
+          <p className="mt-2 text-[12px] text-[var(--text-secondary)]">{imageCount ? `${imageCount} ${imageCount === 1 ? "image" : "images"} from the current draft will be saved with this handoff.` : "No images selected in the current draft."} <button type="button" onClick={onEditImages} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit images in Create</button></p>
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
             <p className={validation.valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}>{validation.count} / {validation.limit} {destination === "bluesky" ? "graphemes" : "characters"}{validation.byteCount !== undefined ? ` · ${validation.byteCount} / ${validation.byteLimit} UTF-8 bytes` : ""}</p>
             {validation.issues.map((issue) => <p key={issue.code} className={issue.severity === "error" ? "text-[var(--danger)]" : "text-[var(--warning)]"}>{issue.message}</p>)}
           </div>}
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <button type="button" onClick={onAdd} disabled={busy || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
+          <button type="button" onClick={onAdd} disabled={busy || mediaBusy || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {mediaBusy ? "Wait for images…" : busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
           {notificationPermission === "default" && <button type="button" onClick={onEnableNotifications} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Bell size={14} /> Enable browser alerts</button>}
           <span className="text-[12px] leading-5 text-[var(--text-soft)]">{notificationPermission === "granted" ? "Browser alerts enabled while this page is open." : "Due items appear here while this page is open."}</span>
         </div>
       </div>
 
-      <div className="border-t border-[var(--line)] px-6 py-3 text-[12px] leading-5 text-[var(--text-muted)] sm:px-7">Copy the saved text, open the platform, and publish there yourself. Opening a platform does not send your text or mark it as posted.</div>
+      <div className="border-t border-[var(--line)] px-6 py-3 text-[12px] leading-5 text-[var(--text-muted)] sm:px-7">Copy the saved text, download any saved images in order, then publish on the platform yourself. Opening a platform does not send the post or mark it as published.</div>
       {items.length === 0 ? (
         <div className="flex flex-col items-center border-t border-[var(--line)] px-6 py-9 text-center"><Bell size={22} className="text-[var(--accent-text)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No assisted posts yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Add one above to get a ready-to-publish checklist.</p></div>
       ) : (
@@ -80,6 +85,7 @@ export function AssistedPublishPanel({ items, destination, text, time, now, busy
                 <button type="button" aria-label={`Remove ${item.title} from assisted publishing`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
               <details className="mt-2 text-[12px] text-[var(--text-muted)]"><summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Review saved text</summary><p className="mt-2 whitespace-pre-wrap break-words rounded-xl bg-[var(--accent-soft)] p-3 leading-5">{item.text}</p></details>
+              <MediaHandoff mediaIds={item.mediaIds} />
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {target.name}</a>

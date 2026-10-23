@@ -102,6 +102,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [assisted, setAssisted] = useState<AssistedPost[]>([]);
   const [assistedBusy, setAssistedBusy] = useState(false);
   const assistedMutation = useRef(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const backupMutation = useRef(false);
+  const [restoringBackup, setRestoringBackup] = useState(false);
+  const restoringBackupRef = useRef(false);
+  const restoreOverlayRef = useRef<HTMLDivElement>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const initialWorkspaceLoad = useRef(true);
   const pendingNotificationIds = useRef(new Set<string>());
@@ -137,6 +142,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  useEffect(() => {
+    if (restoringBackup) restoreOverlayRef.current?.focus();
+  }, [restoringBackup]);
+
   async function refreshWorkspace() {
     const response = await fetch("/api/workspace", { cache: "no-store" });
     if (!response.ok) throw new Error("Could not load your server workspace.");
@@ -150,6 +159,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function changeWorkspace(action: string, extra: Record<string, unknown>) {
+    if (restoringBackupRef.current) throw new Error("Wait for the full backup restore to finish.");
     const response = await fetch("/api/workspace", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, ...extra }),
@@ -444,6 +454,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function addToPlan() {
+    if (mediaBusyRef.current) {
+      setNotice({ kind: "error", text: "Wait for the image operation to finish before adding this plan item." });
+      return;
+    }
     const scheduledFor = new Date(scheduleTime);
     if (!scheduleTime || !Number.isFinite(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now() + 10_000) {
       setNotice({ kind: "error", text: "Choose a local date and time at least 10 seconds ahead." });
@@ -462,6 +476,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       title: draftTitle(title, source),
       source,
       posts: Object.fromEntries(selected.map((id) => [id, textFor(id)])),
+      mediaIds: [...mediaIds],
       scheduledFor: scheduledFor.toISOString(),
       createdAt: new Date().toISOString(),
       status: "queued",
@@ -484,7 +499,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setSource(post.source);
     setSelected(platformIds.filter((id) => post.posts[id] !== undefined));
     setVariants({ ...post.posts });
-    setMediaIds([]);
+    setMediaIds(post.mediaIds ?? []);
     setActive(platformIds.find((id) => post.posts[id] !== undefined) ?? "bluesky");
     setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
     openView("compose");
@@ -542,16 +557,91 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     link.download = `plypost-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setNotice({ kind: "success", text: "JSON exported. Image files are not included; back up the SQLite database for a complete copy." });
+    setNotice({ kind: "success", text: "Text JSON exported without image files. Use Download full backup to include them." });
+  }
+
+  async function downloadFullBackup() {
+    if (backupMutation.current) return;
+    backupMutation.current = true;
+    setBackupBusy(true);
+    try {
+      const response = await fetch("/api/backup", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || "Could not prepare the full backup.");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `plypost-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setNotice({ kind: "success", text: "Full backup downloaded with your saved images. Keep the file private." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not download the full backup." });
+    } finally {
+      backupMutation.current = false;
+      setBackupBusy(false);
+    }
+  }
+
+  async function restoreFullBackup(file: File) {
+    if (backupMutation.current) return;
+    if (mediaBusyRef.current) {
+      setNotice({ kind: "error", text: "Wait for the current image operation before restoring a backup." });
+      return;
+    }
+    if (!file.size || file.size > 128 * 1024 * 1024) {
+      setNotice({ kind: "error", text: "Choose a full backup no larger than 128 MiB." });
+      return;
+    }
+    if (!window.confirm("Replace this account's saved drafts, plan, assisted posts and images with this full backup? This cannot be undone.")) return;
+    backupMutation.current = true;
+    setBackupBusy(true);
+    restoringBackupRef.current = true;
+    setRestoringBackup(true);
+    let restored = false;
+    try {
+      const response = await fetch("/api/backup", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: file,
+        cache: "no-store", credentials: "same-origin",
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || "Could not restore the full backup.");
+      }
+      restored = true;
+      setCurrentDraftId(null);
+      setMediaIds([]);
+      resetMediaPicker();
+      try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
+      setLegacyWorkspace(null);
+      await refreshWorkspace();
+      setNotice({ kind: "success", text: "Full backup restored. Saved drafts, plans, handoffs and images are available in this account." });
+    } catch (error) {
+      setNotice({ kind: "error", text: restored
+        ? "Full backup was restored, but the view could not refresh. Reload to see the saved work."
+        : error instanceof Error ? error.message : "Could not restore the full backup." });
+    } finally {
+      restoringBackupRef.current = false;
+      setRestoringBackup(false);
+      backupMutation.current = false;
+      setBackupBusy(false);
+    }
   }
 
   async function importWorkspace(file: File) {
     try {
       if (file.size > 2_000_000) throw new Error("Backup file is too large (2 MB maximum).");
-      const workspace = parseWorkspace(JSON.parse(await file.text()));
-      if (!workspace) throw new Error("This is not a Plypost workspace backup.");
+      const raw = JSON.parse(await file.text());
+      const workspace = parseWorkspace(raw);
+      if (!workspace || !Array.isArray(raw.drafts) || !Array.isArray(raw.schedule) ||
+          workspace.drafts.length !== raw.drafts.length || workspace.schedule.length !== raw.schedule.length ||
+          (raw.version === 3 && (!Array.isArray(raw.assisted) || workspace.assisted.length !== raw.assisted.length))) {
+        throw new Error("This backup has invalid or excess records. Nothing was replaced.");
+      }
       if (!window.confirm("Replace your account's drafts, publishing plan, and assisted posts with this JSON backup? Images are not in the file, so drafts referencing images require those images in this account's database.")) return;
-      await changeWorkspace("import", { backup: workspace });
+      await changeWorkspace("import", { backup: raw });
       localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace()));
       setLegacyWorkspace(null);
       setCurrentDraftId(null);
@@ -602,6 +692,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function addAssistedPost() {
+    if (mediaBusyRef.current) {
+      setNotice({ kind: "error", text: "Wait for the image operation to finish before saving this handoff." });
+      return;
+    }
     const text = assistText.trim();
     const scheduledFor = assistTime ? new Date(assistTime) : new Date();
     if (!text || characterCount(text) > 5000) {
@@ -628,6 +722,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       title: draftTitle(title, text),
       destination: assistDestination,
       text,
+      mediaIds: [...mediaIds],
       scheduledFor: scheduledFor.toISOString(),
       createdAt: new Date().toISOString(),
       status: "queued",
@@ -669,7 +764,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   return (
-    <div className="app-shell min-h-screen lg:flex">
+    <>
+    <div inert={restoringBackup} className="app-shell min-h-screen lg:flex">
       <aside className="app-sidebar sidebar-glow hidden w-[232px] shrink-0 flex-col border-r px-4 py-7 lg:sticky lg:top-0 lg:flex lg:h-screen">
         <a href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} className="flex items-center gap-3 px-2" aria-label="Plypost home">
           <Image src="/plypost-mark.svg" alt="" width={40} height={40} className="h-10 w-10 shrink-0" />
@@ -727,6 +823,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   <ImageAttachmentPicker
                     key={mediaPickerEpoch}
                     selectedIds={mediaIds}
+                    disabled={restoringBackup}
                     onChange={(ids) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) setMediaIds(ids); }}
                     onBusyChange={(busy) => {
                       if (mediaPickerEpochRef.current !== mediaPickerEpoch) return;
@@ -778,21 +875,28 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
           {view === "drafts" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Drafts</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Saved ideas</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Pick up a post you started earlier, or keep a backup.</p></div>
-            <DraftLibraryPanel drafts={drafts} currentDraftId={currentDraftId} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} />
+            <DraftLibraryPanel drafts={drafts} currentDraftId={currentDraftId} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />
           </div>}
           {view === "schedule" && <div>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Schedule a snapshot of the draft currently in your editor.</p></div>
-            <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations selected</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
-            <ServerSchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} />
+            <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
+            <ServerSchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} />
           </div>}
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} />
+            <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} />}
         </main>
       </div>
     </div>
+    {restoringBackup && <div ref={restoreOverlayRef} tabIndex={-1} role="alertdialog" aria-modal="true" aria-label="Restoring full backup" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-5 outline-none">
+      <div className="w-full max-w-sm rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-center shadow-2xl">
+        <p className="text-[17px] font-bold text-[var(--text)]">Restoring your workspace…</p>
+        <p className="mt-2 text-[13px] leading-6 text-[var(--text-muted)]">Please wait while drafts, plans and images are checked and restored.</p>
+      </div>
+    </div>}
+    </>
   );
 }
 
