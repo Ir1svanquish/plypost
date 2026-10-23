@@ -10,11 +10,9 @@ import {
   Clock3,
   Copy,
   FilePenLine,
-  History,
-  LockKeyhole,
   RotateCcw,
   Send,
-  Sparkles,
+  UserRound,
   WandSparkles,
   Workflow,
 } from "lucide-react";
@@ -23,6 +21,7 @@ import { DraftLibraryPanel } from "@/components/workspace-panels";
 import { ServerSchedulePanel } from "@/components/server-schedule-panel";
 import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { AccountPanel } from "@/components/account-panel";
 import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -34,6 +33,16 @@ const interimSampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nsoflow helps you shape one draft for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
 
 type Provider = "nvidia" | "nebius";
+type WorkspaceView = "compose" | "drafts" | "schedule" | "assisted" | "account";
+const viewLabels: Record<WorkspaceView, string> = {
+  compose: "Create", drafts: "Drafts", schedule: "Plan", assisted: "Assisted", account: "Account",
+};
+
+function viewFromHash(): WorkspaceView {
+  const hash = window.location.hash.slice(1);
+  if (hash === "activity") return "account";
+  return hash === "drafts" || hash === "schedule" || hash === "assisted" || hash === "account" ? hash : "compose";
+}
 type Receipt = {
   platform: PlatformId;
   id: string;
@@ -67,16 +76,8 @@ function PlatformMark({ id, size = "normal" }: { id: PlatformId; size?: "small" 
   );
 }
 
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void }) {
+  const [view, setView] = useState<WorkspaceView>("compose");
   const [source, setSource] = useState(sampleDraft);
   const [selected, setSelected] = useState<PlatformId[]>([...platformIds]);
   const [active, setActive] = useState<PlatformId>("bluesky");
@@ -103,6 +104,23 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [legacyWorkspace, setLegacyWorkspace] = useState<ReturnType<typeof emptyWorkspace> | null>(null);
   const [auditLog, setAuditLog] = useState<{ action: string; subject_id: string | null; detail: string | null; created_at: string }[]>([]);
   const [workerLastSeen, setWorkerLastSeen] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncView = () => setView(viewFromHash());
+    syncView();
+    window.addEventListener("hashchange", syncView);
+    window.addEventListener("popstate", syncView);
+    return () => {
+      window.removeEventListener("hashchange", syncView);
+      window.removeEventListener("popstate", syncView);
+    };
+  }, []);
+
+  function openView(next: WorkspaceView) {
+    setView(next);
+    if (window.location.hash !== `#${next}`) window.location.hash = next;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   async function refreshWorkspace() {
     const response = await fetch("/api/workspace", { cache: "no-store" });
@@ -329,7 +347,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setSelected([...platformIds]);
     setActive("bluesky");
     setNotice(null);
-    document.getElementById("compose")?.scrollIntoView({ behavior: "smooth" });
+    openView("compose");
   }
 
   function loadDraft(draft: SavedDraft) {
@@ -340,7 +358,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setVariants(draft.variants);
     setActive(draft.selected[0] ?? "bluesky");
     setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
-    document.getElementById("compose")?.scrollIntoView({ behavior: "smooth" });
+    openView("compose");
   }
 
   async function deleteDraft(id: string) {
@@ -394,7 +412,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setVariants({ ...post.posts });
     setActive(platformIds.find((id) => post.posts[id] !== undefined) ?? "bluesky");
     setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
-    document.getElementById("compose")?.scrollIntoView({ behavior: "smooth" });
+    openView("compose");
   }
 
   async function runScheduled(post: ScheduledPost) {
@@ -538,85 +556,75 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   return (
     <div className="app-shell min-h-screen lg:flex">
-      <aside className="app-sidebar sidebar-glow hidden w-[248px] shrink-0 flex-col border-r border-white/10 px-5 py-7 text-white lg:sticky lg:top-0 lg:flex lg:h-screen">
-        <a href="#compose" className="flex items-center gap-3 px-2" aria-label="Plypost home">
-          <span className="gradient-button flex h-10 w-10 items-center justify-center rounded-[11px]"><Workflow size={21} strokeWidth={2.3} /></span>
+      <aside className="app-sidebar sidebar-glow hidden w-[232px] shrink-0 flex-col border-r px-4 py-7 lg:sticky lg:top-0 lg:flex lg:h-screen">
+        <a href="#compose" onClick={() => openView("compose")} className="flex items-center gap-3 px-2" aria-label="Plypost home">
+          <span className="gradient-button flex h-10 w-10 items-center justify-center rounded-[11px] text-white"><Workflow size={21} strokeWidth={2.3} /></span>
           <span className="text-[21px] font-bold tracking-[-0.055em]">Plypost<span className="sidebar-accent">.</span></span>
         </a>
         <div className="sidebar-muted mt-12 px-3 text-[11px] font-bold uppercase tracking-[0.17em]">Workspace</div>
         <nav className="mt-4 space-y-1" aria-label="Main navigation">
-          <a href="#compose" className="flex items-center gap-3 rounded-[10px] bg-[var(--nav-active)] px-3 py-2.5 text-[14px] font-semibold text-white"><FilePenLine size={18} className="sidebar-accent" /> Composer</a>
-          <a href="#drafts" className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Draft library</a>
-          <a href="#schedule" className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Clock3 size={18} /> Publishing plan</a>
-          <a href="#assisted" className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Copy size={18} /> Assisted publishing</a>
-          <a href="#activity" className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><History size={18} /> Activity</a>
+          <a href="#compose" onClick={() => openView("compose")} aria-current={view === "compose" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Create</a>
+          <a href="#drafts" onClick={() => openView("drafts")} aria-current={view === "drafts" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Drafts <span className="ml-auto text-[11px] tabular-nums opacity-70">{drafts.length}</span></a>
+          <a href="#schedule" onClick={() => openView("schedule")} aria-current={view === "schedule" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Clock3 size={18} /> Plan</a>
+          <a href="#assisted" onClick={() => openView("assisted")} aria-current={view === "assisted" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Copy size={18} /> Assisted</a>
+          <a href="#account" onClick={() => openView("account")} aria-current={view === "account" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><UserRound size={18} /> Account</a>
         </nav>
-        <div className="mt-auto border-t border-white/10 px-2 pt-5">
-          <p className="sidebar-muted text-[12px] leading-5">Drafts and plans are saved to your account. Assisted checklists remain in this browser.</p>
-          <div className="sidebar-subtle mt-4 flex items-center gap-2 text-[12px]"><span className="h-2 w-2 rounded-full bg-[#91d3ae]" /> Account workspace</div>
+        <div className="sidebar-footer mt-auto border-t px-3 pt-5">
+          <p className="sidebar-muted text-[12px] leading-5">Your space for drafts, plans and assisted posts.</p>
         </div>
       </aside>
 
       <div className="min-w-0 flex-1">
         <header className="app-header sticky top-0 z-30 flex min-h-[66px] items-center justify-between gap-3 border-b px-5 sm:px-8 lg:px-10">
           <div className="flex items-center gap-2.5 lg:hidden"><span className="gradient-button flex h-8 w-8 items-center justify-center rounded-[9px] text-white"><Workflow size={17} /></span><span className="text-[18px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
-          <div className="hidden items-center gap-2 text-[13px] text-[var(--text-muted)] lg:flex"><span>Workspace</span><span>/</span><span className="font-semibold text-[var(--text)]">Composer</span></div>
-          <div className="ml-auto flex items-center gap-3"><span className="hidden max-w-40 truncate text-[12px] text-[var(--text-muted)] sm:inline">{email}</span><ThemeSwitcher /><button type="button" onClick={onLogout} className="text-[12px] font-semibold text-[var(--accent-text)]">Sign out</button></div>
+          <div className="hidden items-center gap-2 text-[13px] text-[var(--text-muted)] lg:flex"><span>Workspace</span><span>/</span><span className="font-semibold text-[var(--text)]">{viewLabels[view]}</span></div>
+          <div className="ml-auto flex items-center gap-3"><ThemeSwitcher /><button type="button" onClick={() => openView("account")} aria-label="Open account" className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] text-[var(--text-secondary)]"><UserRound size={17} /></button></div>
         </header>
         <nav className="mobile-nav app-header sticky top-[66px] z-20 flex gap-5 overflow-x-auto border-b px-5 text-[12px] font-semibold text-[var(--text-secondary)] sm:px-8 lg:hidden" aria-label="Mobile navigation">
-          <a className="shrink-0 border-b-2 border-[var(--accent)] py-3 text-[var(--accent-text)]" href="#compose">Composer</a>
-          <a className="shrink-0 py-3" href="#drafts">Drafts</a>
-          <a className="shrink-0 py-3" href="#schedule">Plan</a>
-          <a className="shrink-0 py-3" href="#assisted">Assisted</a>
-          <a className="shrink-0 py-3" href="#activity">Activity</a>
+          <a className="shrink-0 py-3" href="#compose" onClick={() => openView("compose")} aria-current={view === "compose" ? "page" : undefined}>Create</a>
+          <a className="shrink-0 py-3" href="#drafts" onClick={() => openView("drafts")} aria-current={view === "drafts" ? "page" : undefined}>Drafts</a>
+          <a className="shrink-0 py-3" href="#schedule" onClick={() => openView("schedule")} aria-current={view === "schedule" ? "page" : undefined}>Plan</a>
+          <a className="shrink-0 py-3" href="#assisted" onClick={() => openView("assisted")} aria-current={view === "assisted" ? "page" : undefined}>Assisted</a>
+          <a className="shrink-0 py-3" href="#account" onClick={() => openView("account")} aria-current={view === "account" ? "page" : undefined}>Account</a>
         </nav>
 
-        <main id="compose" className="app-main section-anchor mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
-          {schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Start <code>npm run worker</code> on this computer to process scheduled items.</div>}
+        <main className="app-main mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
+          {view === "schedule" && schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Start <code>npm run worker</code> on this computer to process scheduled items.</div>}
           {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} browser drafts and {legacyWorkspace.schedule.length} planned items from the earlier version.</span><button type="button" onClick={importLegacyWorkspace} className="font-bold text-[var(--accent-text)]">Move into account →</button></div>}
-          <div className="app-hero mb-7 rounded-[18px] px-6 py-7 sm:px-8 sm:py-8">
-            <div className="relative z-10 flex flex-wrap items-start justify-between gap-6">
-              <div className="max-w-[640px]">
-                <div className="mb-3 inline-flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.15em] text-[var(--accent-text)]"><Sparkles size={14} /> Your creative workspace</div>
-                <h1 className="text-[30px] font-bold leading-[1.12] tracking-[-0.05em] text-[var(--text)] sm:text-[39px]">One idea. Made for every feed.</h1>
-                <p className="mt-3 text-[15px] leading-6 text-[var(--text-secondary)]">Write your message, adapt it for each channel, then choose how to share it.</p>
-              </div>
-              <div className="hidden items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] font-medium text-[var(--text-muted)] xl:flex"><LockKeyhole size={14} /> API keys stay on your server</div>
-            </div>
-            <div className="relative z-10 mt-6 grid grid-cols-3 divide-x divide-[var(--line)] border-t border-[var(--line)] pt-5">
-              <a href="#drafts" className="pr-3"><span className="block text-[22px] font-bold tabular-nums text-[var(--text)]">{drafts.length}</span><span className="text-[12px] text-[var(--text-muted)]">Saved drafts</span></a>
-              <a href="#schedule" className="px-4"><span className="block text-[22px] font-bold tabular-nums text-[var(--text)]">{schedule.filter((post) => post.status === "queued").length}</span><span className="text-[12px] text-[var(--text-muted)]">Planned</span></a>
-              <a href="#assisted" className="pl-4"><span className="block text-[22px] font-bold tabular-nums text-[var(--text)]">{assisted.filter((item) => item.status !== "posted").length}</span><span className="text-[12px] text-[var(--text-muted)]">To share</span></a>
-            </div>
+          {view === "compose" && <div id="compose" className="section-anchor">
+          <div className="mb-6">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Create</p>
+            <h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Shape your next post</h1>
+            <p className="mt-1 text-[14px] text-[var(--text-muted)]">Write once, choose channels, then review each version.</p>
           </div>
-
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(370px,.95fr)]">
             <div className="space-y-6">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
-                <div className="flex items-start justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7">
-                  <div className="flex items-start gap-3.5"><span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--accent-soft)] text-[13px] font-bold text-[var(--accent-text)]">01</span><div><h2 id="draft-heading" className="text-[17px] font-bold tracking-[-0.025em]">Start with your idea</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">The message you want to share, in your own words.</p></div></div>
-                  <FilePenLine size={18} className="mt-1 text-[var(--text-soft)]" />
+                <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
+                  <div><h2 id="draft-heading" className="text-[17px] font-bold tracking-[-0.025em]">Draft editor</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Your message and its destinations, in one place.</p></div>
+                  <button type="button" onClick={newDraft} className="shrink-0 text-[12px] font-semibold text-[var(--accent-text)]">New draft</button>
                 </div>
                 <div className="p-6 sm:p-7">
-                  <label htmlFor="source-draft" className="mb-3 block text-[13px] font-bold text-[var(--text)]">Your draft</label>
+                  <label htmlFor="draft-name" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Draft name <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
+                  <input id="draft-name" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Give this idea a name" className="mb-5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" />
+                  <label htmlFor="source-draft" className="mb-2 block text-[13px] font-bold text-[var(--text)]">Your message</label>
                   <textarea id="source-draft" value={source} onChange={(event) => { setSource(event.target.value); setNotice(null); }} placeholder="What's on your mind? Add a launch update, insight, or idea to share..." maxLength={3000} className="min-h-[194px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[15px] leading-[1.75] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
-                  <div className="mt-3 flex items-center justify-between text-[12px] text-[var(--text-soft)]"><span>Write naturally. Fine-tune each version on the right.</span><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
+                  <div className="mt-2 flex items-center justify-between text-[12px] text-[var(--text-soft)]"><span>Fine-tune each version in the preview.</span><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
+                  <div className="mt-6 border-t border-[var(--line)] pt-5">
+                    <div className="mb-3 flex items-center justify-between"><h3 className="text-[13px] font-bold text-[var(--text)]">Destinations</h3><span className="text-[12px] text-[var(--text-muted)]">{selected.length} selected</span></div>
+                    <div role="group" aria-label="Destinations" className="flex flex-wrap gap-2">
+                      {platformIds.map((id) => {
+                        const isSelected = selected.includes(id);
+                        return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[12px] font-semibold transition ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" />{platforms[id].name}<span className={`flex h-4 w-4 items-center justify-center rounded border ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
+                      })}
+                    </div>
+                  </div>
+                  <details className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
+                    <summary className="cursor-pointer text-[13px] font-bold text-[var(--text-secondary)]">Adapt with AI <span className="ml-1 text-[11px] font-normal text-[var(--text-soft)]">Optional · Nemotron</span></summary>
+                    <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
+                  </details>
+                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={saveDraft} disabled={!source.trim()} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white"><FilePenLine size={15} />{currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
                 </div>
-              </section>
-
-              <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="destinations-heading">
-                <div className="flex items-start justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div className="flex items-start gap-3.5"><span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--info-soft)] text-[13px] font-bold text-[var(--info)]">02</span><div><h2 id="destinations-heading" className="text-[17px] font-bold tracking-[-0.025em]">Choose destinations</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Select where this message should go.</p></div></div><span className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-muted)]">{selected.length} selected</span></div>
-                <div className="grid grid-cols-1 gap-3 p-6 sm:grid-cols-2 sm:p-7">
-                  {platformIds.map((id) => {
-                    const isSelected = selected.includes(id);
-                    return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`flex items-center gap-3 rounded-[15px] border p-3.5 text-left transition ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] ring-2 ring-[var(--accent-soft)]" : "border-[var(--line)] bg-[var(--surface)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} /><span className="min-w-0 flex-1"><span className="block text-[14px] font-bold text-[var(--text)]">{platforms[id].name}</span><span className="mt-0.5 block truncate text-[12px] text-[var(--text-soft)]">{platforms[id].hint}</span></span><span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent)] text-white" : "border-[var(--line)] bg-[var(--surface)]"}`}>{isSelected && <Check size={13} strokeWidth={3} />}</span></button>;
-                  })}
-                </div>
-              </section>
-
-              <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="ai-heading">
-                <div className="flex items-start gap-3.5 border-b border-[var(--line)] px-6 py-5 sm:px-7"><span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--warning-soft)] text-[13px] font-bold text-[var(--warning)]">03</span><div><h2 id="ai-heading" className="text-[17px] font-bold tracking-[-0.025em]">Adapt with AI <span className="ml-1 rounded-md bg-[var(--accent-soft)] px-1.5 py-1 align-middle text-[9px] font-bold uppercase tracking-[0.08em] text-[var(--accent-text)]">Optional</span></h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Create four tailored versions with Nemotron.</p></div></div>
-                <div className="flex flex-col gap-3 p-6 sm:flex-row sm:items-center sm:p-7"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button mt-0 inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white shadow-lg shadow-indigo-300/40 transition sm:mt-5"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
               </section>
             </div>
 
@@ -631,16 +639,26 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
               <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your selected drafts first.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? selected.map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No destinations selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={simulatePublish} disabled={!canPublish} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> {publishing ? "Simulating..." : `Simulate publish to ${selected.length || 0} platform${selected.length === 1 ? "" : "s"}`} <ArrowRight size={15} className="ml-1" /></button><p className="mt-3 text-center text-[12px] text-[var(--text-soft)]">Demo action only. No post leaves this app.</p></section>
             </div>
           </div>
+          </div>}
 
           {notice && <div role="status" className={`fixed bottom-4 left-4 right-4 z-50 flex items-start gap-2 rounded-xl border px-4 py-3 text-[13px] leading-5 shadow-xl sm:left-auto sm:max-w-md ${notice.kind === "success" ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]" : "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"}`}>{notice.kind === "success" ? <CheckCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}{notice.text}</div>}
 
           {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable. Unsaved editor text and assisted checklists may not survive a reload.</div>}
 
-          <DraftLibraryPanel drafts={drafts} title={title} currentDraftId={currentDraftId} onTitleChange={setTitle} onSave={saveDraft} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} />
-          <ServerSchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onRemove={removeScheduled} />
-          <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} />
-          <section className="panel-border soft-shadow mt-8 rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="audit-heading"><h2 id="audit-heading" className="text-[17px] font-bold">Account activity</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Recent saved changes and worker results.</p>{auditLog.length === 0 ? <p className="mt-4 text-[12px] text-[var(--text-soft)]">No activity yet.</p> : <div className="mt-4 divide-y divide-[var(--line)]">{auditLog.slice(0, 12).map((item, index) => <div key={`${item.created_at}-${index}`} className="flex flex-wrap justify-between gap-2 py-2 text-[12px]"><span className="font-medium text-[var(--text-secondary)]">{item.action.replaceAll(".", " · ")}{item.detail ? ` · ${item.detail}` : ""}</span><time className="text-[var(--text-soft)]">{formatTime(item.created_at)}</time></div>)}</div>}</section>
-          <section id="activity" className="panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="activity-heading"><div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="activity-heading" className="text-[17px] font-bold tracking-[-0.025em]">Recent simulations</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">A local record of your demo publishing runs.</p></div>{activity.length > 0 && <button type="button" onClick={() => setActivity([])} className="text-[12px] font-semibold text-[var(--accent-text)] hover:text-[var(--accent-text)]">Clear history</button>}</div>{activity.length === 0 ? <div className="flex flex-col items-center px-6 py-10 text-center"><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Clock3 size={20} /></span><p className="text-[14px] font-semibold text-[var(--text-secondary)]">Nothing simulated yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Your demo publishing activity will show up here.</p></div> : <div className="divide-y divide-[var(--line)]">{activity.map((item) => <div key={item.id} className="flex items-center gap-3 px-6 py-3.5 sm:px-7"><PlatformMark id={item.platform} size="small" /><span className="min-w-0 flex-1"><span className="block text-[13px] font-semibold text-[var(--text-secondary)]">{platforms[item.platform].name} <span className="ml-1 rounded-full bg-[var(--accent-soft)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--accent-text)]">Simulated</span></span><span className="mt-0.5 block truncate text-[12px] text-[var(--text-soft)]">{item.content}</span></span><span className="shrink-0 text-[11px] text-[var(--text-soft)]">{formatTime(item.publishedAt)}</span></div>)}</div>}</section>
+          {view === "drafts" && <div>
+            <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Drafts</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Saved ideas</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Pick up a post you started earlier, or keep a backup.</p></div>
+            <DraftLibraryPanel drafts={drafts} currentDraftId={currentDraftId} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} />
+          </div>}
+          {view === "schedule" && <div>
+            <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Schedule a snapshot of the draft currently in your editor.</p></div>
+            <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations selected</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
+            <ServerSchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onRemove={removeScheduled} />
+          </div>}
+          {view === "assisted" && <div>
+            <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
+            <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} />
+          </div>}
+          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} />}
         </main>
       </div>
     </div>

@@ -24,8 +24,16 @@
   --warning-soft: #fff1da;
   --danger: #aa4351;
   --danger-soft: #fff0f2;
-  --sidebar: #171d2d;
-  --nav-active: #303452;
+  --sidebar: #fafbff;
+  --sidebar-line: #e1e5ed;
+  --sidebar-text: #202638;
+  --sidebar-secondary: #515b70;
+  --sidebar-muted: #687388;
+  --sidebar-accent: #5355c8;
+  --sidebar-hover: #edf0f9;
+  --sidebar-glow: rgba(113, 120, 221, .07);
+  --nav-active: #ecebff;
+  --nav-active-text: #4547b5;
 }
 
 :root[data-theme="dark"] {
@@ -53,7 +61,15 @@
   --danger: #f2aab3;
   --danger-soft: #4a303b;
   --sidebar: #121827;
+  --sidebar-line: #303b50;
+  --sidebar-text: #f1f4fa;
+  --sidebar-secondary: #c7d0e2;
+  --sidebar-muted: #aab5cc;
+  --sidebar-accent: #b8baff;
+  --sidebar-hover: #202c42;
+  --sidebar-glow: rgba(113, 120, 221, .1);
   --nav-active: #323b60;
+  --nav-active-text: #ffffff;
 }
 
 * { box-sizing: border-box; }
@@ -69,77 +85,53 @@ button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 input, textarea, select { color: var(--text); background-color: var(--field); }
+select { color-scheme: light; }
+:root[data-theme="dark"] select { color-scheme: dark; }
+select option { color: var(--text); background-color: var(--surface); }
 input::placeholder, textarea::placeholder { color: var(--text-soft); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 ::selection { background: var(--accent-soft); color: var(--text); }
 
 .app-shell { background: var(--canvas); }
-.app-sidebar { background: var(--sidebar); }
-.app-sidebar .sidebar-muted { color: #aab5cc; }
-.app-sidebar .sidebar-subtle { color: #c7d0e2; }
-.app-sidebar .sidebar-accent { color: #b8baff; }
-.app-sidebar .sidebar-link:hover { background: rgba(255,255,255,.075); color: #fff; }
+.app-sidebar { background: var(--sidebar); border-color: var(--sidebar-line); color: var(--sidebar-text); }
+.app-sidebar .border-t,
+.app-sidebar .sidebar-footer { border-color: var(--sidebar-line); }
+.app-sidebar .gradient-button { color: #fff; }
+.app-sidebar .sidebar-muted { color: var(--sidebar-muted); }
+.app-sidebar .sidebar-subtle { color: var(--sidebar-secondary); }
+.app-sidebar .sidebar-accent { color: var(--sidebar-accent); }
+.app-sidebar nav a { color: var(--sidebar-secondary); }
+.app-sidebar nav a:hover { background: var(--sidebar-hover); color: var(--sidebar-text); }
+.app-sidebar nav a[aria-current="page"],
+.app-sidebar nav a[aria-current="page"]:hover { background: var(--nav-active); color: var(--nav-active-text); font-weight: 600; }
 .app-header { background: var(--surface); border-color: var(--line); }
 .app-main { max-width: 1440px; }
-.app-hero {
-  position: relative;
-  overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: 0 12px 36px rgba(25, 35, 60, .035);
-}
-.app-hero::after {
-  content: "";
-  position: absolute;
-  width: 280px;
-  height: 280px;
-  right: -95px;
-  top: -155px;
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 15%, transparent), transparent 70%);
-  pointer-events: none;
-}
 .soft-shadow { box-shadow: 0 8px 28px rgba(25, 35, 60, .035), 0 1px 2px rgba(25, 35, 60, .025); }
 .panel-border { border: 1px solid var(--line); }
 .gradient-button { background: linear-gradient(115deg, #625edb 0%, #4e59c8 100%); }
 .gradient-button:hover { filter: brightness(1.08); }
 .gradient-button:disabled { filter: grayscale(.35); opacity: .55; }
-.sidebar-glow { background-image: radial-gradient(circle at 0% 5%, rgba(113, 120, 221, .1), transparent 42%); }
+.sidebar-glow { background-image: radial-gradient(circle at 0% 5%, var(--sidebar-glow), transparent 42%); }
 .dot-grid { background-image: radial-gradient(color-mix(in srgb, var(--line) 75%, transparent) 1px, transparent 1px); background-size: 18px 18px; }
 .post-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .section-anchor { scroll-margin-top: 112px; }
 .mobile-nav { scrollbar-width: none; }
 .mobile-nav::-webkit-scrollbar { display: none; }
-.theme-switcher select { background: transparent; }
+.theme-switcher-trigger { background: var(--surface-muted); border-color: var(--line); color: var(--text-secondary); }
+.theme-switcher-trigger:hover { background: var(--surface-hover); color: var(--text); }
+.theme-switcher-menu { background: var(--surface); border-color: var(--line); color: var(--text); }
+.theme-switcher-option { color: var(--text-secondary); }
+.theme-switcher-option:hover { background: var(--surface-hover); color: var(--text); }
+.theme-switcher-option[aria-pressed="true"],
+.theme-switcher-option[aria-pressed="true"]:hover { background: var(--accent-soft); color: var(--accent-text); }
 
-body:has(:is(#drafts, #schedule, #assisted, #activity):target) .app-sidebar a[href="#compose"] {
-  background: transparent;
-  color: #c7d0e2;
-  font-weight: 500;
-}
-body:has(:is(#drafts, #schedule, #assisted, #activity):target) .app-sidebar a[href="#compose"] .sidebar-accent { color: #c7d0e2; }
-body:has(#drafts:target) .app-sidebar a[href="#drafts"],
-body:has(#schedule:target) .app-sidebar a[href="#schedule"],
-body:has(#assisted:target) .app-sidebar a[href="#assisted"],
-body:has(#activity:target) .app-sidebar a[href="#activity"] {
-  background: var(--nav-active);
-  color: #fff;
-  font-weight: 600;
-}
-body:has(:is(#drafts, #schedule, #assisted, #activity):target) .mobile-nav a[href="#compose"] {
-  border-color: transparent;
-  color: var(--text-secondary);
-}
-body:has(#drafts:target) .mobile-nav a[href="#drafts"],
-body:has(#schedule:target) .mobile-nav a[href="#schedule"],
-body:has(#assisted:target) .mobile-nav a[href="#assisted"],
-body:has(#activity:target) .mobile-nav a[href="#activity"] {
+.mobile-nav a { border-bottom: 2px solid transparent; }
+.mobile-nav a[aria-current="page"] {
   border-bottom: 2px solid var(--accent);
   color: var(--accent-text);
 }
 
-:root[data-theme="dark"] .soft-shadow,
-:root[data-theme="dark"] .app-hero { box-shadow: 0 10px 28px rgba(0, 0, 0, .17); }
+:root[data-theme="dark"] .soft-shadow { box-shadow: 0 10px 28px rgba(0, 0, 0, .17); }
 :root[data-theme="dark"] .gradient-button { box-shadow: 0 8px 20px rgba(0, 0, 0, .2); }
 
 @media (prefers-reduced-motion: reduce) {

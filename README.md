@@ -15,14 +15,15 @@ A responsive Next.js workspace for drafting one message, adapting it for Bluesky
 - Run a server-side publishing simulation that validates nonempty text and platform character limits, then returns clearly labeled demo receipts. **No social platform API is called and nothing is posted.**
 - Each platform has its own publishing adapter module under `src/lib/publishers`. The current adapters all use the simulation implementation, making real integrations an explicit future change.
 - Use a responsive workspace with light, dark, or system appearance. The selection stays in this browser and follows system changes when set to **System**.
+- Move between **Create**, **Drafts**, **Plan**, **Assisted**, and **Account**. The Create editor keeps destination choices and optional AI adaptation beside the draft; account changes and simulation history are in Account.
 
-Named drafts and scheduled plans live in `data/plypost.sqlite` by default. The unsaved editor and assisted publishing checklist remain in this browser's local storage. Back up both the database and an exported JSON copy. Importing a backup replaces saved account drafts and plans plus this browser's assisted checklist after confirmation; it does not replace the current editor. Both publishing lists capture text snapshots. Dates are entered in your device's local time and stored as UTC instants; the plan also records the source time zone. Version 2 backups remain importable. Importing an overdue queued plan can cause the worker to simulate it promptly.
+Named drafts and scheduled plans live in `data/plypost.sqlite` by default. The unsaved editor and assisted publishing checklist remain in this browser's local storage. Back up both the database and an exported JSON copy. Importing a backup replaces saved account drafts and plans plus this browser's assisted checklist after confirmation; it does not replace the current editor. Both publishing lists capture text snapshots. Enter dates as `YYYY-MM-DD` and times in 24-hour `HH:mm` format. These are local times, stored as UTC instants; the plan also records the source time zone. Version 2 backups remain importable. Importing an overdue queued plan can cause the worker to simulate it promptly.
 
 Plypost keeps the earlier browser storage keys after the rename, so existing SocialFlow AI drafts and plans remain available. The source repository is [Ir1svanquish/plypost](https://github.com/Ir1svanquish/plypost).
 
 ## Assisted publishing
 
-1. Write a draft, then go to **Assisted publishing**. Select a platform and edit the text to copy. For the original four platforms, the field starts with that platform's current draft.
+1. Write a draft, then go to **Assisted**. Select a platform and edit the text to copy. For the original four platforms, the field starts with that platform's current draft.
 2. Leave the reminder time blank for an item ready now, or choose a future local time. Add it to the checklist.
 3. When ready, click **Copy text**, then **Open platform**. Paste and review it on the platform, add media where required, and publish from your own account.
 4. Click **I posted it** only after you have posted it yourself. This is a self-reported local status, and **Undo mark** is available.

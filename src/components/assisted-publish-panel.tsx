@@ -2,7 +2,8 @@
 
 import { Bell, CalendarClock, Check, Copy, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 import { assistedDestinations, assistedIds, type AssistedDestinationId } from "@/lib/assisted";
-import { assistedState, localDateTimeValue, type AssistedPost } from "@/lib/workspace";
+import { assistedState, type AssistedPost } from "@/lib/workspace";
+import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 
 type Props = {
   items: AssistedPost[];
@@ -44,17 +45,14 @@ export function AssistedPublishPanel({ items, destination, text, time, now, noti
             <optgroup label="Current destinations">{assistedIds.slice(7).map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
           </select>
         </div>
-        <div>
-          <label htmlFor="assisted-time" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Reminder time · optional</label>
-          <input id="assisted-time" type="datetime-local" value={time} min={now ? localDateTimeValue(new Date(now)) : undefined} onChange={(event) => onTimeChange(event.target.value)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" />
-        </div>
+        <LocalDateTimeField id="assisted-time" label="Reminder time" value={time} minTimestamp={now} optional onChange={onTimeChange} />
         <div className="sm:col-span-2">
           <label htmlFor="assisted-text" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Text to copy</label>
           <textarea id="assisted-text" value={text} maxLength={5000} onChange={(event) => onTextChange(event.target.value)} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint}{selected.needsMedia ? " Plypost saves the text only; add the media on the platform." : ""}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <button type="button" onClick={onAdd} disabled={!text.trim()} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white"><CalendarClock size={15} /> {time ? "Save reminder" : "Add to checklist"}</button>
+          <button type="button" onClick={onAdd} disabled={!text.trim() || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {time ? "Save reminder" : "Add to checklist"}</button>
           {notificationPermission === "default" && <button type="button" onClick={onEnableNotifications} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Bell size={14} /> Enable browser alerts</button>}
           <span className="text-[12px] leading-5 text-[var(--text-soft)]">{notificationPermission === "granted" ? "Browser alerts enabled while this page is open." : "Due items appear here while this page is open."}</span>
         </div>
@@ -70,7 +68,7 @@ export function AssistedPublishPanel({ items, destination, text, time, now, noti
             const target = assistedDestinations[item.destination];
             return <article key={item.id} className="px-6 py-4 sm:px-7">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[13px] font-bold text-[var(--text-secondary)]">{item.title}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{target.name} · {new Date(item.scheduledFor).toLocaleString()}</p></div>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[13px] font-bold text-[var(--text-secondary)]">{item.title}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{target.name} · {formatLocalDateTime(item.scheduledFor)}</p></div>
                 <button type="button" aria-label={`Remove ${item.title} from assisted publishing`} onClick={() => onRemove(item.id)} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash2 size={14} /></button>
               </div>
               <details className="mt-2 text-[12px] text-[var(--text-muted)]"><summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Review saved text</summary><p className="mt-2 whitespace-pre-wrap break-words rounded-xl bg-[var(--accent-soft)] p-3 leading-5">{item.text}</p></details>

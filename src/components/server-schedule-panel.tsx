@@ -1,8 +1,9 @@
 "use client";
 
 import { CalendarClock, RotateCcw, Trash2 } from "lucide-react";
-import { localDateTimeValue, scheduleState, type ScheduledPost } from "@/lib/workspace";
+import { scheduleState, type ScheduledPost } from "@/lib/workspace";
 import { platformIds, platforms } from "@/lib/platforms";
+import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 
 type Props = {
   schedule: ScheduledPost[]; value: string; now: number; canSchedule: boolean;
@@ -19,8 +20,8 @@ export function ServerSchedulePanel({ schedule, value, now, canSchedule, running
     </div>
     <div className="p-6 sm:p-7">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <div className="min-w-0 flex-1"><label htmlFor="schedule-time" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Local date and time</label><input id="schedule-time" type="datetime-local" value={value} min={now ? localDateTimeValue(new Date(now)) : undefined} onChange={(event) => onValueChange(event.target.value)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" /></div>
-        <button type="button" onClick={onAdd} disabled={!canSchedule} className="gradient-button inline-flex h-[45px] items-center justify-center gap-2 rounded-xl px-4 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> Add to plan</button>
+        <div className="min-w-0 flex-1"><LocalDateTimeField id="schedule-time" label="Publish at" value={value} minTimestamp={now} onChange={onValueChange} /></div>
+        <button type="button" onClick={onAdd} disabled={!canSchedule || !isValidLocalDateTime(value, now)} className="gradient-button inline-flex h-[43px] items-center justify-center gap-2 rounded-xl px-4 text-[13px] font-bold text-white disabled:opacity-50 sm:mb-[22px]"><CalendarClock size={15} /> Add to plan</button>
       </div>
       <p className="mt-3 text-[12px] leading-5 text-[var(--text-soft)]">Keep <code>npm run worker</code> running on this computer. It simulates due items even after this browser closes. No social platform is contacted.</p>
     </div>
@@ -31,7 +32,7 @@ export function ServerSchedulePanel({ schedule, value, now, canSchedule, running
         return <article key={post.id} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:px-7">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[13px] font-bold text-[var(--text-secondary)]">{post.title}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "failed" || state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "simulated" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{label}</span></div>
-            <p className="mt-1 text-[12px] text-[var(--text-muted)]">{new Date(post.scheduledFor).toLocaleString()} · {platformIds.filter((id) => post.posts[id] !== undefined).map((id) => platforms[id].name).join(", ")}</p>
+            <p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(post.scheduledFor)} · {platformIds.filter((id) => post.posts[id] !== undefined).map((id) => platforms[id].name).join(", ")}</p>
             {post.lastError && <p className="mt-1 text-[12px] text-[var(--danger)]">Attempt {post.attempts}/3: {post.lastError}</p>}
             {!!post.receipts?.length && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Receipts: {post.receipts.map((receipt) => platforms[receipt.platform as keyof typeof platforms]?.name ?? receipt.platform).join(", ")}</p>}
           </div>
