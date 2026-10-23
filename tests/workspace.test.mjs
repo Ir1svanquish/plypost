@@ -44,7 +44,17 @@ test("plan items become due only at their local instant and remain simulated", (
   const dueAt = Date.parse(stamp);
   assert.equal(scheduleState(post, dueAt - 1), "upcoming");
   assert.equal(scheduleState(post, dueAt), "due");
+  assert.equal(scheduleState({ ...post, attempts: 1, nextAttemptAt: new Date(dueAt + 60_000).toISOString() }, dueAt + 1), "upcoming");
+  assert.equal(scheduleState({ ...post, attempts: 1, nextAttemptAt: new Date(dueAt + 60_000).toISOString() }, dueAt + 60_000), "due");
   assert.equal(scheduleState({ ...post, status: "simulated" }, dueAt + 1), "simulated");
   assert.match(localDateTimeValue(new Date(2026, 9, 22, 9, 5)), /^2026-10-22T09:05$/);
   assert.equal(draftTitle("", "First line\nsecond line"), "First line");
+});
+
+test("parser never silently drops a requested destination or normalizes an impossible plan date", () => {
+  const post = { id: "s1", title: "Partial", source: "Text", posts: { bluesky: "x".repeat(301), mastodon: "Keep me" }, scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  const backup = (item) => ({ version: 3, drafts: [], schedule: [item], assisted: [] });
+  assert.deepEqual(parseWorkspace(backup(post))?.schedule, []);
+  assert.deepEqual(parseWorkspace(backup({ ...post, posts: { mastodon: "Keep me", unknown: "Drop me" } }))?.schedule, []);
+  assert.deepEqual(parseWorkspace(backup({ ...post, posts: { mastodon: "Keep me" }, scheduledFor: "2026-02-30T12:00:00.000Z" }))?.schedule, []);
 });

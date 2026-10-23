@@ -96,6 +96,18 @@ test("rejects unknown and over-limit destinations", async () => {
   }
 });
 
+test("Bluesky simulation and planning apply grapheme and UTF-8 byte limits consistently", async () => {
+  const withinLimit = "a\u0301".repeat(300);
+  assert.equal((await post("/api/publish", { posts: { bluesky: withinLimit } })).status, 200);
+  const tooManyBytes = "👨‍👩‍👧‍👦".repeat(121);
+  const rejected = await post("/api/publish", { posts: { bluesky: tooManyBytes } });
+  assert.equal(rejected.status, 400);
+  assert.match((await rejected.json()).error, /UTF-8 bytes/);
+  const stamp = new Date().toISOString();
+  const plan = { id: randomUUID(), title: "Byte limit", source: "Hello", posts: { bluesky: tooManyBytes }, scheduledFor: new Date(Date.now() + 60_000).toISOString(), createdAt: stamp, status: "queued" };
+  assert.equal((await post("/api/workspace", { action: "add-schedule", item: plan, timezone: "UTC" })).status, 400);
+});
+
 test("AI endpoint explains missing server key without exposing one", async () => {
   const response = await post("/api/generate", { source: "A new product idea", provider: "nvidia" });
   assert.equal(response.status, 503);
@@ -117,6 +129,23 @@ test("stores account drafts and scheduled snapshots", async () => {
   const loaded = await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } });
   assert.equal(loaded.status, 200);
   assert.equal((await loaded.json()).drafts[0].id, draft.id);
+});
+
+test("reschedule route requires the owner session and validates UTC time and timezone", async () => {
+  const original = new Date(Date.now() + 60_000);
+  const moved = new Date(Date.now() + 180_000);
+  const plan = { id: randomUUID(), title: "HTTP move", source: "Hello", posts: { bluesky: "Hello" }, scheduledFor: original.toISOString(), createdAt: new Date().toISOString(), status: "queued" };
+  assert.equal((await post("/api/workspace", { action: "add-schedule", item: plan, timezone: "UTC" })).status, 200);
+  const request = { action: "reschedule-schedule", id: plan.id, scheduledFor: moved.toISOString(), timezone: "Asia/Hong_Kong" };
+  assert.equal((await post("/api/workspace", request, false)).status, 401);
+  assert.equal((await post("/api/workspace", { ...request, scheduledFor: "2026-02-30T12:00:00.000Z" })).status, 400);
+  assert.equal((await post("/api/workspace", { ...request, timezone: "Mars/Olympus" })).status, 400);
+  const changed = await post("/api/workspace", request);
+  assert.equal(changed.status, 200);
+  const item = (await changed.json()).schedule.find((scheduled) => scheduled.id === plan.id);
+  assert.equal(item.scheduledFor, moved.toISOString());
+  assert.equal(item.nextAttemptAt, moved.toISOString());
+  assert.deepEqual(item.receipts, []);
 });
 
 test("stores assisted checklist actions behind the owner session", async () => {

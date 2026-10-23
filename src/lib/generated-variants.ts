@@ -1,6 +1,7 @@
-import { characterCount, platformIds, platforms, type PlatformId } from "./platforms";
+import { characterCount, platformIds, type PlatformId } from "./platforms";
+import { validatePlatformText } from "./platform-validation";
 
-export type OverLimitVariant = { platform: PlatformId; count: number; limit: number };
+export type OverLimitVariant = { platform: PlatformId; count: number; limit: number; byteCount?: number; byteLimit?: number };
 
 export function parseGeneratedVariants(content: string): { variants: Record<PlatformId, string>; overLimit: OverLimitVariant[] } | null {
   const json = content.match(/\{[\s\S]*\}/)?.[0];
@@ -14,11 +15,14 @@ export function parseGeneratedVariants(content: string): { variants: Record<Plat
       const raw = (value as Record<string, unknown>)[platform];
       if (typeof raw !== "string" || !raw.trim()) return null;
       const text = raw.trim();
-      const count = characterCount(text);
-      if (count > 5000) return null;
+      if (characterCount(text) > 5000) return null;
       variants[platform] = text;
-      const limit = platforms[platform].limit;
-      if (count > limit) overLimit.push({ platform, count, limit });
+      const check = validatePlatformText(platform, text);
+      if (!check.valid) overLimit.push({
+        platform, count: check.count, limit: check.limit,
+        ...(check.byteCount !== undefined && check.byteLimit !== undefined && check.byteCount > check.byteLimit
+          ? { byteCount: check.byteCount, byteLimit: check.byteLimit } : {}),
+      });
     }
     return { variants, overLimit };
   } catch {

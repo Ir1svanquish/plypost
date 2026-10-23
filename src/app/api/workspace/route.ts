@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, retrySchedule, saveDraft, setAssistedStatus } from "@/lib/server/workspace";
+import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, rescheduleSchedule, retrySchedule, saveDraft, setAssistedStatus } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; status?: unknown; items?: unknown; timezone?: unknown; backup?: unknown };
+  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; status?: unknown; items?: unknown; scheduledFor?: unknown; timezone?: unknown; backup?: unknown };
   try { input = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
   let assistedMigration: "imported" | "skipped" | undefined;
   try {
@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       case "delete-assisted": if (typeof input.id !== "string" || !deleteAssisted(user, input.id)) throw new Error("Assisted item not found."); break;
       case "migrate-assisted": assistedMigration = migrateAssisted(user, input.items); break;
       case "add-schedule": addSchedule(user, input.item, input.timezone); break;
+      case "reschedule-schedule": if (typeof input.id !== "string" || !rescheduleSchedule(user, input.id, input.scheduledFor, input.timezone)) throw new Error("Plan item not found or already running/completed."); break;
       case "delete-schedule": if (typeof input.id !== "string" || !deleteSchedule(user, input.id)) throw new Error("Plan item not found or currently running."); break;
       case "retry-schedule": if (typeof input.id !== "string" || !retrySchedule(user, input.id)) throw new Error("Failed item not found."); break;
       case "import": importLibrary(user, input.backup); break;

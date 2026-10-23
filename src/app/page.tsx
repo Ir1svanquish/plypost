@@ -17,12 +17,14 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { adaptDraft, characterCount, isPlatformId, platformIds, platforms, type PlatformId } from "@/lib/platforms";
+import { validatePlatformText } from "@/lib/platform-validation";
 import { DraftLibraryPanel } from "@/components/workspace-panels";
 import { ServerSchedulePanel } from "@/components/server-schedule-panel";
 import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
 import { PlatformPreview } from "@/components/platform-preview";
+import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -83,6 +85,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [selected, setSelected] = useState<PlatformId[]>([...platformIds]);
   const [active, setActive] = useState<PlatformId>("bluesky");
   const [variants, setVariants] = useState<Partial<Record<PlatformId, string>>>({});
+  const [mediaIds, setMediaIds] = useState<string[]>([]);
+  const [mediaPickerEpoch, setMediaPickerEpoch] = useState(0);
+  const mediaPickerEpochRef = useRef(0);
+  const mediaBusyRef = useRef(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
   const [aiUndo, setAiUndo] = useState<Partial<Record<PlatformId, string>> | null>(null);
   const editorRevision = useRef(0);
   const [provider, setProvider] = useState<Provider>("nvidia");
@@ -170,6 +177,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           activity?: unknown;
           title?: unknown;
           currentDraftId?: unknown;
+          mediaIds?: unknown;
         };
         if (typeof data.source === "string") {
           const hasCustomVariants = data.variants && typeof data.variants === "object" &&
@@ -192,6 +200,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         if (Array.isArray(data.activity)) setActivity(data.activity.slice(0, 12));
         if (typeof data.title === "string") setTitle(data.title.slice(0, 120));
         if (typeof data.currentDraftId === "string") setCurrentDraftId(data.currentDraftId);
+        if (Array.isArray(data.mediaIds) && data.mediaIds.length <= 4 && data.mediaIds.every((id) => typeof id === "string")) setMediaIds(data.mediaIds);
       }
     } catch {
       // A malformed local draft should never prevent the editor from opening.
@@ -225,12 +234,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, provider, activity, title, currentDraftId }));
+      localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, mediaIds, provider, activity, title, currentDraftId }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, provider, activity, title, currentDraftId, hydrated]);
+  }, [source, selected, variants, mediaIds, provider, activity, title, currentDraftId, hydrated]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -269,9 +278,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   const textFor = (id: PlatformId) => variants[id] ?? adaptDraft(source, id);
   const currentText = textFor(active);
-  const currentCount = characterCount(currentText);
+  const currentValidation = validatePlatformText(active, currentText);
+  const currentCount = currentValidation.count;
   const invalidSelected = selected.filter(
-    (id) => !textFor(id).trim() || characterCount(textFor(id)) > platforms[id].limit,
+    (id) => !validatePlatformText(id, textFor(id)).valid,
   );
   const canPublish = selected.length > 0 && invalidSelected.length === 0 && !publishing;
   const suggestedAssistText = isPlatformId(assistDestination) ? textFor(assistDestination) : source;
@@ -301,7 +311,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source, provider }),
       });
-      const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: { platform: PlatformId; count: number; limit: number }[] } = await response.json();
+      const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: { platform: PlatformId; count: number; limit: number; byteCount?: number; byteLimit?: number }[] } = await response.json();
       if (!response.ok) throw new Error(data.error || "AI adaptation failed.");
       if (!data.variants) throw new Error("AI adaptation returned no drafts.");
       if (editorRevision.current !== revisionAtStart) {
@@ -313,7 +323,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       const overLimit = data.overLimit ?? [];
       setNotice(overLimit.length ? {
         kind: "error",
-        text: `AI drafts are ready, but ${overLimit.map(({ platform, count, limit }) => `${platforms[platform].name} is ${count}/${limit} characters`).join("; ")}. Shorten them before sharing.`,
+        text: `AI drafts are ready, but ${overLimit.map(({ platform, count, limit, byteCount, byteLimit }) =>
+          byteCount !== undefined && byteLimit !== undefined
+            ? `${platforms[platform].name} is ${byteCount}/${byteLimit} bytes`
+            : `${platforms[platform].name} is ${count}/${limit} characters`).join("; ")}. Shorten them before sharing.`,
       } : { kind: "success", text: "Four platform drafts are ready to review and edit." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "AI adaptation failed." });
@@ -348,6 +361,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function saveDraft() {
+    if (mediaBusyRef.current) {
+      setNotice({ kind: "error", text: "Wait for the image operation to finish before saving this draft." });
+      return;
+    }
     if (!source.trim()) {
       setNotice({ kind: "error", text: "Write a source draft before saving it." });
       return;
@@ -364,6 +381,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       source,
       selected: [...selected],
       variants: { ...variants },
+      mediaIds: [...mediaIds],
       createdAt: existing?.createdAt ?? stamp,
       updatedAt: stamp,
     };
@@ -377,13 +395,22 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
+  function resetMediaPicker() {
+    mediaPickerEpochRef.current += 1;
+    setMediaPickerEpoch(mediaPickerEpochRef.current);
+    mediaBusyRef.current = false;
+    setMediaBusy(false);
+  }
+
   function newDraft() {
     editorRevision.current += 1;
+    resetMediaPicker();
     setAiUndo(null);
     setCurrentDraftId(null);
     setTitle("");
     setSource("");
     setVariants({});
+    setMediaIds([]);
     setSelected([...platformIds]);
     setActive("bluesky");
     setNotice(null);
@@ -392,12 +419,14 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   function loadDraft(draft: SavedDraft) {
     editorRevision.current += 1;
+    resetMediaPicker();
     setAiUndo(null);
     setCurrentDraftId(draft.id);
     setTitle(draft.title);
     setSource(draft.source);
     setSelected(draft.selected);
     setVariants(draft.variants);
+    setMediaIds(draft.mediaIds ?? []);
     setActive(draft.selected[0] ?? "bluesky");
     setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
     openView("compose");
@@ -416,8 +445,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   async function addToPlan() {
     const scheduledFor = new Date(scheduleTime);
-    if (!scheduleTime || !Number.isFinite(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now()) {
-      setNotice({ kind: "error", text: "Choose a future local date and time." });
+    if (!scheduleTime || !Number.isFinite(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now() + 10_000) {
+      setNotice({ kind: "error", text: "Choose a local date and time at least 10 seconds ahead." });
       return;
     }
     if (!source.trim() || selected.length === 0 || invalidSelected.length > 0) {
@@ -448,12 +477,14 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   function loadScheduled(post: ScheduledPost) {
     editorRevision.current += 1;
+    resetMediaPicker();
     setAiUndo(null);
     setCurrentDraftId(null);
     setTitle(post.title);
     setSource(post.source);
     setSelected(platformIds.filter((id) => post.posts[id] !== undefined));
     setVariants({ ...post.posts });
+    setMediaIds([]);
     setActive(platformIds.find((id) => post.posts[id] !== undefined) ?? "bluesky");
     setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
     openView("compose");
@@ -468,6 +499,26 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "success", text: "Queued for another simulation attempt." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Simulation failed." });
+    } finally {
+      setRunningId(null);
+    }
+  }
+
+  async function rescheduleScheduled(post: ScheduledPost, scheduledForIso: string): Promise<void> {
+    if (runningId) throw new Error("Another plan update is in progress.");
+    setRunningId(post.id);
+    try {
+      await changeWorkspace("reschedule-schedule", {
+        id: post.id,
+        scheduledFor: scheduledForIso,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      });
+      setNotice({ kind: "success", text: post.receipts?.length
+        ? "Moved the remaining simulation to the new time. Existing simulated receipts were kept."
+        : "Plan item moved to the new time." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not move plan item." });
+      throw error;
     } finally {
       setRunningId(null);
     }
@@ -491,6 +542,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     link.download = `plypost-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setNotice({ kind: "success", text: "JSON exported. Image files are not included; back up the SQLite database for a complete copy." });
   }
 
   async function importWorkspace(file: File) {
@@ -498,7 +550,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       if (file.size > 2_000_000) throw new Error("Backup file is too large (2 MB maximum).");
       const workspace = parseWorkspace(JSON.parse(await file.text()));
       if (!workspace) throw new Error("This is not a Plypost workspace backup.");
-      if (!window.confirm("Replace your account's drafts, publishing plan, and assisted posts with this backup?")) return;
+      if (!window.confirm("Replace your account's drafts, publishing plan, and assisted posts with this JSON backup? Images are not in the file, so drafts referencing images require those images in this account's database.")) return;
       await changeWorkspace("import", { backup: workspace });
       localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace()));
       setLegacyWorkspace(null);
@@ -555,6 +607,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     if (!text || characterCount(text) > 5000) {
       setNotice({ kind: "error", text: "Add text of up to 5,000 characters before saving." });
       return;
+    }
+    if (isPlatformId(assistDestination)) {
+      const validation = validatePlatformText(assistDestination, text);
+      if (!validation.valid) {
+        setNotice({ kind: "error", text: validation.issues.find((issue) => issue.severity === "error")?.message ?? "Review the platform draft before saving." });
+        return;
+      }
     }
     if (!Number.isFinite(scheduledFor.getTime()) || (assistTime && scheduledFor.getTime() <= Date.now())) {
       setNotice({ kind: "error", text: "Choose a future reminder time, or leave it blank for now." });
@@ -665,6 +724,16 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   <label htmlFor="source-draft" className="mb-2 block text-[13px] font-bold text-[var(--text)]">Your message</label>
                   <textarea id="source-draft" value={source} onChange={(event) => { editorRevision.current += 1; setSource(event.target.value); setNotice(null); }} placeholder="What's on your mind? Add a launch update, insight, or idea to share..." maxLength={3000} className="min-h-[194px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[15px] leading-[1.75] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
                   <div className="mt-2 flex items-center justify-between text-[12px] text-[var(--text-soft)]"><span>Fine-tune each version in the preview.</span><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
+                  <ImageAttachmentPicker
+                    key={mediaPickerEpoch}
+                    selectedIds={mediaIds}
+                    onChange={(ids) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) setMediaIds(ids); }}
+                    onBusyChange={(busy) => {
+                      if (mediaPickerEpochRef.current !== mediaPickerEpoch) return;
+                      mediaBusyRef.current = busy;
+                      setMediaBusy(busy);
+                    }}
+                  />
                   <div className="mt-6 border-t border-[var(--line)] pt-5">
                     <div className="mb-3 flex items-center justify-between"><h3 className="text-[13px] font-bold text-[var(--text)]">Destinations</h3><span className="text-[12px] text-[var(--text-muted)]">{selected.length} selected</span></div>
                     <div role="group" aria-label="Destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
@@ -679,7 +748,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
                     {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   </details>
-                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={saveDraft} disabled={!source.trim()} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white"><FilePenLine size={15} />{currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
+                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={saveDraft} disabled={!source.trim() || mediaBusy} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
                 </div>
               </section>
             </div>
@@ -689,7 +758,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                 <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="preview-heading" className="text-[17px] font-bold tracking-[-0.025em]">Platform preview</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your text before sharing.</p></div><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--accent-text)]">EXAMPLE</span></div>
                 <div className="mobile-x-scroll flex gap-1 border-b border-[var(--line)] px-4 sm:px-6" role="tablist" aria-label="Platform previews">{platformIds.map((id) => <button key={id} type="button" role="tab" aria-selected={active === id} onClick={() => setActive(id)} className={`relative flex shrink-0 items-center gap-1.5 px-3 py-4 text-[12px] font-semibold transition sm:text-[13px] ${active === id ? "text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}><span className={`${selected.includes(id) ? "" : "opacity-40"}`}>{platforms[id].name}</span>{active === id && <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--accent)]" />}</button>)}</div>
                 <div className="dot-grid bg-[var(--surface-muted)] p-5 sm:p-7"><PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} /></div>
-                <div className="px-6 pb-6 pt-5 sm:px-7 sm:pb-7"><div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">Edit {platforms[active].name} draft</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div><textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" /><div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${currentCount > platforms[active].limit ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{currentCount > platforms[active].limit ? "Over platform limit" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${currentCount > platforms[active].limit ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div><button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button></div>
+                {currentValidation.issues.length > 0 && <div role="status" className="space-y-2 px-6 pt-5 sm:px-7">
+                  {currentValidation.issues.map((issue) => <p key={issue.code} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${issue.severity === "error" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--warning-soft)] text-[var(--warning)]"}`}>
+                    <CircleAlert size={14} className="mt-0.5 shrink-0" />
+                    <span>{issue.message}{issue.sourceUrl && <a href={issue.sourceUrl} target="_blank" rel="noopener noreferrer" className="ml-1 underline underline-offset-2">Platform guidance</a>}</span>
+                  </p>)}
+                </div>}
+                <div className="px-6 pb-6 pt-5 sm:px-7 sm:pb-7"><div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">Edit {platforms[active].name} draft</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div><textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" /><div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${!currentValidation.valid ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{!currentValidation.valid ? "Needs attention" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${!currentValidation.valid ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div><button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button></div>
               </section>
 
               <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your selected drafts first.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? selected.map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No destinations selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={simulatePublish} disabled={!canPublish} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> {publishing ? "Simulating..." : `Simulate publish to ${selected.length || 0} platform${selected.length === 1 ? "" : "s"}`} <ArrowRight size={15} className="ml-1" /></button><p className="mt-3 text-center text-[12px] text-[var(--text-soft)]">Demo action only. No post leaves this app.</p></section>
@@ -708,7 +783,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           {view === "schedule" && <div>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Schedule a snapshot of the draft currently in your editor.</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations selected</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
-            <ServerSchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onRemove={removeScheduled} />
+            <ServerSchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} />
           </div>}
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>

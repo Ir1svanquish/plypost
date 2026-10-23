@@ -90,3 +90,10 @@ test("legacy browser import replaces drafts and plans without replacing account 
   assert.deepEqual(listWorkspace(owner).assisted, [accountItem]);
   assert.equal(listWorkspace(owner).schedule[0].id, schedule.id);
 });
+
+test("assisted publishing enforces known platform limits without restricting other destinations", () => {
+  assert.throws(() => addAssisted(owner, { ...item("x".repeat(301)), destination: "bluesky" }), /Fix platform draft limits/);
+  const elsewhere = item("x".repeat(301));
+  assert.deepEqual(addAssisted(owner, elsewhere), elsewhere);
+  assert.equal(deleteAssisted(owner, elsewhere.id), true);
+});

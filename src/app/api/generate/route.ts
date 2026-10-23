@@ -72,7 +72,7 @@ export async function POST(request: Request) {
         messages: [
           {
             role: "system",
-            content: `You are a social media editor. Rewrite the user's draft into four distinct platform-native posts. Preserve facts, claims, URLs and intent. Do not invent details. Return ONLY a JSON object with string keys bluesky, mastodon, linkedin and threads. Bluesky: concise, at most ${platforms.bluesky.limit} characters. Mastodon: clear context, at most ${platforms.mastodon.limit} characters. LinkedIn: professional and readable, at most ${platforms.linkedin.limit} characters. Threads: conversational, at most ${platforms.threads.limit} characters. Do not add markdown fences.`,
+            content: `You are a social media editor. Rewrite the user's draft into four distinct platform-native posts. Preserve facts, claims, URLs and intent. Do not invent details. Return ONLY a JSON object with string keys bluesky, mastodon, linkedin and threads. Bluesky: concise, at most ${platforms.bluesky.limit} grapheme clusters and 3,000 UTF-8 bytes. Mastodon: clear context, at most ${platforms.mastodon.limit} characters for the default composer (instance limits may differ). LinkedIn: professional and readable, at most ${platforms.linkedin.limit} characters. Threads: conversational, at most ${platforms.threads.limit} characters. Do not add markdown fences.`,
           },
           { role: "user", content: source },
         ],

@@ -117,7 +117,7 @@ export function PlatformPreview({ platform, text, count, limit }: Props) {
       </div>
       <figcaption className="mt-3 flex flex-wrap items-center justify-center gap-x-2 text-center text-[11px] text-[var(--text-soft)]">
         <span>Illustrative preview · No account connected</span>
-        {typeof count === "number" && typeof limit === "number" && <span className="tabular-nums">· {count} / {limit} characters</span>}
+        {typeof count === "number" && typeof limit === "number" && <span className="tabular-nums">· {count} / {limit} {platform === "bluesky" ? "graphemes" : "characters"}</span>}
       </figcaption>
     </figure>
   );

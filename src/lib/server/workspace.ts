@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
 import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
-import { platformIds } from "../platforms";
+import { isPlatformId, platformIds } from "../platforms";
+import { validatePlatformText } from "../platform-validation";
+import { assertOwnedMedia } from "./media";
 
 type DraftRow = { payload: string };
 type JobRow = {
@@ -19,15 +21,19 @@ export type ServerSchedule = ScheduledPost & {
 
 function mapJob(row: JobRow): ServerSchedule {
   const post = JSON.parse(row.payload) as ScheduledPost;
-  return {
+  const mapped: ServerSchedule = {
     ...post,
     status: row.status as ServerSchedule["status"],
     attempts: row.attempts,
-    ...(row.status === "queued" ? { nextAttemptAt: row.next_attempt_at } : {}),
-    ...(row.last_error ? { lastError: row.last_error } : {}),
-    ...(row.completed_at ? { simulatedAt: row.completed_at } : {}),
     receipts: JSON.parse(row.receipts) as ServerSchedule["receipts"],
   };
+  delete mapped.nextAttemptAt;
+  delete mapped.lastError;
+  delete mapped.simulatedAt;
+  if (row.status === "queued") mapped.nextAttemptAt = row.next_attempt_at;
+  if (row.last_error) mapped.lastError = row.last_error;
+  if (row.status === "simulated" && row.completed_at) mapped.simulatedAt = row.completed_at;
+  return mapped;
 }
 
 export function listWorkspace(userId: string) {
@@ -61,9 +67,30 @@ function validAssisted(value: unknown): AssistedPost | null {
 
 const validId = (id: string) => /^[a-f0-9-]{36}$/i.test(id);
 
+const MIN_SCHEDULE_LEAD_MS = 10_000;
+
+function validFutureUtc(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toISOString() === value && date.getTime() >= Date.now() + MIN_SCHEDULE_LEAD_MS;
+}
+
+function validTimezone(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 64 || !/^(?:UTC|[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){1,3})$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function addAssisted(userId: string, value: unknown): AssistedPost {
   const item = validAssisted(value);
   if (!item || !validId(item.id) || item.status !== "queued") throw new Error("Invalid assisted item.");
+  if (isPlatformId(item.destination) && !validatePlatformText(item.destination, item.text).valid) {
+    throw new Error("Fix platform draft limits before adding to assisted publishing.");
+  }
   transaction((db) => {
     if (db.prepare("SELECT id FROM assisted WHERE id=?").get(item.id)) throw new Error("Assisted item already exists.");
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
@@ -145,6 +172,7 @@ export function saveDraft(userId: string, value: unknown): SavedDraft {
   const draft = validDraft(value);
   if (!draft || !/^[a-f0-9-]{36}$/i.test(draft.id)) throw new Error("Invalid draft.");
   transaction((db) => {
+    assertOwnedMedia(userId, draft.mediaIds ?? []);
     const existing = db.prepare("SELECT user_id, payload FROM drafts WHERE id=?").get(draft.id) as { user_id: string; payload: string } | undefined;
     if (existing && existing.user_id !== userId) throw new Error("Draft not found.");
     const count = db.prepare("SELECT COUNT(*) AS count FROM drafts WHERE user_id=?").get(userId) as { count: number };
@@ -167,9 +195,11 @@ export function deleteDraft(userId: string, id: string) {
 export function addSchedule(userId: string, value: unknown, timezone: unknown): ServerSchedule {
   const post = validSchedule(value);
   if (!post || post.status !== "queued" || !/^[a-f0-9-]{36}$/i.test(post.id) ||
-      Date.parse(post.scheduledFor) <= Date.now() ||
-      typeof timezone !== "string" || !/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,3}$/.test(timezone)) {
-    throw new Error("Choose a future time and valid platform drafts.");
+      !validFutureUtc(post.scheduledFor) || !validTimezone(timezone)) {
+    throw new Error("Choose a valid time at least 10 seconds ahead, timezone, and platform drafts.");
+  }
+  if (platformIds.some((id) => post.posts[id] !== undefined && !validatePlatformText(id, post.posts[id]!).valid)) {
+    throw new Error("Fix platform draft limits before adding to the plan.");
   }
   const now = new Date().toISOString();
   transaction((db) => {
@@ -189,10 +219,33 @@ export function deleteSchedule(userId: string, id: string) {
 }
 
 export function retrySchedule(userId: string, id: string) {
-  const result = database().prepare("UPDATE jobs SET status='queued',next_attempt_at=?,last_error=NULL WHERE id=? AND user_id=? AND status='failed'")
+  const result = database().prepare("UPDATE jobs SET status='queued',attempts=0,next_attempt_at=?,last_error=NULL WHERE id=? AND user_id=? AND status='failed'")
     .run(new Date().toISOString(), id, userId);
   if (result.changes) audit(userId, "schedule.retried", id);
   return Boolean(result.changes);
+}
+
+export function rescheduleSchedule(userId: string, id: string, scheduledFor: unknown, timezone: unknown): boolean {
+  if (!validId(id) || !validFutureUtc(scheduledFor) || !validTimezone(timezone)) {
+    throw new Error("Choose a valid UTC time at least 10 seconds ahead and a recognized timezone.");
+  }
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM jobs WHERE id=? AND user_id=? AND status IN ('queued','failed')")
+      .get(id, userId) as { payload: string } | undefined;
+    if (!row) return false;
+    const post = JSON.parse(row.payload) as ScheduledPost;
+    const updated: ScheduledPost = { ...post, scheduledFor, status: "queued" };
+    delete updated.nextAttemptAt;
+    delete updated.lastError;
+    delete updated.simulatedAt;
+    delete updated.attempts;
+    const result = db.prepare(`UPDATE jobs SET payload=?,scheduled_for=?,timezone=?,status='queued',attempts=0,next_attempt_at=?,
+      lease_until=NULL,last_error=NULL,completed_at=NULL WHERE id=? AND user_id=? AND status IN ('queued','failed')`)
+      .run(JSON.stringify(updated), scheduledFor, timezone, scheduledFor, id, userId);
+    if (!result.changes) return false;
+    audit(userId, "schedule.rescheduled", id, `${timezone}; ${scheduledFor}`);
+    return true;
+  });
 }
 
 type ImportMode = "replace-all" | "preserve-assisted";
@@ -212,6 +265,7 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
     if (running.count) throw new Error("Wait for running jobs before importing.");
     if (mode === "replace-all") db.prepare("DELETE FROM assisted WHERE user_id=?").run(userId);
     for (const draft of workspace.drafts) {
+      assertOwnedMedia(userId, draft.mediaIds ?? []);
       db.prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?)")
         .run(draft.id, userId, JSON.stringify(draft), draft.updatedAt);
     }

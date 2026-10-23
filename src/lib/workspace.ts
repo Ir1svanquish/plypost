@@ -1,4 +1,5 @@
 import { characterCount, isPlatformId, platformIds, platforms, type PlatformId } from "./platforms.ts";
+import { validatePlatformText } from "./platform-validation.ts";
 import { isAssistedDestinationId, type AssistedDestinationId } from "./assisted.ts";
 
 export const WORKSPACE_KEY = "socialflow-workspace-v2";
@@ -9,6 +10,7 @@ export type SavedDraft = {
   source: string;
   selected: PlatformId[];
   variants: Partial<Record<PlatformId, string>>;
+  mediaIds?: string[];
   createdAt: string;
   updatedAt: string;
 };
@@ -55,6 +57,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const validDate = (value: unknown): value is string =>
   typeof value === "string" && Number.isFinite(Date.parse(value));
 
+const validUtcInstant = (value: unknown): value is string =>
+  typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
+  Number.isFinite(new Date(value).getTime()) && new Date(value).toISOString() === value;
+
 function selectedPlatforms(value: unknown): PlatformId[] {
   if (!Array.isArray(value)) return [];
   return platformIds.filter((id) => value.includes(id));
@@ -71,13 +77,14 @@ function validVariants(value: unknown): Partial<Record<PlatformId, string>> {
   return variants;
 }
 
-function validReceipts(value: unknown): NonNullable<ScheduledPost["receipts"]> {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 4).filter((item) =>
+function validReceipts(value: unknown): NonNullable<ScheduledPost["receipts"]> | null {
+  if (!Array.isArray(value) || value.length > 4) return null;
+  const receipts = value.filter((item) =>
     isRecord(item) && isPlatformId(item.platform) &&
     typeof item.id === "string" && item.id.length <= 120 &&
-    item.status === "simulated" && validDate(item.publishedAt) &&
-    typeof item.content === "string" && characterCount(item.content) <= platforms[item.platform].limit,
+    item.status === "simulated" && validUtcInstant(item.publishedAt) &&
+    typeof item.content === "string" &&
+    (validatePlatformText(item.platform, item.content).valid || characterCount(item.content) <= platforms[item.platform].limit),
   ).map((item) => ({
     platform: item.platform as PlatformId,
     id: item.id as string,
@@ -85,6 +92,7 @@ function validReceipts(value: unknown): NonNullable<ScheduledPost["receipts"]> {
     publishedAt: item.publishedAt as string,
     content: item.content as string,
   }));
+  return receipts.length === value.length && new Set(receipts.map((item) => item.platform)).size === receipts.length ? receipts : null;
 }
 
 function parseDraft(value: unknown): SavedDraft | null {
@@ -92,12 +100,16 @@ function parseDraft(value: unknown): SavedDraft | null {
       typeof value.title !== "string" || typeof value.source !== "string" ||
       characterCount(value.title) > 120 || characterCount(value.source) > 3000 ||
       !validDate(value.createdAt) || !validDate(value.updatedAt)) return null;
+  if (value.mediaIds !== undefined && (!Array.isArray(value.mediaIds) || value.mediaIds.length > 4 ||
+      new Set(value.mediaIds).size !== value.mediaIds.length ||
+      value.mediaIds.some((id) => typeof id !== "string" || !/^[a-f0-9-]{36}$/i.test(id)))) return null;
   return {
     id: value.id,
     title: value.title,
     source: value.source,
     selected: selectedPlatforms(value.selected),
     variants: validVariants(value.variants),
+    ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   };
@@ -107,17 +119,20 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
   if (!isRecord(value) || typeof value.id !== "string" || !value.id ||
       typeof value.title !== "string" || characterCount(value.title) > 120 ||
       typeof value.source !== "string" || characterCount(value.source) > 3000 ||
-      !validDate(value.scheduledFor) || !validDate(value.createdAt) ||
+    !validUtcInstant(value.scheduledFor) || !validDate(value.createdAt) ||
       (value.status !== "queued" && value.status !== "running" && value.status !== "simulated" && value.status !== "failed") ||
       !isRecord(value.posts)) return null;
   const posts: Partial<Record<PlatformId, string>> = {};
-  for (const id of platformIds) {
+  for (const id of Object.keys(value.posts)) {
+    if (!isPlatformId(id)) return null;
     const text = value.posts[id];
-    if (typeof text === "string" && text.trim() && characterCount(text) <= platforms[id].limit) {
-      posts[id] = text;
-    }
+    if (typeof text !== "string" || !text.trim() ||
+        (!validatePlatformText(id, text).valid && characterCount(text) > platforms[id].limit)) return null;
+    posts[id] = text;
   }
   if (!Object.keys(posts).length) return null;
+  const receipts = value.receipts === undefined ? undefined : validReceipts(value.receipts);
+  if (receipts === null || receipts?.some((receipt) => posts[receipt.platform as PlatformId] !== receipt.content)) return null;
   return {
     id: value.id,
     title: value.title,
@@ -130,7 +145,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
     ...(typeof value.attempts === "number" ? { attempts: value.attempts } : {}),
     ...(validDate(value.nextAttemptAt) ? { nextAttemptAt: value.nextAttemptAt } : {}),
     ...(typeof value.lastError === "string" ? { lastError: value.lastError } : {}),
-    ...(Array.isArray(value.receipts) ? { receipts: validReceipts(value.receipts) } : {}),
+    ...(receipts ? { receipts } : {}),
   };
 }
 
@@ -139,7 +154,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
       typeof value.title !== "string" || characterCount(value.title) > 120 ||
       !isAssistedDestinationId(value.destination) ||
       typeof value.text !== "string" || !value.text.trim() || characterCount(value.text) > 5000 ||
-      !validDate(value.scheduledFor) || !validDate(value.createdAt) ||
+      !validUtcInstant(value.scheduledFor) || !validDate(value.createdAt) ||
       (value.status !== "queued" && value.status !== "posted")) return null;
   return {
     id: value.id,
@@ -176,7 +191,8 @@ export function scheduleState(post: ScheduledPost, now: number): "upcoming" | "d
   if (post.status === "simulated") return "simulated";
   if (post.status === "running") return "running";
   if (post.status === "failed") return "failed";
-  return Date.parse(post.scheduledFor) <= now ? "due" : "upcoming";
+  const next = post.nextAttemptAt && validUtcInstant(post.nextAttemptAt) ? post.nextAttemptAt : post.scheduledFor;
+  return Date.parse(next) <= now ? "due" : "upcoming";
 }
 
 export function assistedState(post: AssistedPost, now: number): "upcoming" | "due" | "posted" {

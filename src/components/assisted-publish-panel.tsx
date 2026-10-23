@@ -2,6 +2,8 @@
 
 import { Bell, CalendarClock, Check, Copy, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 import { assistedDestinations, assistedIds, type AssistedDestinationId } from "@/lib/assisted";
+import { isPlatformId } from "@/lib/platforms";
+import { validatePlatformText } from "@/lib/platform-validation";
 import { assistedState, type AssistedPost } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 
@@ -27,6 +29,7 @@ type Props = {
 export function AssistedPublishPanel({ items, destination, text, time, now, busy, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUndo, onRemove, onEnableNotifications }: Props) {
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const selected = assistedDestinations[destination];
+  const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
 
   return (
     <section id="assisted" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="assisted-heading">
@@ -51,9 +54,13 @@ export function AssistedPublishPanel({ items, destination, text, time, now, busy
           <label htmlFor="assisted-text" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Text to copy</label>
           <textarea id="assisted-text" value={text} maxLength={5000} onChange={(event) => onTextChange(event.target.value)} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint}{selected.needsMedia ? " Plypost saves the text only; add the media on the platform." : ""}</p>
+          {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
+            <p className={validation.valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}>{validation.count} / {validation.limit} {destination === "bluesky" ? "graphemes" : "characters"}{validation.byteCount !== undefined ? ` · ${validation.byteCount} / ${validation.byteLimit} UTF-8 bytes` : ""}</p>
+            {validation.issues.map((issue) => <p key={issue.code} className={issue.severity === "error" ? "text-[var(--danger)]" : "text-[var(--warning)]"}>{issue.message}</p>)}
+          </div>}
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <button type="button" onClick={onAdd} disabled={busy || !text.trim() || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
+          <button type="button" onClick={onAdd} disabled={busy || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
           {notificationPermission === "default" && <button type="button" onClick={onEnableNotifications} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Bell size={14} /> Enable browser alerts</button>}
           <span className="text-[12px] leading-5 text-[var(--text-soft)]">{notificationPermission === "granted" ? "Browser alerts enabled while this page is open." : "Due items appear here while this page is open."}</span>
         </div>

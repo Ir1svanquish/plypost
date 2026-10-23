@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { characterCount, isPlatformId, platforms, type PlatformId } from "@/lib/platforms";
+import { isPlatformId, type PlatformId } from "@/lib/platforms";
+import { validatePlatformText } from "@/lib/platform-validation";
 import { publishers } from "@/lib/publishers";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { audit } from "@/lib/server/db";
@@ -37,9 +38,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unknown destination or invalid content." }, { status: 400 });
     }
     const content = value.trim();
-    if (!content || characterCount(content) > platforms[platform].limit) {
+    const check = validatePlatformText(platform, content);
+    if (!check.valid) {
       return NextResponse.json(
-        { error: `${platforms[platform].name} needs text within its ${platforms[platform].limit}-character limit.` },
+        { error: check.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" ") },
         { status: 400 },
       );
     }
