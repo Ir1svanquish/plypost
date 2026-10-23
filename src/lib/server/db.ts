@@ -62,6 +62,9 @@ export function database(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS worker_heartbeat (
       id INTEGER PRIMARY KEY CHECK(id=1), seen_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS mastodon_worker_heartbeat (
+      id INTEGER PRIMARY KEY CHECK(id=1), seen_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS mastodon_oauth_states (
       state_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL,
       instance TEXT NOT NULL, redirect_uri TEXT NOT NULL,
@@ -98,6 +101,7 @@ export function database(): DatabaseSync {
       text TEXT NOT NULL, content_hash TEXT NOT NULL,
       scheduled_for TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('queued','inflight','posted','unknown','rejected','cancelled')),
+      dispatch_authorized INTEGER NOT NULL DEFAULT 0 CHECK(dispatch_authorized IN (0,1)),
       claimed_at TEXT, remote_id TEXT, remote_url TEXT, last_error TEXT,
       resolution TEXT CHECK(resolution IN ('found','absent') OR resolution IS NULL),
       resolved_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -128,6 +132,14 @@ export function database(): DatabaseSync {
   if (!attemptColumns.some((column) => column.name === "resolved_at")) {
     db.exec("ALTER TABLE mastodon_publish_attempts ADD COLUMN resolved_at TEXT");
   }
+  const scheduledColumns = db.prepare("PRAGMA table_info(mastodon_scheduled_posts)").all() as { name: string }[];
+  if (!scheduledColumns.some((column) => column.name === "dispatch_authorized")) {
+    db.exec("ALTER TABLE mastodon_scheduled_posts ADD COLUMN dispatch_authorized INTEGER NOT NULL DEFAULT 0 CHECK(dispatch_authorized IN (0,1))");
+  }
+  // A record from before real scheduling was enabled must never start publishing after an upgrade.
+  db.prepare(`UPDATE mastodon_scheduled_posts SET status='cancelled',
+    last_error='This entry predates authorized automatic publishing. Schedule it again to send it.',updated_at=?
+    WHERE status='queued' AND dispatch_authorized=0`).run(new Date().toISOString());
   const unresolvedIndex = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='mastodon_attempts_unresolved_content'")
     .get() as { sql: string } | undefined;
   if (!unresolvedIndex?.sql.includes("resolution='found'")) {

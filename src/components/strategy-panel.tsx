@@ -69,7 +69,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [brief, setBrief] = useState<BrandBrief | null>(null);
   const [form, setForm] = useState<BriefForm>(() => asForm(null));
-  const [profileOpen, setProfileOpen] = useState(true);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [plans, setPlans] = useState<WeeklyPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [weekStart, setWeekStart] = useState(() => localMonday(new Date()));
@@ -123,7 +123,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
         setPlans(data.plans);
         setNewDrafts({});
         setSelectedPlanId(data.plans[0]?.id ?? "");
-        setProfileOpen(!data.brief);
+        setProfileOpen(false);
         setEditingIdeaId(null);
         setMessage(null);
       } catch (error) {

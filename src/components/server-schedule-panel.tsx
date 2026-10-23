@@ -40,6 +40,7 @@ export function ServerSchedulePanel({ schedule, assisted, value, now, canSchedul
   });
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [showAllDates, setShowAllDates] = useState(false);
+  const [showAllAttention, setShowAllAttention] = useState(false);
   const [filter, setFilter] = useState<PlanAgendaFilter>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -48,6 +49,16 @@ export function ServerSchedulePanel({ schedule, assisted, value, now, canSchedul
   const queuedCount = schedule.filter((post) => post.status === "queued").length;
   const manualPendingCount = assisted.filter((post) => post.status === "queued").length;
   const allItems = buildPlanAgenda(schedule, assisted);
+  const attentionItems = [
+    ...assisted.filter((post) => assistedState(post, now) === "due").map((post) => ({ kind: "manual" as const, post })),
+    ...schedule.filter((post) => {
+      const state = scheduleState(post, now);
+      return state === "failed" || state === "due";
+    }).map((post) => ({ kind: "simulation" as const, post })),
+  ].sort((left, right) => Date.parse(left.post.scheduledFor) - Date.parse(right.post.scheduledFor));
+  const visibleAttention = showAllAttention ? attentionItems : attentionItems.slice(0, 4);
+  const readyManualCount = attentionItems.filter((item) => item.kind === "manual").length;
+  const failedSimulationCount = attentionItems.filter((item) => item.kind === "simulation" && item.post.status === "failed").length;
   const filtered = allItems.filter((item) => matchesPlanAgendaFilter(item, filter));
   const monthItems = agendaForMonth(filtered, month.year, month.index);
   const agenda = showAllDates ? filtered : monthItems.filter((item) => !selectedDay || localAgendaDay(item.scheduledFor) === selectedDay);
@@ -112,8 +123,28 @@ export function ServerSchedulePanel({ schedule, assisted, value, now, canSchedul
         <div className="min-w-0 flex-1"><LocalDateTimeField id="schedule-time" label="Simulation time" value={value} minTimestamp={now + 10_000} onChange={onValueChange} /></div>
         <button type="button" onClick={onAdd} disabled={!canSchedule || !isValidLocalDateTime(value, now + 10_000)} className="gradient-button inline-flex h-[43px] items-center justify-center gap-2 rounded-xl px-4 text-[13px] font-bold text-white disabled:opacity-50 sm:mb-[22px]"><CalendarClock size={15} /> Add simulation</button>
       </div>
-      <p className="mt-3 text-[12px] leading-5 text-[var(--text-soft)]">Keep <code>npm run worker</code> running on this computer. It simulates due items even after this browser closes. No social platform is contacted.</p>
+      <p className="mt-3 text-[12px] leading-5 text-[var(--text-soft)]">Keep <code>npm run worker</code> running on this computer. Items in this calendar are simulated or manual. Separately confirmed Mastodon live schedules can publish through the same worker.</p>
     </div>
+    {attentionItems.length > 0 && <div className="border-t border-[var(--line)] bg-[var(--surface-muted)] px-6 py-5 sm:px-7" aria-labelledby="plan-attention-heading">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div><h3 id="plan-attention-heading" className="text-[15px] font-bold text-[var(--text)]">Needs attention</h3><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Across all dates · {readyManualCount} manual ready, {failedSimulationCount} simulation failed{attentionItems.length - readyManualCount - failedSimulationCount ? `, ${attentionItems.length - readyManualCount - failedSimulationCount} simulation waiting for worker` : ""}.</p></div>
+        <span className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--warning)]">{attentionItems.length} to review</span>
+      </div>
+      <div className="mt-4 divide-y divide-[var(--line)] overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
+        {visibleAttention.map((item) => {
+          if (item.kind === "manual") return <div key={`attention-manual-${item.post.id}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0"><p className="break-words text-[12px] font-bold text-[var(--text-secondary)]">{item.post.title}</p><p className="mt-0.5 text-[11px] text-[var(--text-muted)]">{assistedDestinations[item.post.destination].name} · {formatLocalDateTime(item.post.scheduledFor)} · manual posting due</p></div>
+            <button type="button" onClick={() => onOpenAssisted(item.post)} className="self-start shrink-0 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-bold text-[var(--accent-text)]">Open handoff</button>
+          </div>;
+          const failed = item.post.status === "failed";
+          return <div key={`attention-simulation-${item.post.id}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0"><p className="break-words text-[12px] font-bold text-[var(--text-secondary)]">{item.post.title}</p><p className="mt-0.5 text-[11px] text-[var(--text-muted)]">{formatLocalDateTime(item.post.scheduledFor)} · {failed ? "simulation failed" : "simulation due, waiting for worker"} · no platform post</p></div>
+            <div className="flex shrink-0 gap-2"><button type="button" onClick={() => onLoad(item.post)} className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]">Open</button>{failed && <button type="button" onClick={() => onRun(item.post)} disabled={runningId !== null} className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-45">Retry simulation</button>}</div>
+          </div>;
+        })}
+      </div>
+      {attentionItems.length > 4 && <button type="button" onClick={() => setShowAllAttention((current) => !current)} aria-expanded={showAllAttention} className="mt-3 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">{showAllAttention ? "Show fewer" : `Show all ${attentionItems.length} items`}</button>}
+    </div>}
     <div className="border-t border-[var(--line)] px-4 py-5 sm:px-7 sm:py-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div><h3 className="text-[15px] font-bold text-[var(--text)]">Calendar</h3><p className="mt-1 text-[12px] text-[var(--text-muted)]">Your local time · select a day to inspect its items. S = simulation, M = manual handoff.</p></div>

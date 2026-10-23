@@ -7,11 +7,27 @@ const UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const STALE_AFTER_MS = 2 * 60_000;
 const MAX_AHEAD_MS = 366 * 24 * 60 * 60_000;
 
+/** Set false to stop future real dispatch; restart both web and worker after editing .env.local. */
+export function mastodonScheduleExecutionEnabled(): boolean {
+  return !["false", "0", "off"].includes((process.env.PLYPOST_MASTODON_SCHEDULE_ENABLED ?? "").trim().toLowerCase());
+}
+
+export function touchMastodonWorker(): void {
+  database().prepare(`INSERT INTO mastodon_worker_heartbeat(id,seen_at) VALUES (1,?)
+    ON CONFLICT(id) DO UPDATE SET seen_at=excluded.seen_at`).run(new Date().toISOString());
+}
+
+export function mastodonWorkerLastSeen(): string | null {
+  const row = database().prepare("SELECT seen_at FROM mastodon_worker_heartbeat WHERE id=1")
+    .get() as { seen_at: string } | undefined;
+  return row?.seen_at ?? null;
+}
+
 type Status = "queued" | "inflight" | "posted" | "unknown" | "rejected" | "cancelled";
 type Row = {
   client_request_id: string; user_id: string; instance: string; account_id: string;
   account_username: string; account_url: string; text: string; content_hash: string;
-  scheduled_for: string; status: Status; claimed_at: string | null;
+  scheduled_for: string; status: Status; dispatch_authorized: number; claimed_at: string | null;
   remote_id: string | null; remote_url: string | null; last_error: string | null;
   resolution: "found" | "absent" | null; resolved_at: string | null;
   created_at: string; updated_at: string;
@@ -57,6 +73,9 @@ function inputObject(value: unknown, keys: readonly string[]): Record<string, un
 
 /** A queued intent is an explicit owner instruction; its text and account are immutable. */
 export function createMastodonSchedule(userId: string, body: unknown): { item: MastodonScheduledPost; created: boolean } {
+  if (!mastodonScheduleExecutionEnabled()) {
+    throw new MastodonScheduleError("Automatic Mastodon publishing is paused on this installation.", 503);
+  }
   const input = inputObject(body, ["clientRequestId", "text", "scheduledFor", "accountId"]);
   if (!validId(input.clientRequestId) || typeof input.text !== "string" ||
       input.text.length > 10_000 || !input.text.trim() || !validUtc(input.scheduledFor) ||
@@ -113,8 +132,8 @@ export function createMastodonSchedule(userId: string, body: unknown): { item: M
     const stamp = now.toISOString();
     db.prepare(`INSERT INTO mastodon_scheduled_posts
       (client_request_id,user_id,instance,account_id,account_username,account_url,text,content_hash,
-       scheduled_for,status,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,'queued',?,?)`).run(id, userId, connection.instance, accountId,
+       scheduled_for,status,dispatch_authorized,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'queued',1,?,?)`).run(id, userId, connection.instance, accountId,
       connection.account.username, connection.account.url, text, contentHash, scheduledFor, stamp, stamp);
     audit(userId, "mastodon.schedule_created", id, `${accountId}; ${scheduledFor}`);
     const row = db.prepare("SELECT * FROM mastodon_scheduled_posts WHERE client_request_id=?").get(id) as Row;
@@ -226,13 +245,14 @@ export function resolveMastodonSchedule(userId: string, body: unknown): Mastodon
 }
 
 export function claimDueMastodonSchedule(now = new Date()): Row | null {
+  if (!mastodonScheduleExecutionEnabled()) return null;
   reconcileMastodonSchedules(now);
   return transaction((db) => {
-    const row = db.prepare(`SELECT * FROM mastodon_scheduled_posts WHERE status='queued' AND scheduled_for <= ?
+    const row = db.prepare(`SELECT * FROM mastodon_scheduled_posts WHERE status='queued' AND dispatch_authorized=1 AND scheduled_for <= ?
       ORDER BY scheduled_for,client_request_id LIMIT 1`).get(now.toISOString()) as Row | undefined;
     if (!row) return null;
     const changed = db.prepare(`UPDATE mastodon_scheduled_posts SET status='inflight',claimed_at=?,updated_at=?
-      WHERE client_request_id=? AND status='queued'`).run(now.toISOString(), now.toISOString(), row.client_request_id);
+      WHERE client_request_id=? AND status='queued' AND dispatch_authorized=1`).run(now.toISOString(), now.toISOString(), row.client_request_id);
     if (changed.changes !== 1) return null;
     audit(row.user_id, "mastodon.schedule_claimed", row.client_request_id);
     return { ...row, status: "inflight" as const, claimed_at: now.toISOString(), updated_at: now.toISOString() };

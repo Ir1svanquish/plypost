@@ -220,7 +220,7 @@ export function ImageAttachmentPicker({ selectedIds, onChange, onBusyChange, dis
         })}</ul>}
         </>}
       </div>
-      <p className="mt-4 text-[11px] leading-5 text-[var(--text-soft)]">Removing an image from this draft keeps it in your private library. Assisted publishing still requires you to add images on the destination platform; scheduled publishing here is a simulation.</p>
+      <p className="mt-4 text-[11px] leading-5 text-[var(--text-soft)]">Removing an image from this draft keeps it in your private library. Assisted publishing still requires you to add images on the destination platform. The calendar plan is simulated; real Mastodon scheduling supports text only.</p>
     </section>
   );
 }

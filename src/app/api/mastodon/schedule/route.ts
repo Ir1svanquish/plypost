@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { cancelMastodonSchedule, createMastodonSchedule, listMastodonSchedules, MastodonScheduleError } from "@/lib/server/mastodon-schedule";
+import { cancelMastodonSchedule, createMastodonSchedule, listMastodonSchedules, mastodonScheduleExecutionEnabled, mastodonWorkerLastSeen, MastodonScheduleError } from "@/lib/server/mastodon-schedule";
 
 export const runtime = "nodejs";
 const MAX_BODY_BYTES = 48 * 1024;
-// Live background dispatch is pending explicit owner approval. Keep existing intents inspectable and cancellable.
-const executionEnabled = false;
+// The authenticated owner confirms each exact account, text and time in the client before POST.
 
 async function limitedJson(request: Request): Promise<unknown> {
   const reader = request.body?.getReader();
@@ -33,7 +32,8 @@ export async function GET(request: Request) {
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
   try {
-    return NextResponse.json({ items: listMastodonSchedules(user), executionEnabled },
+    return NextResponse.json({ items: listMastodonSchedules(user),
+      executionEnabled: mastodonScheduleExecutionEnabled(), mastodonWorkerLastSeen: mastodonWorkerLastSeen() },
       { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return errorResponse(error); }
 }
@@ -42,8 +42,8 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  if (!executionEnabled) return NextResponse.json(
-    { error: "Automatic Mastodon publishing is not enabled on this installation." },
+  if (!mastodonScheduleExecutionEnabled()) return NextResponse.json(
+    { error: "Automatic Mastodon publishing is paused on this installation." },
     { status: 503, headers: { "Cache-Control": "no-store" } },
   );
   try {

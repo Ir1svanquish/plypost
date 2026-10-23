@@ -1,6 +1,6 @@
 # Plypost
 
-A responsive Next.js workspace for drafting one message, adapting it for Bluesky, Mastodon, LinkedIn and Threads, and reviewing each version before a **simulated** publishing run or a manual assisted publishing workflow. An optional, separately configured Mastodon connection can send a reviewed text post immediately. Real Mastodon scheduling is prepared but disabled pending explicit approval to enable unattended dispatch. This release runs on your own computer; there is no hosted server.
+A responsive Next.js workspace for drafting one message, adapting it for Bluesky, Mastodon, LinkedIn and Threads, and reviewing each version before a **simulated** publishing run or a manual assisted publishing workflow. An optional, separately configured Mastodon connection can send a reviewed text post immediately or at a time you confirm. This release runs on your own computer; there is no hosted server.
 
 ## What works
 
@@ -18,7 +18,7 @@ A responsive Next.js workspace for drafting one message, adapting it for Bluesky
 - Due assisted items appear in the app. Browser alerts are optional and are sent only while this page is open after you click **Enable browser alerts** and grant permission.
 - Ask a server-side Nebius Token Factory or NVIDIA Nemotron endpoint to create four tailored drafts. Existing platform edits require confirmation before replacement and can be undone; over-limit AI results are flagged for editing. This is optional; the editor and simulation work without an API key.
 - Run a server-side publishing simulation that validates nonempty text and platform character limits, then returns clearly labeled demo receipts. **No social platform API is called and nothing is posted.**
-- Optionally connect one Mastodon account through its official authorization page and publish a reviewed text-only Mastodon version immediately. **Plan** shows the separate real Mastodon scheduling workflow, currently disabled until unattended dispatch is approved and enabled. Images remain a manual handoff. Real account authorization and posting have not been verified against a live instance in this repository.
+- Optionally connect one Mastodon account through its official authorization page and publish a reviewed text-only Mastodon version immediately. **Plan** has a separate real Mastodon queue: review the exact account, text and local time, then confirm each item before it can be sent by the running worker. It is distinct from the simulated calendar. Images remain a manual handoff. Real account authorization and posting have not been verified against a live instance in this repository.
 - Each platform has its own publishing adapter module under `src/lib/publishers`. The current adapters all use the simulation implementation, making real integrations an explicit future change.
 - Use a responsive workspace with light, dark, or system appearance. The selection stays in this browser and follows system changes when set to **System**.
 - Move between **Create**, **Drafts**, **Plan**, **Assisted**, and **Account**. The Create editor keeps destination choices and optional AI adaptation beside the draft; account changes and simulation history are in Account.
@@ -56,13 +56,13 @@ npm run hash-password
 npm run dev
 ```
 
-The password command prompts without echoing what you type and prints a `PLYPOST_OWNER_PASSWORD_HASH=...` line. Put that line and an email of your choice as `PLYPOST_OWNER_EMAIL=...` in `.env.local`. These two values are required to sign in. The password itself is never written to the file or Git. On Windows PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`. Start the simulation worker in a second terminal:
+The password command prompts without echoing what you type and prints a `PLYPOST_OWNER_PASSWORD_HASH=...` line. Put that line and an email of your choice as `PLYPOST_OWNER_EMAIL=...` in `.env.local`. These two values are required to sign in. The password itself is never written to the file or Git. On Windows PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`. Start the background worker in a second terminal:
 
 ```bash
 npm run worker
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in. The worker reads the same `.env.local` file and SQLite database. Closing the browser does not stop the worker; shutting down the computer, stopping the worker, or sleeping the computer does. On restart, overdue queued **simulation** tasks are picked up. This build does not dispatch real scheduled posts. For access from another device, expose the local app only over a trusted network; public hosting, TLS and managed database backup are later work.
+Open [http://localhost:3000](http://localhost:3000) and sign in. The worker reads the same `.env.local` file and SQLite database. **Restart the worker after updating Plypost** so it has the current real-post capability. Closing the browser does not stop the worker; shutting down the computer, stopping the worker, or sleeping the computer does. On restart, overdue queued simulation tasks and separately confirmed Mastodon real posts can be processed. Check the real queue before relying on a due post; an uncertain send is never automatically retried. For access from another device, expose the local app only over a trusted network; public hosting, TLS and managed database backup are later work.
 
 To use AI adaptation or weekly planning, fill in one provider. The editor and simulation work without an AI key:
 
@@ -78,6 +78,7 @@ To use AI adaptation or weekly planning, fill in one provider. The editor and si
 | `PLYPOST_MASTODON_INSTANCE` | Optional trusted Mastodon HTTPS origin, such as `https://mastodon.example` |
 | `PLYPOST_PUBLIC_ORIGIN` | This app's exact origin for the Mastodon OAuth callback |
 | `PLYPOST_MASTODON_SECRET` | 32 random bytes (64 hex characters) for encrypting Mastodon credentials in SQLite |
+| `PLYPOST_MASTODON_SCHEDULE_ENABLED` | Optional emergency stop: set `false` to stop accepting and dispatching real Mastodon schedules; default is enabled. Restart both web and worker after changing it. Existing queued items stay queued until cancelled or the switch is restored. |
 
 Restart the development server after editing `.env.local`. Select the matching provider in the app and click **Generate variants**. The key is read by `src/app/api/generate/route.ts` on the server and is never sent to the browser. The endpoint URL is fixed in server code; visitors cannot supply an arbitrary URL. The `.env*` ignore rule excludes real environment files while keeping `.env.example` in Git.
 
@@ -95,9 +96,9 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 In **Account**, choose **Connect Mastodon** and approve the requested profile and status-writing permissions on that instance. The server registers an app for this configured instance, validates the OAuth callback, and stores the access token and app secret encrypted in local SQLite. The secret stays only in `.env.local`; losing it means the saved connection cannot be decrypted. **Disconnect** attempts to revoke the token and removes the local connection. The portable backup excludes these credentials, live posting attempts and the real scheduled queue; restoring a content backup does not cancel real posts already queued on this installation.
 
-In **Create**, review the Mastodon version, select Mastodon as a destination, and use the separate live-post action. It asks for confirmation before sending. **Plan** has a separate real Mastodon scheduling preview, but creation is disabled in this build. Its prepared data model would lock the exact text, connected account and local time before any future post; later draft edits would not change a queued task. Images are not uploaded by either path. The ordinary calendar plan and **Simulate publish** button remain simulation-only.
+In **Create**, review the Mastodon version, select Mastodon as a destination, and use the separate live-post action. It asks for confirmation before sending. In **Plan**, the real Mastodon section lets you review and confirm a time for that same text-only account; the queued item locks the exact text, connected account and local time. Later draft edits do not change it. Images are not uploaded by either path. The ordinary calendar plan and **Simulate publish** button remain simulation-only.
 
-The separate scheduling module has a one-shot processing function and records a durable request ID and any platform post ID/URL received. It is **not connected to the running worker**. If enabled after approval, a network timeout, process crash or other uncertain result would leave the task **Result unknown** for you to check on Mastodon; it would never be automatically sent again. A found/absent check would be your report, not a platform-verified receipt. Disconnecting the account cancels queued real tasks. This implementation still needs explicit approval to enable unattended dispatch and a real test-account authorization, scheduled post and revoke check before it can be called end-to-end verified. See the [Mastodon OAuth API](https://docs.joinmastodon.org/methods/oauth/) and [status posting API](https://docs.joinmastodon.org/methods/statuses/) for platform details.
+The separate scheduling module records a durable request ID and any platform post ID/URL received. Its worker takes each confirmed due item once. A network timeout, process crash or other uncertain result leaves the task **Result unknown** for you to check on Mastodon; it is never automatically sent again. A found/absent check is your report, not a platform-verified receipt. Disconnecting the account cancels queued real tasks. Setting `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` and restarting web and worker stops new real queue entries and future dispatch, but cannot recall a request already in flight. This implementation still needs a real test-account authorization, scheduled post and revoke check before it can be called end-to-end verified. See the [Mastodon OAuth API](https://docs.joinmastodon.org/methods/oauth/) and [status posting API](https://docs.joinmastodon.org/methods/statuses/) for platform details.
 
 ## Checks
 
@@ -113,6 +114,6 @@ npm audit
 
 ## Scope and next steps
 
-The running worker creates **simulation receipts only**. Its automatic retry logic never calls a social network. Real Mastodon scheduling is disabled pending explicit approval for unattended dispatch. Assisted publishing still hands the final posting action to the user and cannot verify it. The displayed checks do not replace the destination platform's composer; Mastodon limits can vary by instance. Image upload here is private local storage and manual download, not a social platform media upload. The immediate Mastodon real-text path awaits real-account validation. Other platform connections, production monitoring and public deployment remain future work.
+The ordinary four-platform plan and its retry logic still create **simulation receipts only**. The separate Mastodon queue can send confirmed real text posts while the local worker runs. Assisted publishing still hands the final posting action to the user and cannot verify it. The displayed checks do not replace the destination platform's composer; Mastodon limits can vary by instance. Image upload here is private local storage and manual download, not a social platform media upload. Real Mastodon account flows await test-account validation. Other platform connections, production monitoring and public deployment remain future work.
 
 Platform checks are based on the [Bluesky post lexicon](https://github.com/bluesky-social/atproto/blob/main/lexicons/app/bsky/feed/post.json), the [AT Protocol string length specification](https://atproto.com/specs/lexicon), and [Mastodon's instance configuration](https://docs.joinmastodon.org/entities/Instance/). Warnings for rich text, tagging and server-specific behavior require manual review on the platform.

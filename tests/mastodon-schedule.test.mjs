@@ -8,8 +8,9 @@ import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession } from "../src/lib/server/auth.ts";
 import {
   cancelMastodonSchedule, claimDueMastodonSchedule, createMastodonSchedule,
-  listMastodonSchedules, processOneDueMastodonSchedule, reconcileMastodonSchedules,
+  listMastodonSchedules, mastodonWorkerLastSeen, processOneDueMastodonSchedule, reconcileMastodonSchedules,
   resolveMastodonSchedule,
+  touchMastodonWorker,
 } from "../src/lib/server/mastodon-schedule.ts";
 import { disconnectMastodon, publishMastodonText } from "../src/lib/server/mastodon.ts";
 import { GET, POST } from "../src/app/api/mastodon/schedule/route.ts";
@@ -48,18 +49,112 @@ function routeRequest(method, cookie = "", body) {
   });
 }
 
-test("Mastodon scheduled live backend is inert by default while history remains readable", async () => {
+test("authenticated, same-origin owner can confirm one real schedule without dispatching it in the route", async () => {
   fresh();
   const session = createSession(user);
   const cookie = `plypost_session=${session}`;
   const get = await GET(routeRequest("GET", cookie));
   assert.equal(get.status, 200);
-  assert.deepEqual(await get.json(), { items: [], executionEnabled: false });
-  const post = await POST(routeRequest("POST", cookie, plan("Never dispatch from this test")));
-  assert.equal(post.status, 503);
-  assert.match((await post.json()).error, /not enabled/);
-  assert.equal(database().prepare("SELECT COUNT(*) AS count FROM mastodon_scheduled_posts").get().count, 0);
+  assert.deepEqual(await get.json(), { items: [], executionEnabled: true, mastodonWorkerLastSeen: null });
+  const intent = plan("Only dispatch after the due time");
+  const post = await POST(routeRequest("POST", cookie, intent));
+  assert.equal(post.status, 201);
+  assert.equal((await post.json()).item.clientRequestId, intent.clientRequestId);
+  const confirmed = database().prepare("SELECT status,dispatch_authorized FROM mastodon_scheduled_posts WHERE client_request_id=?")
+    .get(intent.clientRequestId);
+  assert.equal(confirmed.status, "queued");
+  assert.equal(confirmed.dispatch_authorized, 1);
+  const replay = await POST(routeRequest("POST", cookie, intent));
+  assert.equal(replay.status, 200);
+  assert.equal(database().prepare("SELECT COUNT(*) AS count FROM mastodon_scheduled_posts").get().count, 1);
   assert.equal((await GET(routeRequest("GET"))).status, 401);
+  assert.equal((await POST(routeRequest("POST", "", plan("Unauthenticated")))).status, 401);
+  const crossOrigin = new globalThis.Request(`${origin}/api/mastodon/schedule`, {
+    method: "POST", headers: { origin: "https://other.example", cookie, "Content-Type": "application/json" },
+    body: JSON.stringify(plan("Cross-origin")),
+  });
+  assert.equal((await POST(crossOrigin)).status, 403);
+});
+
+test("real worker heartbeat is separate from simulation heartbeat and a paused installation cannot queue or claim", async () => {
+  const db = fresh();
+  db.prepare("INSERT INTO worker_heartbeat(id,seen_at) VALUES (1,?)").run(new Date().toISOString());
+  assert.equal(mastodonWorkerLastSeen(), null);
+  touchMastodonWorker();
+  assert.ok(mastodonWorkerLastSeen());
+  const intent = plan("Pause before dispatch");
+  createMastodonSchedule(user, intent);
+  process.env.PLYPOST_MASTODON_SCHEDULE_ENABLED = "false";
+  try {
+    const session = createSession(user);
+    const get = await GET(routeRequest("GET", `plypost_session=${session}`));
+    const status = await get.json();
+    assert.equal(status.executionEnabled, false);
+    assert.equal(status.mastodonWorkerLastSeen, mastodonWorkerLastSeen());
+    const post = await POST(routeRequest("POST", `plypost_session=${session}`, plan("No new real post")));
+    assert.equal(post.status, 503);
+    assert.throws(() => createMastodonSchedule(user, plan("No internal bypass")), /paused/);
+    assert.equal(claimDueMastodonSchedule(new Date(Date.parse(intent.scheduledFor) + 1)), null);
+    assert.equal(database().prepare("SELECT status FROM mastodon_scheduled_posts WHERE client_request_id=?")
+      .get(intent.clientRequestId).status, "queued");
+  } finally {
+    delete process.env.PLYPOST_MASTODON_SCHEDULE_ENABLED;
+  }
+});
+
+test("only newly authorized schedules are claimable; legacy queued rows become cancelled on upgrade", async () => {
+  const db = fresh();
+  const legacy = plan("An old unapproved schedule");
+  createMastodonSchedule(user, legacy);
+  db.prepare("UPDATE mastodon_scheduled_posts SET dispatch_authorized=0 WHERE client_request_id=?")
+    .run(legacy.clientRequestId);
+  const due = new Date(Date.parse(legacy.scheduledFor) + 1);
+  assert.equal(claimDueMastodonSchedule(due), null);
+  closeDatabase();
+  const reopened = database();
+  const oldRow = reopened.prepare("SELECT status,dispatch_authorized FROM mastodon_scheduled_posts WHERE client_request_id=?")
+    .get(legacy.clientRequestId);
+  assert.equal(oldRow.status, "cancelled");
+  assert.equal(oldRow.dispatch_authorized, 0);
+  assert.match(listMastodonSchedules(user)[0].error, /predates authorized/);
+  let sends = 0;
+  assert.equal(await processOneDueMastodonSchedule(due, async () => {
+    sends += 1; return { status: "posted", id: "unexpected" };
+  }), false);
+  assert.equal(sends, 0);
+});
+
+test("schema upgrade defaults pre-existing queued rows to unauthorized and cancels them", () => {
+  const old = fresh();
+  const legacy = plan("Pre-upgrade text");
+  createMastodonSchedule(user, legacy);
+  old.exec("ALTER TABLE mastodon_scheduled_posts DROP COLUMN dispatch_authorized");
+  closeDatabase();
+  const upgraded = database();
+  const record = upgraded.prepare("SELECT status,dispatch_authorized,last_error FROM mastodon_scheduled_posts WHERE client_request_id=?")
+    .get(legacy.clientRequestId);
+  assert.equal(record.dispatch_authorized, 0);
+  assert.equal(record.status, "cancelled");
+  assert.match(record.last_error, /predates authorized/);
+});
+
+test("a route-confirmed due intent is dispatched at most once", async () => {
+  fresh();
+  const session = createSession(user);
+  const intent = plan("Once at the agreed time");
+  const response = await POST(routeRequest("POST", `plypost_session=${session}`, intent));
+  assert.equal(response.status, 201);
+  const due = new Date(Date.parse(intent.scheduledFor) + 1);
+  let sends = 0;
+  assert.equal(await processOneDueMastodonSchedule(due, async () => {
+    sends += 1; return { status: "posted", id: "remote-confirmed", url: `${instance}/@writer/remote-confirmed` };
+  }), true);
+  assert.equal(await processOneDueMastodonSchedule(due, async () => {
+    sends += 1; return { status: "posted", id: "duplicate" };
+  }), false);
+  assert.equal(sends, 1);
+  assert.equal(listMastodonSchedules(user)[0].status, "posted");
+  assert.equal(listMastodonSchedules(user)[0].id, "remote-confirmed");
 });
 
 test("intent stores exact account and text snapshot, replays one ID, and rejects accidental same-slot duplicates", () => {

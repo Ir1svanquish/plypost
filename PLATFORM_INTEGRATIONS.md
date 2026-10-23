@@ -4,7 +4,7 @@
 
 ## 当前产品边界
 
-Plypost 的四个平台“模拟发布”和排程 worker 不会向社交平台发帖；辅助发布由用户自己在目标平台完成。只有 Mastodon 另有独立的即时真实**文字**发布代码路径，目前经过本地模拟实例测试，尚未完成真实测试账号的授权、发帖、撤销和回执核对。Mastodon 的真实定时排程模块已准备，但创建与后台发送均关闭，等待明确授权。Bluesky、LinkedIn、Threads 的 `src/lib/publishers/` 适配器仍为模拟实现。其他平台目前只在辅助发布中出现。
+Plypost 的四个平台“模拟发布”和普通计划日历不会向社交平台发帖；辅助发布由用户自己在目标平台完成。Mastodon 另有独立的即时真实**文字**发布及逐条确认的真实定时队列。后者由本机 worker 处理，旧的未授权队列记录不会发送；可用环境开关暂停新排程和未来派发。目前只经过本地模拟实例测试，尚未完成真实测试账号的授权、发帖、撤销和回执核对。Bluesky、LinkedIn、Threads 的 `src/lib/publishers/` 适配器仍为模拟实现。其他平台目前只在辅助发布中出现。
 
 ## 平台能力与门槛
 
@@ -21,6 +21,8 @@ Plypost 的四个平台“模拟发布”和排程 worker 不会向社交平台�
 | [TikTok](https://developers.tiktok.com/docs/en/content-posting-api-get-started) | Direct Post 要开发者应用、Content Posting API、经审批的 `video.publish` 范围和用户授权。支持视频与照片，不支持纯文字直发。视频可文件上传或由已验证域名拉取，照片需已验证域名 URL。[媒体传输](https://developers.tiktok.com/docs/en/content-posting-api-media-transfer-guide) | 未通过审计的客户端仅可 `SELF_ONLY` 私密发布，最多五位用户/24 小时；公开发布须审计。发布页必须读取 creator info，让用户选择隐私与互动设置、明确同意。Web Login Kit 的回调须为已登记的静态 HTTPS URL，裸 `http://localhost` 不符合 Web 规则。[内容分享规范](https://developers.tiktok.com/docs/en/content-sharing-guidelines) · [Web OAuth](https://developers.tiktok.com/docs/en/login-kit-web) | 在账号、审计、HTTPS 回调及公网素材准备好之前保留辅助发布；首个直发版本需完整实现 TikTok 特有的发布前选项和审核流程。 |
 
 ## 接入顺序与验收条件
+
+Bluesky 的本地开发还有一个容易踩到的登录问题：[官方 Next.js OAuth 教程](https://github.com/bluesky-social/nextjs-oauth-tutorial/blob/main/TUTORIAL.md)使用 `@atproto/oauth-client-node` 和 `127.0.0.1` 回调，而虚拟 `client_id` 是不带端口的 `http://localhost`。Plypost 当前登录 Cookie 只属于访问时的主机；若从 `localhost` 登录后跳回 `127.0.0.1`，回调拿不到原来的会话。本地接入应全程使用同一个 `127.0.0.1` 地址和端口，并把 OAuth state 与用户的服务端会话绑定。教程中的内存 state/session 存储只是入门示例；Plypost 应持久化并加密保存授权资料，使用官方 SDK 处理令牌刷新及并发锁。[OAuth 规范](https://atproto.com/specs/oauth)仍是协议依据，本地回环许可是否受目标授权服务器支持须实测。
 
 **优先级判断（推断）：**先完成 Mastodon 真实账号验收，再验证 LinkedIn 个人纯文字的实际准入；如果 LinkedIn 自助与新版接口的落差阻塞，则先转向 Bluesky OAuth 或 Threads 纯文字。Facebook Pages、Instagram、TikTok 分别增加 Page 管理权、专业账号/公网媒体、内容审计和专门发布页的成本。这一顺序基于现有文字编辑工作流与上述文档门槛，尚未经过目标用户访谈。
 
