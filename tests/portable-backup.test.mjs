@@ -8,7 +8,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createMedia, getMedia, listMedia } from "../src/lib/server/media.ts";
-import { addSchedule, listWorkspace, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
+import { addSchedule, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { approveStrategyIdea, createWeeklyPlan, listStrategy, saveBrandBrief } from "../src/lib/server/strategy.ts";
@@ -279,4 +279,41 @@ test("full backup preserves brand details, reviewed ideas, and their remapped dr
   delete legacy.weeklyPlans;
   await importPortableBackup(destinationOwner, legacy);
   assert.deepEqual(listStrategy(destinationOwner), { brief: null, plans: [] });
+});
+
+test("full backup remaps batch handoff origins while preserving snapshots from deleted drafts", async () => {
+  const sourceOwner = "batch-source@example.test";
+  const destinationOwner = "batch-restored@example.test";
+  const saved = saveDraft(sourceOwner, {
+    ...draft(randomUUID()), selected: ["bluesky", "linkedin"],
+    variants: { bluesky: "Reviewed Bluesky", linkedin: "Reviewed LinkedIn" },
+  });
+  const batchId = randomUUID();
+  const items = [
+    { destination: "bluesky", scheduledFor: new Date(Date.now() + 60_000).toISOString() },
+    { destination: "linkedin", scheduledFor: new Date(Date.now() + 120_000).toISOString() },
+  ];
+  const original = prepareAssistedBatch(sourceOwner, saved.id, batchId, items);
+  const deleted = saveDraft(sourceOwner, draft(randomUUID()));
+  const orphanBatchId = randomUUID();
+  const orphan = prepareAssistedBatch(sourceOwner, deleted.id, orphanBatchId, [items[0]])[0];
+  assert.equal(deleteDraft(sourceOwner, deleted.id), true);
+
+  const archive = JSON.parse(exportPortableBackup(sourceOwner));
+  const altered = globalThis.structuredClone(archive);
+  altered.assisted.find((item) => item.id === original[1].id).sourceDraftId = randomUUID();
+  await assert.rejects(importPortableBackup(destinationOwner, altered), /inconsistent assisted batch provenance/);
+  assert.deepEqual(listWorkspace(destinationOwner).assisted, []);
+
+  await importPortableBackup(destinationOwner, archive);
+  const restored = listWorkspace(destinationOwner);
+  const linked = restored.assisted.filter((item) => item.batchId === batchId);
+  const restoredOrphan = restored.assisted.find((item) => item.batchId === orphanBatchId);
+  assert.equal(linked.length, 2);
+  assert.ok(linked.every((item) => item.sourceDraftId === restored.drafts[0].id));
+  assert.notEqual(restored.drafts[0].id, saved.id);
+  assert.deepEqual(linked.map((item) => item.text).sort(), original.map((item) => item.text).sort());
+  assert.equal(restoredOrphan.text, orphan.text);
+  assert.equal(restoredOrphan.sourceDraftId, deleted.id);
+  assert.equal(restored.drafts.some((item) => item.id === deleted.id), false);
 });

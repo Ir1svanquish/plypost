@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
-import { isPlatformId, platformIds } from "../platforms";
+import { draftTitle, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { adaptDraft, isPlatformId, platformIds, type PlatformId } from "../platforms";
 import { validatePlatformText } from "../platform-validation";
 import { assertOwnedMedia } from "./media";
 
@@ -44,8 +44,18 @@ export function listWorkspace(userId: string) {
     .all(userId).map((row) => JSON.parse((row as DraftRow).payload) as AssistedPost);
   const schedule = db.prepare("SELECT id,payload,status,attempts,next_attempt_at,last_error,completed_at,receipts FROM jobs WHERE user_id=? ORDER BY scheduled_for ASC LIMIT 100")
     .all(userId).map((row) => mapJob(row as JobRow));
-  const log = db.prepare("SELECT action,subject_id,detail,created_at FROM audit WHERE user_id=? ORDER BY id DESC LIMIT 30")
-    .all(userId);
+  const log = (db.prepare("SELECT action,subject_id,detail,created_at FROM audit WHERE user_id=? ORDER BY id DESC LIMIT 30")
+    .all(userId) as { action: string; subject_id: string | null; detail: string | null; created_at: string }[])
+    .map((entry) => {
+      if (entry.action !== "assisted.batch_prepared") return entry;
+      try {
+        const manifest = JSON.parse(entry.detail ?? "") as { items?: unknown };
+        const count = Array.isArray(manifest.items) ? manifest.items.length : 0;
+        return { ...entry, detail: count ? `${count} manual handoffs` : "Manual handoffs prepared" };
+      } catch {
+        return { ...entry, detail: "Manual handoffs prepared" };
+      }
+    });
   const heartbeat = db.prepare("SELECT seen_at FROM worker_heartbeat WHERE id=1").get() as { seen_at: string } | undefined;
   return { drafts, schedule, assisted, log, workerLastSeen: heartbeat?.seen_at ?? null };
 }
@@ -66,6 +76,13 @@ function validAssisted(value: unknown): AssistedPost | null {
 }
 
 const validId = (id: string) => /^[a-f0-9-]{36}$/i.test(id);
+const validUuid = (value: unknown): value is string =>
+  typeof value === "string" && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(value);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const validUtcInstant = (value: unknown): value is string =>
+  typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
+  Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 
 const MIN_SCHEDULE_LEAD_MS = 10_000;
 
@@ -88,6 +105,7 @@ function validTimezone(value: unknown): value is string {
 export function addAssisted(userId: string, value: unknown): AssistedPost {
   const item = validAssisted(value);
   if (!item || !validId(item.id) || item.status !== "queued") throw new Error("Invalid assisted item.");
+  if (item.sourceDraftId || item.batchId) throw new Error("Use batch preparation for draft-linked handoffs.");
   if (isPlatformId(item.destination) && !validatePlatformText(item.destination, item.text).valid) {
     throw new Error("Fix platform draft limits before adding to assisted publishing.");
   }
@@ -101,6 +119,79 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
     audit(userId, "assisted.created", item.id);
   });
   return item;
+}
+
+type BatchHandoff = { destination: PlatformId; scheduledFor: string };
+
+/** Snapshot reviewed, saved platform drafts as one atomic manual-publishing handoff. */
+export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: unknown, items: unknown): AssistedPost[] {
+  if (!validUuid(draftId) || !validUuid(batchId) || !Array.isArray(items) ||
+      items.length < 1 || items.length > 4 || items.some((entry) =>
+        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor") ||
+        !isPlatformId(entry.destination) || !validUtcInstant(entry.scheduledFor))) {
+    throw new Error("Choose a saved draft, a batch ID, and one to four destinations with UTC reminder times.");
+  }
+  const requested = items as BatchHandoff[];
+  if (new Set(requested.map((item) => item.destination)).size !== requested.length) {
+    throw new Error("Choose each destination only once.");
+  }
+  return transaction((db) => {
+    // Keep the original request in the local audit log so a retry cannot shrink a
+    // batch after one or all handoffs were deleted. Imported backups may lack this log.
+    const manifest = JSON.stringify({ draftId, items: requested
+      .map(({ destination, scheduledFor }) => ({ destination, scheduledFor }))
+      .sort((a, b) => a.destination.localeCompare(b.destination)) });
+    const recorded = db.prepare("SELECT detail FROM audit WHERE user_id=? AND action='assisted.batch_prepared' AND subject_id=? ORDER BY id LIMIT 1")
+      .get(userId, batchId) as { detail: string | null } | undefined;
+    if (recorded && recorded.detail !== manifest) {
+      throw new Error("This batch ID was already used for a different or partial handoff.");
+    }
+    const existing = (db.prepare("SELECT payload FROM assisted WHERE user_id=?").all(userId) as DraftRow[])
+      .map((row) => JSON.parse(row.payload) as AssistedPost)
+      .filter((item) => item.batchId === batchId);
+    if (existing.length) {
+      const byDestination = new Map(existing.map((item) => [item.destination, item]));
+      if (existing.length !== requested.length || byDestination.size !== requested.length ||
+          existing.some((item) => item.sourceDraftId !== draftId) ||
+          requested.some((item) => byDestination.get(item.destination)?.scheduledFor !== item.scheduledFor)) {
+        throw new Error("This batch ID was already used for a different or partial handoff.");
+      }
+      return requested.map((item) => byDestination.get(item.destination)!);
+    }
+    if (recorded) throw new Error("This batch was already prepared, but its handoffs were removed.");
+
+    const row = db.prepare("SELECT payload FROM drafts WHERE id=? AND user_id=?").get(draftId, userId) as DraftRow | undefined;
+    const draft = row && validDraft(JSON.parse(row.payload));
+    if (!draft || draft.id !== draftId) throw new Error("Saved draft not found.");
+    if (requested.some((item) => !draft.selected.includes(item.destination))) {
+      throw new Error("Choose destinations selected in this saved draft.");
+    }
+    const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
+    if (count.count + requested.length > 100) throw new Error("Assisted publishing list is full.");
+    assertOwnedMedia(userId, draft.mediaIds ?? []);
+
+    const now = new Date().toISOString();
+    const prepared = requested.map(({ destination, scheduledFor }): AssistedPost => {
+      const text = draft.variants[destination] ?? adaptDraft(draft.source, destination);
+      if (!validatePlatformText(destination, text).valid) {
+        throw new Error(`Fix the saved ${destination} text before preparing this handoff.`);
+      }
+      const item: AssistedPost = {
+        id: randomUUID(), title: draftTitle(draft.title, draft.source), destination, text,
+        ...(draft.mediaIds !== undefined ? { mediaIds: [...draft.mediaIds] } : {}),
+        sourceDraftId: draft.id, batchId, scheduledFor, createdAt: now, status: "queued",
+        ...(Date.parse(scheduledFor) <= Date.parse(now) ? { notifiedAt: now } : {}),
+      };
+      if (!validAssisted(item)) throw new Error("Could not prepare a valid handoff.");
+      return item;
+    });
+    const insert = db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)");
+    for (const item of prepared) {
+      insert.run(item.id, userId, JSON.stringify(item), item.scheduledFor, now);
+    }
+    audit(userId, "assisted.batch_prepared", batchId, manifest);
+    return prepared;
+  });
 }
 
 export function setAssistedStatus(userId: string, id: string, status: unknown, postUrl?: unknown): boolean {

@@ -124,7 +124,8 @@ function validateCollection<T extends { id: string }>(raw: unknown, parsed: T[],
     if (label === "assisted items" &&
         ((item.postedAt !== undefined && item.postedAt !== normalized.postedAt) ||
           (item.postUrl !== undefined && item.postUrl !== normalized.postUrl) ||
-          (item.notifiedAt !== undefined && item.notifiedAt !== normalized.notifiedAt))) {
+          (item.notifiedAt !== undefined && item.notifiedAt !== normalized.notifiedAt) ||
+          item.sourceDraftId !== normalized.sourceDraftId || item.batchId !== normalized.batchId)) {
       invalid("Backup contains invalid assisted item history.");
     }
   }
@@ -174,6 +175,16 @@ function validateWorkspace(raw: Record<string, unknown>) {
   const jobs = validateJobs(raw.jobs);
   const parsed = parseWorkspace({ version: 3, drafts, schedule: [], assisted });
   if (!parsed) invalid();
+  const batches = new Map<string, { sourceDraftId: string; destinations: Set<string> }>();
+  for (const item of parsed.assisted) {
+    if (!item.batchId || !item.sourceDraftId) continue;
+    const batch = batches.get(item.batchId);
+    if (batch && (batch.sourceDraftId !== item.sourceDraftId || batch.destinations.has(item.destination))) {
+      invalid("Backup contains inconsistent assisted batch provenance.");
+    }
+    if (batch) batch.destinations.add(item.destination);
+    else batches.set(item.batchId, { sourceDraftId: item.sourceDraftId, destinations: new Set([item.destination]) });
+  }
   return {
     drafts: validateCollection(drafts, parsed.drafts, "drafts"),
     assisted: validateCollection(assisted, parsed.assisted, "assisted items"),
@@ -401,7 +412,14 @@ export async function importPortableBackup(userId: string, raw: unknown) {
   const drafts = workspace.drafts.map((item) => remapMediaIds(item, mediaMap));
   const draftIdMap = new Map(workspace.drafts.map((item, index) => [item.id, drafts[index].id]));
   const jobs = workspace.jobs.map((item) => ({ ...item, post: remapMediaIds(item.post, mediaMap) }));
-  const assisted = workspace.assisted.map((item) => remapMediaIds(item, mediaMap));
+  const assisted = workspace.assisted.map((item) => {
+    const restored = remapMediaIds(item, mediaMap);
+    // A deleted source draft is allowed: its handoff is still a valid immutable snapshot.
+    // Remap only links whose source draft is present in this archive.
+    return item.sourceDraftId && draftIdMap.has(item.sourceDraftId)
+      ? { ...restored, sourceDraftId: draftIdMap.get(item.sourceDraftId)! }
+      : restored;
+  });
   const weeklyPlans = strategy.weeklyPlans.map((plan) => ({
     ...plan,
     id: randomUUID(),

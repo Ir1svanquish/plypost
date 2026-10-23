@@ -37,6 +37,9 @@ export type AssistedPost = {
   destination: AssistedDestinationId;
   text: string;
   mediaIds?: string[];
+  /** Present together for handoffs prepared from a saved draft. */
+  sourceDraftId?: string;
+  batchId?: string;
   scheduledFor: string;
   createdAt: string;
   status: "queued" | "posted";
@@ -77,6 +80,8 @@ const validDate = (value: unknown): value is string =>
 const validUtcInstant = (value: unknown): value is string =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
   Number.isFinite(new Date(value).getTime()) && new Date(value).toISOString() === value;
+const validUuid = (value: unknown): value is string =>
+  typeof value === "string" && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(value);
 
 /** Strictly validates user-entered results. An explicit zero is a valid observation. */
 export function parseAssistedOutcomeInput(value: unknown): AssistedOutcomeInput | null {
@@ -225,6 +230,8 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
       typeof value.text !== "string" || !value.text.trim() || characterCount(value.text) > 5000 ||
       !validUtcInstant(value.scheduledFor) || !validDate(value.createdAt) ||
       (value.status !== "queued" && value.status !== "posted")) return null;
+  if ((value.sourceDraftId !== undefined || value.batchId !== undefined) &&
+      (!validUuid(value.sourceDraftId) || !validUuid(value.batchId) || !isPlatformId(value.destination))) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.postUrl !== undefined && (value.status !== "posted" ||
       normalizePublicPostUrl(value.postUrl) !== value.postUrl)) return null;
@@ -237,6 +244,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
     destination: value.destination,
     text: value.text,
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
+    ...(value.sourceDraftId !== undefined ? { sourceDraftId: value.sourceDraftId as string, batchId: value.batchId as string } : {}),
     scheduledFor: value.scheduledFor,
     createdAt: value.createdAt,
     status: value.status,
