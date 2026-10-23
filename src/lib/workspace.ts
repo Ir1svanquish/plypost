@@ -1,4 +1,4 @@
-import { characterCount, platformIds, platforms, type PlatformId } from "./platforms.ts";
+import { characterCount, isPlatformId, platformIds, platforms, type PlatformId } from "./platforms.ts";
 import { isAssistedDestinationId, type AssistedDestinationId } from "./assisted.ts";
 
 export const WORKSPACE_KEY = "socialflow-workspace-v2";
@@ -71,6 +71,22 @@ function validVariants(value: unknown): Partial<Record<PlatformId, string>> {
   return variants;
 }
 
+function validReceipts(value: unknown): NonNullable<ScheduledPost["receipts"]> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 4).filter((item) =>
+    isRecord(item) && isPlatformId(item.platform) &&
+    typeof item.id === "string" && item.id.length <= 120 &&
+    item.status === "simulated" && validDate(item.publishedAt) &&
+    typeof item.content === "string" && characterCount(item.content) <= platforms[item.platform].limit,
+  ).map((item) => ({
+    platform: item.platform as PlatformId,
+    id: item.id as string,
+    status: "simulated",
+    publishedAt: item.publishedAt as string,
+    content: item.content as string,
+  }));
+}
+
 function parseDraft(value: unknown): SavedDraft | null {
   if (!isRecord(value) || typeof value.id !== "string" || !value.id ||
       typeof value.title !== "string" || typeof value.source !== "string" ||
@@ -114,7 +130,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
     ...(typeof value.attempts === "number" ? { attempts: value.attempts } : {}),
     ...(validDate(value.nextAttemptAt) ? { nextAttemptAt: value.nextAttemptAt } : {}),
     ...(typeof value.lastError === "string" ? { lastError: value.lastError } : {}),
-    ...(Array.isArray(value.receipts) ? { receipts: value.receipts as ScheduledPost["receipts"] } : {}),
+    ...(Array.isArray(value.receipts) ? { receipts: validReceipts(value.receipts) } : {}),
   };
 }
 

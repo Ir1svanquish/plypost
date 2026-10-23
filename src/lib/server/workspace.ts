@@ -124,8 +124,8 @@ export function importLibrary(userId: string, raw: unknown) {
     }
     for (const post of workspace.schedule) {
       const status = post.status === "simulated" ? "simulated" : "queued";
-      db.prepare("INSERT INTO jobs(id,user_id,payload,scheduled_for,timezone,status,next_attempt_at,completed_at) VALUES (?,?,?,?,?,?,?,?)")
-        .run(post.id, userId, JSON.stringify(post), post.scheduledFor, "UTC", status, post.scheduledFor, post.simulatedAt ?? null);
+      db.prepare("INSERT INTO jobs(id,user_id,payload,scheduled_for,timezone,status,next_attempt_at,completed_at,receipts) VALUES (?,?,?,?,?,?,?,?,?)")
+        .run(post.id, userId, JSON.stringify(post), post.scheduledFor, "UTC", status, post.scheduledFor, post.simulatedAt ?? null, JSON.stringify(post.receipts ?? []));
     }
     audit(userId, "workspace.imported", randomUUID(), `${workspace.drafts.length} drafts; ${workspace.schedule.length} jobs`);
   });
