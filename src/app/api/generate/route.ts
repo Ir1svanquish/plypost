@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { characterCount, platformIds, platforms, type PlatformId } from "@/lib/platforms";
+import { currentUser, sameOrigin } from "@/lib/server/auth";
+import { aiRateAllowed } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 
@@ -39,6 +41,9 @@ function parseVariants(content: string): Record<PlatformId, string> | null {
 }
 
 export async function POST(request: Request) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  const user = currentUser(request);
+  if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
   let body: unknown;
   try {
     body = await request.json();
@@ -66,6 +71,10 @@ export async function POST(request: Request) {
       { error: `Configure ${provider === "nebius" ? "NEBIUS_API_KEY and NEBIUS_MODEL" : "NVIDIA_API_KEY"} in .env.local to enable AI adaptation.` },
       { status: 503 },
     );
+  }
+
+  if (!aiRateAllowed(user)) {
+    return NextResponse.json({ error: "AI limit reached: 10 requests per hour. Try again later." }, { status: 429 });
   }
 
   try {

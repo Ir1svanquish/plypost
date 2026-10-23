@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { characterCount, isPlatformId, platforms, type PlatformId } from "@/lib/platforms";
 import { publishers } from "@/lib/publishers";
+import { currentUser, sameOrigin } from "@/lib/server/auth";
+import { audit } from "@/lib/server/db";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  const user = currentUser(request);
+  if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
   let body: unknown;
   try {
     body = await request.json();
@@ -44,6 +49,7 @@ export async function POST(request: Request) {
   const results = await Promise.all(
     validated.map(({ platform, content }) => publishers[platform].publish(content)),
   );
+  audit(user, "publish.simulated", undefined, results.map((result) => result.platform).join(","));
 
   return NextResponse.json(
     { mode: "simulation", results },

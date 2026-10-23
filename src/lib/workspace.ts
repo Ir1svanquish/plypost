@@ -20,8 +20,12 @@ export type ScheduledPost = {
   posts: Partial<Record<PlatformId, string>>;
   scheduledFor: string;
   createdAt: string;
-  status: "queued" | "simulated";
+  status: "queued" | "running" | "simulated" | "failed";
   simulatedAt?: string;
+  attempts?: number;
+  nextAttemptAt?: string;
+  lastError?: string;
+  receipts?: { platform: string; id: string; status: string; publishedAt: string; content: string }[];
 };
 
 export type AssistedPost = {
@@ -88,7 +92,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
       typeof value.title !== "string" || characterCount(value.title) > 120 ||
       typeof value.source !== "string" || characterCount(value.source) > 3000 ||
       !validDate(value.scheduledFor) || !validDate(value.createdAt) ||
-      (value.status !== "queued" && value.status !== "simulated") ||
+      (value.status !== "queued" && value.status !== "running" && value.status !== "simulated" && value.status !== "failed") ||
       !isRecord(value.posts)) return null;
   const posts: Partial<Record<PlatformId, string>> = {};
   for (const id of platformIds) {
@@ -107,6 +111,10 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
     createdAt: value.createdAt,
     status: value.status,
     ...(value.status === "simulated" && validDate(value.simulatedAt) ? { simulatedAt: value.simulatedAt } : {}),
+    ...(typeof value.attempts === "number" ? { attempts: value.attempts } : {}),
+    ...(validDate(value.nextAttemptAt) ? { nextAttemptAt: value.nextAttemptAt } : {}),
+    ...(typeof value.lastError === "string" ? { lastError: value.lastError } : {}),
+    ...(Array.isArray(value.receipts) ? { receipts: value.receipts as ScheduledPost["receipts"] } : {}),
   };
 }
 
@@ -148,8 +156,10 @@ export function draftTitle(title: string, source: string): string {
   return (title.trim() || source.trim().split(/\r?\n/)[0] || "Untitled draft").slice(0, 120);
 }
 
-export function scheduleState(post: ScheduledPost, now: number): "upcoming" | "due" | "simulated" {
+export function scheduleState(post: ScheduledPost, now: number): "upcoming" | "due" | "running" | "failed" | "simulated" {
   if (post.status === "simulated") return "simulated";
+  if (post.status === "running") return "running";
+  if (post.status === "failed") return "failed";
   return Date.parse(post.scheduledFor) <= now ? "due" : "upcoming";
 }
 

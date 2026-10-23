@@ -19,7 +19,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { adaptDraft, characterCount, isPlatformId, platformIds, platforms, type PlatformId } from "@/lib/platforms";
-import { DraftLibraryPanel, SchedulePanel } from "@/components/workspace-panels";
+import { DraftLibraryPanel } from "@/components/workspace-panels";
+import { ServerSchedulePanel } from "@/components/server-schedule-panel";
 import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
@@ -75,7 +76,7 @@ function formatTime(iso: string) {
   });
 }
 
-export default function Home() {
+function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void }) {
   const [source, setSource] = useState(sampleDraft);
   const [selected, setSelected] = useState<PlatformId[]>([...platformIds]);
   const [active, setActive] = useState<PlatformId>("bluesky");
@@ -99,6 +100,33 @@ export default function Home() {
   const [storageWarning, setStorageWarning] = useState(false);
   const [now, setNow] = useState(0);
   const [hydrated, setHydrated] = useState(false);
+  const [legacyWorkspace, setLegacyWorkspace] = useState<ReturnType<typeof emptyWorkspace> | null>(null);
+  const [auditLog, setAuditLog] = useState<{ action: string; subject_id: string | null; detail: string | null; created_at: string }[]>([]);
+  const [workerLastSeen, setWorkerLastSeen] = useState<string | null>(null);
+
+  async function refreshWorkspace() {
+    const response = await fetch("/api/workspace", { cache: "no-store" });
+    if (!response.ok) throw new Error("Could not load your server workspace.");
+    const data = await response.json();
+    setDrafts(data.drafts);
+    setSchedule(data.schedule);
+    setAuditLog(data.log);
+    setWorkerLastSeen(data.workerLastSeen);
+  }
+
+  async function changeWorkspace(action: string, extra: Record<string, unknown>) {
+    const response = await fetch("/api/workspace", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...extra }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not update workspace.");
+    setDrafts(data.drafts);
+    setSchedule(data.schedule);
+    setAuditLog(data.log);
+    setWorkerLastSeen(data.workerLastSeen);
+    return data;
+  }
 
   useEffect(() => {
     try {
@@ -140,26 +168,32 @@ export default function Home() {
     }
     try {
       const workspace = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
-      setDrafts(workspace.drafts);
-      setSchedule(workspace.schedule);
+      if (workspace.drafts.length || workspace.schedule.length) setLegacyWorkspace(workspace);
       setAssisted(workspace.assisted);
     } catch {
       // Keep the editor usable if the browser holds an invalid workspace backup.
     }
     setHydrated(true);
     if ("Notification" in window) setNotificationPermission(Notification.permission);
+    void refreshWorkspace().catch(() => setNotice({ kind: "error", text: "Could not load server workspace. Check that the server is running." }));
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
     try {
       localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, provider, activity, title, currentDraftId }));
-      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 3, drafts, schedule, assisted }));
+      const previous = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ ...previous, assisted }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, provider, activity, title, currentDraftId, drafts, schedule, assisted, hydrated]);
+  }, [source, selected, variants, provider, activity, title, currentDraftId, assisted, hydrated]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => { void refreshWorkspace().catch(() => {}); }, 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setNow(Date.now());
@@ -257,13 +291,13 @@ export default function Home() {
     }
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     if (!source.trim()) {
       setNotice({ kind: "error", text: "Write a source draft before saving it." });
       return;
     }
     if (!currentDraftId && drafts.length >= 100) {
-      setNotice({ kind: "error", text: "The local library is full. Delete an old draft before saving another." });
+      setNotice({ kind: "error", text: "The library is full. Delete an old draft before saving another." });
       return;
     }
     const stamp = new Date().toISOString();
@@ -277,10 +311,14 @@ export default function Home() {
       createdAt: existing?.createdAt ?? stamp,
       updatedAt: stamp,
     };
-    setDrafts((current) => [saved, ...current.filter((draft) => draft.id !== saved.id)]);
-    setCurrentDraftId(saved.id);
-    setTitle(saved.title);
-    setNotice({ kind: "success", text: "Draft saved in this browser." });
+    try {
+      await changeWorkspace("save-draft", { item: saved });
+      setCurrentDraftId(saved.id);
+      setTitle(saved.title);
+      setNotice({ kind: "success", text: "Draft saved to your account." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save draft." });
+    }
   }
 
   function newDraft() {
@@ -305,14 +343,18 @@ export default function Home() {
     document.getElementById("compose")?.scrollIntoView({ behavior: "smooth" });
   }
 
-  function deleteDraft(id: string) {
-    if (!window.confirm("Delete this saved draft from this browser?")) return;
-    setDrafts((current) => current.filter((draft) => draft.id !== id));
-    if (currentDraftId === id) setCurrentDraftId(null);
-    setNotice({ kind: "success", text: "Saved draft deleted. The current editor was kept." });
+  async function deleteDraft(id: string) {
+    if (!window.confirm("Delete this saved draft from your account?")) return;
+    try {
+      await changeWorkspace("delete-draft", { id });
+      if (currentDraftId === id) setCurrentDraftId(null);
+      setNotice({ kind: "success", text: "Saved draft deleted. The current editor was kept." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not delete draft." });
+    }
   }
 
-  function addToPlan() {
+  async function addToPlan() {
     const scheduledFor = new Date(scheduleTime);
     if (!scheduleTime || !Number.isFinite(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now()) {
       setNotice({ kind: "error", text: "Choose a future local date and time." });
@@ -323,7 +365,7 @@ export default function Home() {
       return;
     }
     if (schedule.length >= 100) {
-      setNotice({ kind: "error", text: "The local plan is full. Remove an old item before adding another." });
+      setNotice({ kind: "error", text: "The plan is full. Remove an old item before adding another." });
       return;
     }
     const post: ScheduledPost = {
@@ -335,9 +377,13 @@ export default function Home() {
       createdAt: new Date().toISOString(),
       status: "queued",
     };
-    setSchedule((current) => [...current, post].sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor)));
-    setScheduleTime("");
-    setNotice({ kind: "success", text: "Added to your local publishing plan. It will need a manual demo run when due." });
+    try {
+      await changeWorkspace("add-schedule", { item: post, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
+      setScheduleTime("");
+      setNotice({ kind: "success", text: "Added to this computer's plan. The worker will simulate it when due." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not add plan item." });
+    }
   }
 
   function loadScheduled(post: ScheduledPost) {
@@ -352,20 +398,12 @@ export default function Home() {
   }
 
   async function runScheduled(post: ScheduledPost) {
-    if (runningId || post.status !== "queued" || Date.parse(post.scheduledFor) > Date.now()) return;
+    if (runningId || post.status !== "failed") return;
     setRunningId(post.id);
     setNotice(null);
     try {
-      const response = await fetch("/api/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ posts: post.posts }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Simulation failed.");
-      setActivity((current) => [...data.results, ...current].slice(0, 12));
-      setSchedule((current) => current.map((item) => item.id === post.id ? { ...item, status: "simulated", simulatedAt: new Date().toISOString() } : item));
-      setNotice({ kind: "success", text: `Simulated ${data.results.length} planned post${data.results.length === 1 ? "" : "s"}. No external platform was contacted.` });
+      await changeWorkspace("retry-schedule", { id: post.id });
+      setNotice({ kind: "success", text: "Queued for another simulation attempt." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Simulation failed." });
     } finally {
@@ -373,10 +411,14 @@ export default function Home() {
     }
   }
 
-  function removeScheduled(id: string) {
-    if (!window.confirm("Remove this item from your local plan?")) return;
-    setSchedule((current) => current.filter((post) => post.id !== id));
-    setNotice({ kind: "success", text: "Item removed from your local plan." });
+  async function removeScheduled(id: string) {
+    if (!window.confirm("Remove this item from your plan?")) return;
+    try {
+      await changeWorkspace("delete-schedule", { id });
+      setNotice({ kind: "success", text: "Item removed from your plan." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not remove item." });
+    }
   }
 
   function exportWorkspace() {
@@ -394,14 +436,28 @@ export default function Home() {
       if (file.size > 2_000_000) throw new Error("Backup file is too large (2 MB maximum).");
       const workspace = parseWorkspace(JSON.parse(await file.text()));
       if (!workspace) throw new Error("This is not a Plypost workspace backup.");
-      if (!window.confirm("Replace saved drafts, the publishing plan, and assisted posts in this browser with this backup?")) return;
-      setDrafts(workspace.drafts);
-      setSchedule(workspace.schedule);
+      if (!window.confirm("Replace your account's drafts and publishing plan, and this browser's assisted posts, with this backup?")) return;
+      await changeWorkspace("import", { backup: workspace });
       setAssisted(workspace.assisted);
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 3, drafts: [], schedule: [], assisted: workspace.assisted }));
+      setLegacyWorkspace(null);
       setCurrentDraftId(null);
       setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts.` });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import backup." });
+    }
+  }
+
+  async function importLegacyWorkspace() {
+    if (!legacyWorkspace) return;
+    if (!window.confirm("Move the browser's saved drafts and plan into your account? This replaces the account library and overdue queued items may be simulated by the worker.")) return;
+    try {
+      await changeWorkspace("import", { backup: legacyWorkspace });
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ version: 3, drafts: [], schedule: [], assisted }));
+      setLegacyWorkspace(null);
+      setNotice({ kind: "success", text: "Browser drafts and plan moved into your account." });
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import browser data." });
     }
   }
 
@@ -496,8 +552,8 @@ export default function Home() {
           <a href="#activity" className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><History size={18} /> Activity</a>
         </nav>
         <div className="mt-auto border-t border-white/10 px-2 pt-5">
-          <p className="sidebar-muted text-[12px] leading-5">Your drafts live in this browser. Export a backup from the draft library.</p>
-          <div className="sidebar-subtle mt-4 flex items-center gap-2 text-[12px]"><span className="h-2 w-2 rounded-full bg-[#91d3ae]" /> Local workspace</div>
+          <p className="sidebar-muted text-[12px] leading-5">Drafts and plans are saved to your account. Assisted checklists remain in this browser.</p>
+          <div className="sidebar-subtle mt-4 flex items-center gap-2 text-[12px]"><span className="h-2 w-2 rounded-full bg-[#91d3ae]" /> Account workspace</div>
         </div>
       </aside>
 
@@ -505,7 +561,7 @@ export default function Home() {
         <header className="app-header sticky top-0 z-30 flex min-h-[66px] items-center justify-between gap-3 border-b px-5 sm:px-8 lg:px-10">
           <div className="flex items-center gap-2.5 lg:hidden"><span className="gradient-button flex h-8 w-8 items-center justify-center rounded-[9px] text-white"><Workflow size={17} /></span><span className="text-[18px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
           <div className="hidden items-center gap-2 text-[13px] text-[var(--text-muted)] lg:flex"><span>Workspace</span><span>/</span><span className="font-semibold text-[var(--text)]">Composer</span></div>
-          <div className="ml-auto flex items-center gap-3"><span className="hidden items-center gap-2 rounded-full border border-[var(--line)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-muted)] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-[var(--positive)]" /> Demo workspace</span><ThemeSwitcher /></div>
+          <div className="ml-auto flex items-center gap-3"><span className="hidden max-w-40 truncate text-[12px] text-[var(--text-muted)] sm:inline">{email}</span><ThemeSwitcher /><button type="button" onClick={onLogout} className="text-[12px] font-semibold text-[var(--accent-text)]">Sign out</button></div>
         </header>
         <nav className="mobile-nav app-header sticky top-[66px] z-20 flex gap-5 overflow-x-auto border-b px-5 text-[12px] font-semibold text-[var(--text-secondary)] sm:px-8 lg:hidden" aria-label="Mobile navigation">
           <a className="shrink-0 border-b-2 border-[var(--accent)] py-3 text-[var(--accent-text)]" href="#compose">Composer</a>
@@ -516,6 +572,8 @@ export default function Home() {
         </nav>
 
         <main id="compose" className="app-main section-anchor mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
+          {schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Start <code>npm run worker</code> on this computer to process scheduled items.</div>}
+          {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} browser drafts and {legacyWorkspace.schedule.length} planned items from the earlier version.</span><button type="button" onClick={importLegacyWorkspace} className="font-bold text-[var(--accent-text)]">Move into account →</button></div>}
           <div className="app-hero mb-7 rounded-[18px] px-6 py-7 sm:px-8 sm:py-8">
             <div className="relative z-10 flex flex-wrap items-start justify-between gap-6">
               <div className="max-w-[640px]">
@@ -576,14 +634,64 @@ export default function Home() {
 
           {notice && <div role="status" className={`fixed bottom-4 left-4 right-4 z-50 flex items-start gap-2 rounded-xl border px-4 py-3 text-[13px] leading-5 shadow-xl sm:left-auto sm:max-w-md ${notice.kind === "success" ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]" : "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"}`}>{notice.kind === "success" ? <CheckCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}{notice.text}</div>}
 
-          {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable or full. Your changes may not survive a reload. Export your saved library if possible.</div>}
+          {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable. Unsaved editor text and assisted checklists may not survive a reload.</div>}
 
           <DraftLibraryPanel drafts={drafts} title={title} currentDraftId={currentDraftId} onTitleChange={setTitle} onSave={saveDraft} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} />
-          <SchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onRemove={removeScheduled} />
+          <ServerSchedulePanel schedule={schedule} value={scheduleTime} now={now} canSchedule={Boolean(scheduleTime && source.trim() && selected.length && invalidSelected.length === 0)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onRemove={removeScheduled} />
           <AssistedPublishPanel items={assisted} destination={assistDestination} text={assistText} time={assistTime} now={now} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} />
+          <section className="panel-border soft-shadow mt-8 rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="audit-heading"><h2 id="audit-heading" className="text-[17px] font-bold">Account activity</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Recent saved changes and worker results.</p>{auditLog.length === 0 ? <p className="mt-4 text-[12px] text-[var(--text-soft)]">No activity yet.</p> : <div className="mt-4 divide-y divide-[var(--line)]">{auditLog.slice(0, 12).map((item, index) => <div key={`${item.created_at}-${index}`} className="flex flex-wrap justify-between gap-2 py-2 text-[12px]"><span className="font-medium text-[var(--text-secondary)]">{item.action.replaceAll(".", " · ")}{item.detail ? ` · ${item.detail}` : ""}</span><time className="text-[var(--text-soft)]">{formatTime(item.created_at)}</time></div>)}</div>}</section>
           <section id="activity" className="panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="activity-heading"><div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="activity-heading" className="text-[17px] font-bold tracking-[-0.025em]">Recent simulations</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">A local record of your demo publishing runs.</p></div>{activity.length > 0 && <button type="button" onClick={() => setActivity([])} className="text-[12px] font-semibold text-[var(--accent-text)] hover:text-[var(--accent-text)]">Clear history</button>}</div>{activity.length === 0 ? <div className="flex flex-col items-center px-6 py-10 text-center"><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Clock3 size={20} /></span><p className="text-[14px] font-semibold text-[var(--text-secondary)]">Nothing simulated yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Your demo publishing activity will show up here.</p></div> : <div className="divide-y divide-[var(--line)]">{activity.map((item) => <div key={item.id} className="flex items-center gap-3 px-6 py-3.5 sm:px-7"><PlatformMark id={item.platform} size="small" /><span className="min-w-0 flex-1"><span className="block text-[13px] font-semibold text-[var(--text-secondary)]">{platforms[item.platform].name} <span className="ml-1 rounded-full bg-[var(--accent-soft)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--accent-text)]">Simulated</span></span><span className="mt-0.5 block truncate text-[12px] text-[var(--text-soft)]">{item.content}</span></span><span className="shrink-0 text-[11px] text-[var(--text-soft)]">{formatTime(item.publishedAt)}</span></div>)}</div>}</section>
         </main>
       </div>
     </div>
   );
+}
+
+export default function Home() {
+  const [session, setSession] = useState<{ email: string | null; configured: boolean } | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void fetch("/api/auth/session", { cache: "no-store" })
+      .then((response) => response.json())
+      .then(setSession)
+      .catch(() => setError("Could not reach the server."));
+  }, []);
+
+  async function signIn(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Sign-in failed.");
+      setSession({ email: data.email, configured: true });
+      setPassword("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Sign-in failed.");
+    } finally { setBusy(false); }
+  }
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setSession({ email: null, configured: true });
+  }
+
+  if (session?.email) return <WorkspaceApp email={session.email} onLogout={signOut} />;
+  return <div className="app-shell flex min-h-screen items-center justify-center px-5 py-10"><div className="panel-border soft-shadow w-full max-w-md rounded-[22px] bg-[var(--surface)] p-8">
+    <div className="mb-7 flex items-center gap-3"><span className="gradient-button flex h-11 w-11 items-center justify-center rounded-xl text-white"><Workflow size={22} /></span><span className="text-[25px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
+    <h1 className="text-[22px] font-bold text-[var(--text)]">Your workspace, ready when you are.</h1>
+    <p className="mt-2 text-[13px] leading-5 text-[var(--text-muted)]">Sign in to save drafts and run scheduled simulations on this computer.</p>
+    {!session?.configured && session !== null ? <p role="alert" className="mt-5 rounded-xl bg-[var(--warning-soft)] p-3 text-[13px] text-[var(--warning)]">Owner sign-in is not configured. Follow the setup steps in README.md.</p> : <form onSubmit={signIn} className="mt-7 space-y-4">
+      <div><label htmlFor="login-email" className="mb-1.5 block text-[12px] font-bold text-[var(--text-secondary)]">Email</label><input id="login-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" /></div>
+      <div><label htmlFor="login-password" className="mb-1.5 block text-[12px] font-bold text-[var(--text-secondary)]">Password</label><input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" /></div>
+      <button type="submit" disabled={busy || session === null} className="gradient-button w-full rounded-xl py-3 text-[14px] font-bold text-white disabled:opacity-50">{busy ? "Signing in..." : "Sign in"}</button>
+    </form>}
+    {error && <p role="alert" className="mt-4 text-[13px] text-[var(--danger)]">{error}</p>}
+    <div className="mt-6 flex justify-end"><ThemeSwitcher /></div>
+  </div></div>;
 }
