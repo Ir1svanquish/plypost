@@ -118,7 +118,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   function openView(next: WorkspaceView) {
     setView(next);
-    if (window.location.hash !== `#${next}`) window.location.hash = next;
+    if (window.location.hash !== `#${next}`) window.history.pushState(null, "", `#${next}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -557,17 +557,17 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   return (
     <div className="app-shell min-h-screen lg:flex">
       <aside className="app-sidebar sidebar-glow hidden w-[232px] shrink-0 flex-col border-r px-4 py-7 lg:sticky lg:top-0 lg:flex lg:h-screen">
-        <a href="#compose" onClick={() => openView("compose")} className="flex items-center gap-3 px-2" aria-label="Plypost home">
+        <a href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} className="flex items-center gap-3 px-2" aria-label="Plypost home">
           <span className="gradient-button flex h-10 w-10 items-center justify-center rounded-[11px] text-white"><Workflow size={21} strokeWidth={2.3} /></span>
           <span className="text-[21px] font-bold tracking-[-0.055em]">Plypost<span className="sidebar-accent">.</span></span>
         </a>
         <div className="sidebar-muted mt-12 px-3 text-[11px] font-bold uppercase tracking-[0.17em]">Workspace</div>
         <nav className="mt-4 space-y-1" aria-label="Main navigation">
-          <a href="#compose" onClick={() => openView("compose")} aria-current={view === "compose" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Create</a>
-          <a href="#drafts" onClick={() => openView("drafts")} aria-current={view === "drafts" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Drafts <span className="ml-auto text-[11px] tabular-nums opacity-70">{drafts.length}</span></a>
-          <a href="#schedule" onClick={() => openView("schedule")} aria-current={view === "schedule" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Clock3 size={18} /> Plan</a>
-          <a href="#assisted" onClick={() => openView("assisted")} aria-current={view === "assisted" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Copy size={18} /> Assisted</a>
-          <a href="#account" onClick={() => openView("account")} aria-current={view === "account" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><UserRound size={18} /> Account</a>
+          <a href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} aria-current={view === "compose" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Create</a>
+          <a href="#drafts" onClick={(event) => { event.preventDefault(); openView("drafts"); }} aria-current={view === "drafts" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Drafts <span className="ml-auto text-[11px] tabular-nums opacity-70">{drafts.length}</span></a>
+          <a href="#schedule" onClick={(event) => { event.preventDefault(); openView("schedule"); }} aria-current={view === "schedule" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Clock3 size={18} /> Plan</a>
+          <a href="#assisted" onClick={(event) => { event.preventDefault(); openView("assisted"); }} aria-current={view === "assisted" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Copy size={18} /> Assisted</a>
+          <a href="#account" onClick={(event) => { event.preventDefault(); openView("account"); }} aria-current={view === "account" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><UserRound size={18} /> Account</a>
         </nav>
         <div className="sidebar-footer mt-auto border-t px-3 pt-5">
           <p className="sidebar-muted text-[12px] leading-5">Your space for drafts, plans and assisted posts.</p>
@@ -581,11 +581,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <div className="ml-auto flex items-center gap-3"><ThemeSwitcher /><button type="button" onClick={() => openView("account")} aria-label="Open account" className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] text-[var(--text-secondary)]"><UserRound size={17} /></button></div>
         </header>
         <nav className="mobile-nav app-header sticky top-[66px] z-20 flex gap-5 overflow-x-auto border-b px-5 text-[12px] font-semibold text-[var(--text-secondary)] sm:px-8 lg:hidden" aria-label="Mobile navigation">
-          <a className="shrink-0 py-3" href="#compose" onClick={() => openView("compose")} aria-current={view === "compose" ? "page" : undefined}>Create</a>
-          <a className="shrink-0 py-3" href="#drafts" onClick={() => openView("drafts")} aria-current={view === "drafts" ? "page" : undefined}>Drafts</a>
-          <a className="shrink-0 py-3" href="#schedule" onClick={() => openView("schedule")} aria-current={view === "schedule" ? "page" : undefined}>Plan</a>
-          <a className="shrink-0 py-3" href="#assisted" onClick={() => openView("assisted")} aria-current={view === "assisted" ? "page" : undefined}>Assisted</a>
-          <a className="shrink-0 py-3" href="#account" onClick={() => openView("account")} aria-current={view === "account" ? "page" : undefined}>Account</a>
+          <a className="shrink-0 py-3" href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} aria-current={view === "compose" ? "page" : undefined}>Create</a>
+          <a className="shrink-0 py-3" href="#drafts" onClick={(event) => { event.preventDefault(); openView("drafts"); }} aria-current={view === "drafts" ? "page" : undefined}>Drafts</a>
+          <a className="shrink-0 py-3" href="#schedule" onClick={(event) => { event.preventDefault(); openView("schedule"); }} aria-current={view === "schedule" ? "page" : undefined}>Plan</a>
+          <a className="shrink-0 py-3" href="#assisted" onClick={(event) => { event.preventDefault(); openView("assisted"); }} aria-current={view === "assisted" ? "page" : undefined}>Assisted</a>
+          <a className="shrink-0 py-3" href="#account" onClick={(event) => { event.preventDefault(); openView("account"); }} aria-current={view === "account" ? "page" : undefined}>Account</a>
         </nav>
 
         <main className="app-main mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
