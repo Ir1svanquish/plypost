@@ -42,8 +42,22 @@ export type AssistedPost = {
   status: "queued" | "posted";
   postedAt?: string;
   postUrl?: string;
+  outcome?: AssistedOutcome;
   notifiedAt?: string;
 };
+
+export type AssistedOutcomeInput = {
+  views?: number;
+  likes?: number;
+  replies?: number;
+  notes?: string;
+};
+
+/** Results entered by the account owner; these numbers are not verified with a platform. */
+export type AssistedOutcome = AssistedOutcomeInput & { recordedAt: string };
+
+export const MAX_ASSISTED_OUTCOME_COUNT = 1_000_000_000;
+export const MAX_ASSISTED_OUTCOME_NOTES = 500;
 
 export type Workspace = {
   version: 3;
@@ -63,6 +77,35 @@ const validDate = (value: unknown): value is string =>
 const validUtcInstant = (value: unknown): value is string =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
   Number.isFinite(new Date(value).getTime()) && new Date(value).toISOString() === value;
+
+/** Strictly validates user-entered results. An explicit zero is a valid observation. */
+export function parseAssistedOutcomeInput(value: unknown): AssistedOutcomeInput | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => !["views", "likes", "replies", "notes"].includes(key))) return null;
+  const parsed: AssistedOutcomeInput = {};
+  for (const key of ["views", "likes", "replies"] as const) {
+    if (value[key] === undefined) continue;
+    const count = value[key];
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > MAX_ASSISTED_OUTCOME_COUNT) return null;
+    parsed[key] = count;
+  }
+  if (value.notes !== undefined) {
+    if (typeof value.notes !== "string" || !value.notes.trim() || value.notes !== value.notes.trim() ||
+        characterCount(value.notes) > MAX_ASSISTED_OUTCOME_NOTES || [...value.notes].some((character) => {
+          const code = character.codePointAt(0) ?? 0;
+          return code <= 8 || (code >= 11 && code <= 31) || code === 127;
+        })) return null;
+    parsed.notes = value.notes;
+  }
+  return Object.keys(parsed).length ? parsed : null;
+}
+
+function parseAssistedOutcome(value: unknown): AssistedOutcome | null {
+  if (!isRecord(value) || !validUtcInstant(value.recordedAt)) return null;
+  const input = { ...value };
+  delete input.recordedAt;
+  const parsed = parseAssistedOutcomeInput(input);
+  return parsed ? { ...parsed, recordedAt: value.recordedAt } : null;
+}
 
 /** Checks the shape of a public HTTPS post link. This does not verify that a post exists. */
 export function normalizePublicPostUrl(value: unknown): string | null {
@@ -185,6 +228,9 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.postUrl !== undefined && (value.status !== "posted" ||
       normalizePublicPostUrl(value.postUrl) !== value.postUrl)) return null;
+  const outcome = value.outcome === undefined ? undefined : parseAssistedOutcome(value.outcome);
+  if (outcome === null || (outcome !== undefined &&
+      (value.status !== "posted" || !validUtcInstant(value.postedAt)))) return null;
   return {
     id: value.id,
     title: value.title,
@@ -196,6 +242,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
     status: value.status,
     ...(value.status === "posted" && validDate(value.postedAt) ? { postedAt: value.postedAt } : {}),
     ...(value.postUrl !== undefined ? { postUrl: value.postUrl as string } : {}),
+    ...(outcome !== undefined ? { outcome } : {}),
     ...(validDate(value.notifiedAt) ? { notifiedAt: value.notifiedAt } : {}),
   };
 }

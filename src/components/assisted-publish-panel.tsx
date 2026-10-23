@@ -5,7 +5,7 @@ import { Bell, CalendarClock, Check, Copy, ExternalLink, RotateCcw, Trash2 } fro
 import { assistedDestinations, assistedIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isPlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
-import { assistedState, normalizePublicPostUrl, type AssistedPost } from "@/lib/workspace";
+import { assistedState, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 
@@ -26,6 +26,7 @@ type Props = {
   onCopy: (text: string, destination: AssistedDestinationId) => void;
   onMarkPosted: (id: string, postUrl?: string) => void;
   onUpdatePostUrl: (id: string, postUrl: string | null) => Promise<boolean>;
+  onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null) => Promise<boolean>;
   onUndo: (id: string) => void;
   onRemove: (id: string) => void;
   onEnableNotifications: () => void;
@@ -33,10 +34,41 @@ type Props = {
   focusItemId?: string;
 };
 
-export function AssistedPublishPanel({ items, destination, text, time, now, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdatePostUrl, onUndo, onRemove, onEnableNotifications, onEditImages, focusItemId }: Props) {
+type OutcomeForm = { views: string; likes: string; replies: string; notes: string };
+
+function outcomeForm(item: AssistedPost): OutcomeForm {
+  return {
+    views: item.outcome?.views?.toString() ?? "",
+    likes: item.outcome?.likes?.toString() ?? "",
+    replies: item.outcome?.replies?.toString() ?? "",
+    notes: item.outcome?.notes ?? "",
+  };
+}
+
+function readOutcomeForm(form: OutcomeForm): { value?: AssistedOutcomeInput; error?: string } {
+  const value: AssistedOutcomeInput = {};
+  for (const key of ["views", "likes", "replies"] as const) {
+    const input = form[key].trim();
+    if (!input) continue;
+    if (!/^\d+$/.test(input) || !Number.isSafeInteger(Number(input)) || Number(input) > MAX_ASSISTED_OUTCOME_COUNT) {
+      return { error: "Use whole numbers from 0 to 1,000,000,000 for results." };
+    }
+    value[key] = Number(input);
+  }
+  const notes = form.notes.trim();
+  if (notes.length > MAX_ASSISTED_OUTCOME_NOTES) return { error: "Keep notes within 500 characters." };
+  if (notes) value.notes = notes;
+  if (!Object.keys(value).length) return { error: "Add at least one count or a note." };
+  return { value };
+}
+
+export function AssistedPublishPanel({ items, destination, text, time, now, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, focusItemId }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [editingLinks, setEditingLinks] = useState<Record<string, boolean>>({});
   const [linkSavingId, setLinkSavingId] = useState<string | null>(null);
+  const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, OutcomeForm>>({});
+  const [editingOutcomes, setEditingOutcomes] = useState<Record<string, boolean>>({});
+  const [outcomeSavingId, setOutcomeSavingId] = useState<string | null>(null);
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const selected = assistedDestinations[destination];
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
@@ -61,6 +93,28 @@ export function AssistedPublishPanel({ items, destination, text, time, now, busy
       if (await onUpdatePostUrl(id, postUrl)) closeLinkEditor(id);
     } finally {
       setLinkSavingId(null);
+    }
+  }
+
+  function closeOutcomeEditor(id: string) {
+    setEditingOutcomes((current) => { const next = { ...current }; delete next[id]; return next; });
+    setOutcomeDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
+  }
+
+  function changeOutcomeField(item: AssistedPost, key: keyof OutcomeForm, value: string) {
+    setOutcomeDrafts((current) => ({
+      ...current,
+      [item.id]: { ...(current[item.id] ?? outcomeForm(item)), [key]: value },
+    }));
+  }
+
+  async function updateOutcome(id: string, outcome: AssistedOutcomeInput | null) {
+    if (busy || outcomeSavingId) return;
+    setOutcomeSavingId(id);
+    try {
+      if (await onUpdateOutcome(id, outcome)) closeOutcomeEditor(id);
+    } finally {
+      setOutcomeSavingId(null);
     }
   }
 
@@ -116,6 +170,13 @@ export function AssistedPublishPanel({ items, destination, text, time, now, busy
             const editedLink = postUrls[item.id] ?? savedUrl ?? "";
             const normalizedEditedLink = editedLink ? normalizePublicPostUrl(editedLink) : undefined;
             const invalidEditedLink = normalizedEditedLink === null;
+            const editingOutcome = item.status === "posted" && Boolean(editingOutcomes[item.id]);
+            const resultDraft = outcomeDrafts[item.id] ?? outcomeForm(item);
+            const resultValidation = readOutcomeForm(resultDraft);
+            const resultSummary = item.outcome && (["views", "likes", "replies"] as const)
+              .filter((key) => item.outcome?.[key] !== undefined)
+              .map((key) => `${key[0].toUpperCase()}${key.slice(1)} ${item.outcome?.[key]?.toLocaleString()}`)
+              .join(" · ");
             return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[13px] font-bold text-[var(--text-secondary)]">{item.title}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{target.name} · {formatLocalDateTime(item.scheduledFor)}</p></div>
@@ -131,7 +192,7 @@ export function AssistedPublishPanel({ items, destination, text, time, now, busy
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {target.name}</a>
-                {item.status === "queued" ? <button type="button" onClick={() => onMarkPosted(item.id, normalizedUrl ?? undefined)} disabled={busy || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => onUndo(item.id)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+                {item.status === "queued" ? <button type="button" onClick={() => onMarkPosted(item.id, normalizedUrl ?? undefined)} disabled={busy || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { closeOutcomeEditor(item.id); onUndo(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
               {item.status === "posted" && <div className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">
                 <p>Marked posted by you{item.postedAt ? ` · ${formatLocalDateTime(item.postedAt)}` : ""} · not verified by Plypost.</p>
@@ -147,6 +208,34 @@ export function AssistedPublishPanel({ items, destination, text, time, now, busy
                     <button type="button" onClick={() => { if (normalizedEditedLink) void updateLink(item.id, normalizedEditedLink); }} disabled={busy || linkSavingId !== null || !normalizedEditedLink || normalizedEditedLink === savedUrl} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{linkSavingId === item.id ? "Saving…" : "Save link"}</button>
                     {savedUrl && <button type="button" onClick={() => { void updateLink(item.id, null); }} disabled={busy || linkSavingId !== null} className="text-[12px] font-semibold text-[var(--danger)] disabled:opacity-50">Remove recorded link</button>}
                     <button type="button" onClick={() => closeLinkEditor(item.id)} disabled={busy || linkSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
+                  </div>
+                </div>}
+              </div>}
+              {item.status === "posted" && <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-[12px]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-[var(--text-secondary)]">Results you entered <span className="font-normal text-[var(--text-muted)]">· self-reported, not verified</span></p>
+                  {!editingOutcome && <button type="button" onClick={() => { setOutcomeDrafts((current) => ({ ...current, [item.id]: outcomeForm(item) })); setEditingOutcomes((current) => ({ ...current, [item.id]: true })); }} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.outcome ? "Edit results" : "Record results"}</button>}
+                </div>
+                {item.outcome ? <div className="mt-2 space-y-1 text-[var(--text-muted)]">
+                  {resultSummary && <p>{resultSummary}</p>}
+                  {item.outcome.notes && <p className="whitespace-pre-wrap break-words">{item.outcome.notes}</p>}
+                  <p className="text-[11px]">Entered {formatLocalDateTime(item.outcome.recordedAt)}</p>
+                </div> : !editingOutcome && <p className="mt-1 text-[var(--text-muted)]">Add a count or a brief note after checking the platform yourself.</p>}
+                {editingOutcome && <div className="mt-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["views", "likes", "replies"] as const).map((key) => <div key={key}>
+                      <label htmlFor={`assisted-outcome-${key}-${item.id}`} className="mb-1 block font-semibold capitalize text-[var(--text-secondary)]">{key}</label>
+                      <input id={`assisted-outcome-${key}-${item.id}`} type="text" inputMode="numeric" pattern="[0-9]*" value={resultDraft[key]} placeholder="—" onChange={(event) => changeOutcomeField(item, key, event.target.value)} disabled={busy || outcomeSavingId === item.id} className="w-full min-w-0 rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
+                    </div>)}
+                  </div>
+                  <label htmlFor={`assisted-outcome-notes-${item.id}`} className="mb-1 mt-3 block font-semibold text-[var(--text-secondary)]">What happened · optional</label>
+                  <textarea id={`assisted-outcome-notes-${item.id}`} value={resultDraft.notes} maxLength={MAX_ASSISTED_OUTCOME_NOTES} rows={2} placeholder="A short observation for your next plan" onChange={(event) => changeOutcomeField(item, "notes", event.target.value)} disabled={busy || outcomeSavingId === item.id} className="w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
+                  <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">Plypost does not fetch or verify these numbers, or send them to AI. Your posted time and link will stay unchanged.</p>
+                  {resultValidation.error && <p role="status" className="mt-1 text-[11px] text-[var(--danger)]">{resultValidation.error}</p>}
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button type="button" onClick={() => { if (resultValidation.value) void updateOutcome(item.id, resultValidation.value); }} disabled={busy || outcomeSavingId !== null || !resultValidation.value} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 font-semibold text-[var(--accent-text)] disabled:opacity-50">{outcomeSavingId === item.id ? "Saving…" : "Save results"}</button>
+                    {item.outcome && <button type="button" onClick={() => { void updateOutcome(item.id, null); }} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--danger)] disabled:opacity-50">Clear results</button>}
+                    <button type="button" onClick={() => closeOutcomeEditor(item.id)} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                   </div>
                 </div>}
               </div>}

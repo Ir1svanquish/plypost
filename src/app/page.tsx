@@ -20,6 +20,7 @@ import { adaptDraft, characterCount, isPlatformId, platformIds, platforms, type 
 import { validatePlatformText } from "@/lib/platform-validation";
 import { DraftLibraryPanel } from "@/components/workspace-panels";
 import { ServerSchedulePanel } from "@/components/server-schedule-panel";
+import { StrategyPanel } from "@/components/strategy-panel";
 import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
@@ -27,7 +28,7 @@ import { PlatformPreview } from "@/components/platform-preview";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { MastodonLivePanel, isMastodonConnection, type MastodonConnection } from "@/components/mastodon-live-panel";
 import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
-import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nShape one message for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
@@ -136,6 +137,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [focusedAssistedId, setFocusedAssistedId] = useState<string | null>(null);
   const assistedMutation = useRef(false);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [strategyRefreshEpoch, setStrategyRefreshEpoch] = useState(0);
+  const [strategyDirty, setStrategyDirty] = useState(false);
   const backupMutation = useRef(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
   const restoringBackupRef = useRef(false);
@@ -758,7 +761,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Choose a full backup no larger than 128 MiB." });
       return;
     }
-    if (!window.confirm("Replace this account's saved drafts, plan, assisted posts and images with this full backup? This cannot be undone.")) return;
+    const unsavedStrategyWarning = strategyDirty
+      ? " Your unsaved brand profile or AI idea edits will be lost."
+      : "";
+    if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), and images with this full backup?${unsavedStrategyWarning} This cannot be undone.`)) return;
     backupMutation.current = true;
     setBackupBusy(true);
     restoringBackupRef.current = true;
@@ -780,7 +786,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
       await refreshWorkspace();
-      setNotice({ kind: "success", text: "Full backup restored. Saved drafts, plans, handoffs and images are available in this account." });
+      setStrategyRefreshEpoch((epoch) => epoch + 1);
+      setNotice({ kind: "success", text: "Full backup restored. Saved drafts, brand plans, handoffs, results and images are available in this account." });
     } catch (error) {
       setNotice({ kind: "error", text: restored
         ? "Full backup was restored, but the view could not refresh. Reload to see the saved work."
@@ -803,12 +810,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           (raw.version === 3 && (!Array.isArray(raw.assisted) || workspace.assisted.length !== raw.assisted.length))) {
         throw new Error("This backup has invalid or excess records. Nothing was replaced.");
       }
-      if (!window.confirm("Replace your account's drafts, publishing plan, and assisted posts with this JSON backup? Images are not in the file, so drafts referencing images require those images in this account's database.")) return;
+      if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`)) return;
       await changeWorkspace("import", { backup: raw });
       localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace()));
       setLegacyWorkspace(null);
       setCurrentDraftId(null);
-      setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts.` });
+      setStrategyRefreshEpoch((epoch) => epoch + 1);
+      setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts. AI weekly plans were cleared; your saved brand profile remains.` });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import backup." });
     }
@@ -816,13 +824,14 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   async function importLegacyWorkspace() {
     if (!legacyWorkspace) return;
-    if (!window.confirm("Move the browser's saved drafts and plan into your account? This replaces the account library and overdue queued items may be simulated by the worker.")) return;
+    if (!window.confirm(`Move the browser's saved drafts and plan into your account? This replaces the account's drafts and publishing plan; assisted posts and your saved brand profile remain, while AI weekly plans are cleared. Overdue queued items may be simulated by the worker.${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`)) return;
     try {
       await changeWorkspace("import-legacy", { backup: legacyWorkspace });
       const previous = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
       localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ ...emptyWorkspace(), assisted: previous.assisted }));
       setLegacyWorkspace(null);
-      setNotice({ kind: "success", text: "Browser drafts and plan moved into your account." });
+      setStrategyRefreshEpoch((epoch) => epoch + 1);
+      setNotice({ kind: "success", text: "Browser drafts and publishing plan moved into your account. AI weekly plans were cleared; your saved brand profile and assisted posts remain." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import browser data." });
     }
@@ -914,6 +923,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     return runAssistedAction("set-assisted-status", { id, status: "posted", postUrl }, postUrl === null
       ? "Recorded link removed. Your posted mark and completion time were kept."
       : "Recorded link saved. Plypost did not verify the platform post.");
+  }
+
+  async function updateAssistedOutcome(id: string, outcome: AssistedOutcomeInput | null): Promise<boolean> {
+    return runAssistedAction("set-assisted-outcome", { id, outcome }, outcome
+      ? "Your self-reported result was saved. Plypost did not verify these metrics with the platform."
+      : "Your self-reported result was removed.");
   }
 
   async function undoAssistedPosted(id: string) {
@@ -1047,14 +1062,15 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Drafts</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Saved ideas</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Pick up a post you started earlier, or keep a backup.</p></div>
             <DraftLibraryPanel drafts={drafts} currentDraftId={currentDraftId} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />
           </div>}
-          {view === "schedule" && <div>
-            <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Schedule a snapshot of the draft currently in your editor.</p></div>
+          <div hidden={view !== "schedule"}>
+            <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Turn a goal into reviewed drafts, then plan a publishing simulation or manual handoff.</p></div>
+            <div className="mb-6"><StrategyPanel drafts={drafts} refreshToken={strategyRefreshEpoch} onDirtyChange={setStrategyDirty} onDraftApproved={() => { void refreshWorkspace().catch(() => setNotice({ kind: "error", text: "The idea was approved, but the draft library could not refresh. Reload this page to see it." })); }} onOpenDraft={loadDraft} /></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
             <ServerSchedulePanel schedule={schedule} assisted={assisted} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} />
-          </div>}
+          </div>
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdatePostUrl={updateAssistedPostUrl} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} />
+            <AssistedPublishPanel items={assisted} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} />}
         </main>

@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import sharp from "sharp";
 import { transaction, audit, database } from "./db";
 import { listMedia, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_OWNER_MEDIA_BYTES, MAX_OWNER_MEDIA_COUNT } from "./media";
 import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { parseBrandBrief, parseWeeklyPlan, type BrandBrief, type WeeklyPlan } from "../strategy";
 
 export const MAX_PORTABLE_BACKUP_BYTES = 128 * 1024 * 1024;
 
@@ -38,12 +40,14 @@ type PortableMedia = {
 };
 export type PortableBackup = {
   format: "plypost-portable";
-  version: 1;
+  version: 2;
   exportedAt: string;
   drafts: SavedDraft[];
   jobs: PortableJob[];
   assisted: AssistedPost[];
   media: PortableMedia[];
+  brandBrief: BrandBrief | null;
+  weeklyPlans: WeeklyPlan[];
 };
 
 type StoredMedia = {
@@ -177,6 +181,26 @@ function validateWorkspace(raw: Record<string, unknown>) {
   };
 }
 
+function validateStrategy(raw: Record<string, unknown>): { brandBrief: BrandBrief | null; weeklyPlans: WeeklyPlan[] } {
+  if (raw.version === 1) return { brandBrief: null, weeklyPlans: [] };
+  const brandBrief = raw.brandBrief === null ? null : parseBrandBrief(raw.brandBrief);
+  if (raw.brandBrief !== null && (!brandBrief || !isDeepStrictEqual(brandBrief, raw.brandBrief))) {
+    invalid("Backup contains invalid brand details.");
+  }
+  if (!Array.isArray(raw.weeklyPlans) || raw.weeklyPlans.length > 12) {
+    invalid("Backup contains invalid weekly plans.");
+  }
+  const weeklyPlans = raw.weeklyPlans.map((entry) => {
+    const plan = parseWeeklyPlan(entry);
+    if (!plan || !isDeepStrictEqual(plan, entry)) invalid("Backup contains invalid weekly plans.");
+    return plan;
+  });
+  if (new Set(weeklyPlans.map((plan) => plan.id)).size !== weeklyPlans.length) {
+    invalid("Backup contains duplicate weekly plans.");
+  }
+  return { brandBrief, weeklyPlans };
+}
+
 function assertUniqueIds(items: { id: string }[]) {
   if (new Set(items.map((item) => item.id)).size !== items.length) invalid("Backup contains duplicate IDs.");
 }
@@ -280,6 +304,8 @@ function ownerDataFingerprint(db: ReturnType<typeof database>, userId: string): 
     "SELECT id,payload,scheduled_for,timezone,status,attempts,next_attempt_at,last_error,completed_at,receipts FROM jobs WHERE user_id=? ORDER BY id",
     "SELECT id,payload,scheduled_for,updated_at FROM assisted WHERE user_id=? ORDER BY id",
     "SELECT id,sha256,byte_size FROM media WHERE user_id=? ORDER BY id",
+    "SELECT user_id,payload FROM brand_briefs WHERE user_id=?",
+    "SELECT id,payload,created_at FROM weekly_plans WHERE user_id=? ORDER BY id",
   ];
   for (const query of tables) hash.update(JSON.stringify(db.prepare(query).all(userId)));
   return hash.digest("hex");
@@ -312,11 +338,17 @@ export function exportPortableBackup(userId: string): string {
     });
     const media = db.prepare("SELECT id,original_name,mime_type,byte_size,width,height,created_at,sha256,body FROM media WHERE user_id=? ORDER BY created_at DESC,id")
       .all(userId) as StoredMedia[];
-    return { drafts, assisted, jobs, media };
+    const briefRow = db.prepare("SELECT payload FROM brand_briefs WHERE user_id=?")
+      .get(userId) as { payload: string } | undefined;
+    const brandBrief = briefRow ? JSON.parse(briefRow.payload) as BrandBrief : null;
+    const weeklyPlans = db.prepare("SELECT payload FROM weekly_plans WHERE user_id=? ORDER BY created_at DESC,id")
+      .all(userId).map((row) => JSON.parse((row as { payload: string }).payload) as WeeklyPlan);
+    return { drafts, assisted, jobs, media, brandBrief, weeklyPlans };
   });
   const archive: PortableBackup = {
-    format: "plypost-portable", version: 1, exportedAt: new Date().toISOString(),
+    format: "plypost-portable", version: 2, exportedAt: new Date().toISOString(),
     drafts: snapshot.drafts, jobs: snapshot.jobs, assisted: snapshot.assisted,
+    brandBrief: snapshot.brandBrief, weeklyPlans: snapshot.weeklyPlans,
     media: snapshot.media.map((row) => {
       const body = Buffer.from(row.body);
       if (body.length !== row.byte_size || createHash("sha256").update(body).digest("hex") !== row.sha256) {
@@ -330,9 +362,11 @@ export function exportPortableBackup(userId: string): string {
     }),
   };
   const validated = validateWorkspace(archive);
+  validateStrategy(archive);
   const allIds = [
     ...validated.drafts.map((item) => item.id), ...validated.jobs.map((item) => item.post.id),
     ...validated.assisted.map((item) => item.id), ...archive.media.map((item) => item.id),
+    ...archive.weeklyPlans.map((item) => item.id),
   ];
   assertUniqueIds(allIds.map((id) => ({ id })));
   const mediaIds = new Set(archive.media.map((item) => item.id));
@@ -349,9 +383,10 @@ export function exportPortableBackup(userId: string): string {
 }
 
 export async function importPortableBackup(userId: string, raw: unknown) {
-  if (!isRecord(raw) || raw.format !== "plypost-portable" || raw.version !== 1 ||
+  if (!isRecord(raw) || raw.format !== "plypost-portable" || (raw.version !== 1 && raw.version !== 2) ||
       !validInstant(raw.exportedAt)) invalid("This is not a supported Plypost portable backup.");
   const workspace = validateWorkspace(raw);
+  const strategy = validateStrategy(raw);
   listMedia(userId);
   // Reject a restore if another tab or request changes this account while images are prepared.
   const startingData = transaction((db) => ownerDataFingerprint(db, userId));
@@ -359,12 +394,22 @@ export async function importPortableBackup(userId: string, raw: unknown) {
   const allIds = [
     ...workspace.drafts.map((item) => item.id), ...workspace.jobs.map((item) => item.post.id),
     ...workspace.assisted.map((item) => item.id), ...media.map((item) => item.oldId),
+    ...strategy.weeklyPlans.map((item) => item.id),
   ];
   if (new Set(allIds).size !== allIds.length) invalid("Backup contains duplicate IDs.");
   const mediaMap = new Map(media.map((item) => [item.oldId, item.newId]));
   const drafts = workspace.drafts.map((item) => remapMediaIds(item, mediaMap));
+  const draftIdMap = new Map(workspace.drafts.map((item, index) => [item.id, drafts[index].id]));
   const jobs = workspace.jobs.map((item) => ({ ...item, post: remapMediaIds(item.post, mediaMap) }));
   const assisted = workspace.assisted.map((item) => remapMediaIds(item, mediaMap));
+  const weeklyPlans = strategy.weeklyPlans.map((plan) => ({
+    ...plan,
+    id: randomUUID(),
+    ideas: plan.ideas.map((idea) => ({
+      ...idea,
+      ...(idea.draftId && draftIdMap.has(idea.draftId) ? { draftId: draftIdMap.get(idea.draftId)! } : {}),
+    })),
+  }));
   // No user data is changed until every image and every reference has passed validation.
   transaction((db) => {
     if (ownerDataFingerprint(db, userId) !== startingData) {
@@ -375,6 +420,8 @@ export async function importPortableBackup(userId: string, raw: unknown) {
     db.prepare("DELETE FROM drafts WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM jobs WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM assisted WHERE user_id=?").run(userId);
+    db.prepare("DELETE FROM brand_briefs WHERE user_id=?").run(userId);
+    db.prepare("DELETE FROM weekly_plans WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM media WHERE user_id=?").run(userId);
     for (const image of media) {
       db.prepare("INSERT INTO media(id,user_id,original_name,mime_type,byte_size,width,height,sha256,body,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
@@ -395,8 +442,16 @@ export async function importPortableBackup(userId: string, raw: unknown) {
       db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
         .run(item.id, userId, JSON.stringify(item), item.scheduledFor, new Date().toISOString());
     }
+    if (strategy.brandBrief) {
+      db.prepare("INSERT INTO brand_briefs(user_id,payload) VALUES (?,?)")
+        .run(userId, JSON.stringify(strategy.brandBrief));
+    }
+    for (const plan of weeklyPlans) {
+      db.prepare("INSERT INTO weekly_plans(id,user_id,payload,created_at) VALUES (?,?,?,?)")
+        .run(plan.id, userId, JSON.stringify(plan), plan.createdAt);
+    }
     audit(userId, "workspace.portable_imported", undefined,
-      `${drafts.length} drafts; ${jobs.length} jobs; ${assisted.length} assisted; ${media.length} images`);
+      `${drafts.length} drafts; ${jobs.length} jobs; ${assisted.length} assisted; ${media.length} images; ${weeklyPlans.length} weekly plans`);
   });
   return { drafts: drafts.length, jobs: jobs.length, assisted: assisted.length, media: media.length };
 }

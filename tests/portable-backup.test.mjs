@@ -11,6 +11,7 @@ import { createMedia, getMedia, listMedia } from "../src/lib/server/media.ts";
 import { addSchedule, listWorkspace, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
+import { approveStrategyIdea, createWeeklyPlan, listStrategy, saveBrandBrief } from "../src/lib/server/strategy.ts";
 import { GET, POST } from "../src/app/api/backup/route.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-portable-"));
@@ -56,7 +57,9 @@ test("portable backup restores image pixels and saved records in a fresh databas
   const exported = exportPortableBackup(owner);
   const archive = JSON.parse(exported);
   assert.equal(archive.format, "plypost-portable");
-  assert.equal(archive.version, 1);
+  assert.equal(archive.version, 2);
+  assert.equal(archive.brandBrief, null);
+  assert.deepEqual(archive.weeklyPlans, []);
   assert.equal(archive.media.length, 1);
   assert.equal(archive.drafts[0].mediaIds[0], image.id);
   assert.equal(archive.jobs[0].timezone, "Asia/Hong_Kong");
@@ -236,4 +239,44 @@ test("failed and completed plan states, receipts, and timezones survive restore"
   assert.equal(simulated.simulatedAt, finishedAt);
   assert.deepEqual(simulated.receipts, [receipt]);
   assert.equal(database().prepare("SELECT timezone FROM jobs WHERE id=?").get(failed.id).timezone, "Asia/Hong_Kong");
+});
+
+test("full backup preserves brand details, reviewed ideas, and their remapped draft links", async () => {
+  const sourceOwner = "strategy-source@example.test";
+  const destinationOwner = "strategy-restored@example.test";
+  const brief = saveBrandBrief(sourceOwner, {
+    brandName: "Plypost", description: "A social publishing workspace", audience: "Solo creators",
+    goal: "Explain the product", voice: "Plain and useful", facts: "The app is local-first.",
+    contentPillars: ["Product notes"], platforms: ["bluesky", "linkedin"],
+  });
+  const plan = createWeeklyPlan(sourceOwner, brief, "nvidia", "2026-10-26", [{
+    title: "Share an update", angle: "Explain one improvement", rationale: "Readers can see a concrete change",
+    seed: "Plypost added a clearer publishing plan.", platforms: ["bluesky", "linkedin"],
+  }]);
+  const originalDraft = approveStrategyIdea(sourceOwner, plan.id, plan.ideas[0].id);
+  const archive = JSON.parse(exportPortableBackup(sourceOwner));
+  assert.equal(archive.version, 2);
+  assert.equal(archive.brandBrief.brandName, "Plypost");
+  assert.equal(archive.weeklyPlans[0].ideas[0].draftId, originalDraft.id);
+
+  const broken = globalThis.structuredClone(archive);
+  broken.weeklyPlans[0].ideas[0].status = "proposed";
+  await assert.rejects(importPortableBackup(destinationOwner, broken), /invalid weekly plans/);
+  assert.deepEqual(listStrategy(destinationOwner).plans, []);
+
+  await importPortableBackup(destinationOwner, archive);
+  const restoredState = listStrategy(destinationOwner);
+  const restoredDraft = listWorkspace(destinationOwner).drafts[0];
+  assert.equal(restoredState.brief.brandName, brief.brandName);
+  assert.notEqual(restoredState.plans[0].id, plan.id);
+  assert.notEqual(restoredDraft.id, originalDraft.id);
+  assert.equal(restoredState.plans[0].ideas[0].draftId, restoredDraft.id);
+  assert.equal(restoredState.plans[0].ideas[0].seed, plan.ideas[0].seed);
+
+  const legacy = globalThis.structuredClone(archive);
+  legacy.version = 1;
+  delete legacy.brandBrief;
+  delete legacy.weeklyPlans;
+  await importPortableBackup(destinationOwner, legacy);
+  assert.deepEqual(listStrategy(destinationOwner), { brief: null, plans: [] });
 });

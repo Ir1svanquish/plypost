@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { normalizePublicPostUrl, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { isPlatformId, platformIds } from "../platforms";
 import { validatePlatformText } from "../platform-validation";
 import { assertOwnedMedia } from "./media";
@@ -124,10 +124,38 @@ export function setAssistedStatus(userId: string, id: string, status: unknown, p
     } else {
       delete updated.postedAt;
       delete updated.postUrl;
+      delete updated.outcome;
     }
     db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
       .run(JSON.stringify(updated), new Date().toISOString(), id, userId);
     audit(userId, status === "posted" ? current.status === "posted" ? "assisted.post_link_updated" : "assisted.posted" : "assisted.unposted", id);
+    return true;
+  });
+}
+
+/** Saves or clears owner-entered feedback without changing the human posting receipt. */
+export function setAssistedOutcome(userId: string, id: string, outcome: unknown): boolean {
+  if (!validId(id)) throw new Error("Invalid assisted item ID.");
+  const parsed = outcome === null ? null : parseAssistedOutcomeInput(outcome);
+  if (outcome !== null && !parsed) {
+    throw new Error("Enter at least one result. Counts must be whole numbers from 0 to 1,000,000,000; notes may be up to 500 characters.");
+  }
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
+    if (!row) return false;
+    const current = JSON.parse(row.payload) as AssistedPost;
+    if (current.status !== "posted") throw new Error("Mark the item posted before recording results.");
+    if (parsed === null && !current.outcome) return true;
+    if (parsed !== null && current.outcome) {
+      const existing = Object.fromEntries(Object.entries(current.outcome).filter(([key]) => key !== "recordedAt"));
+      if (JSON.stringify(existing) === JSON.stringify(parsed)) return true;
+    }
+    const updated: AssistedPost = { ...current };
+    if (parsed === null) delete updated.outcome;
+    else updated.outcome = { ...parsed, recordedAt: new Date().toISOString() };
+    db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(JSON.stringify(updated), new Date().toISOString(), id, userId);
+    audit(userId, parsed === null ? "assisted.outcome_cleared" : "assisted.outcome_recorded", id);
     return true;
   });
 }
@@ -274,6 +302,8 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
   const ids = [...workspace.drafts, ...workspace.schedule, ...workspace.assisted].map((item) => item.id);
   if (new Set(ids).size !== ids.length || ids.some((id) => !/^[a-f0-9-]{36}$/i.test(id))) throw new Error("Backup has invalid IDs.");
   transaction((db) => {
+    // A text workspace backup has no weekly plans; replacing its drafts invalidates approved idea links.
+    db.prepare("DELETE FROM weekly_plans WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM drafts WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM jobs WHERE user_id=? AND status != 'running'").run(userId);
     const running = db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE user_id=?").get(userId) as { count: number };
