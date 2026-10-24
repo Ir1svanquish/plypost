@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "@/lib/server/workspace";
+import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; expectedScheduledFor?: unknown; expectedText?: unknown; text?: unknown; expectedMediaAlt?: unknown; mediaAlt?: unknown; expectedVideoId?: unknown; videoId?: unknown; timezone?: unknown; backup?: unknown; expectedUpdatedAt?: unknown };
+  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; expectedScheduledFor?: unknown; expectedText?: unknown; text?: unknown; expectedMediaIds?: unknown; mediaIds?: unknown; expectedMediaAlt?: unknown; mediaAlt?: unknown; expectedVideoId?: unknown; videoId?: unknown; timezone?: unknown; backup?: unknown; expectedUpdatedAt?: unknown };
   try { input = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
   let assistedMigration: "imported" | "skipped" | undefined;
   let savedDraftResult: ReturnType<typeof saveDraft> | undefined;
@@ -29,6 +29,7 @@ export async function POST(request: Request) {
       case "reschedule-assisted": if (typeof input.id !== "string" || !rescheduleAssisted(user, input.id, input.expectedScheduledFor, input.scheduledFor)) throw new Error("Assisted item not found."); break;
       case "update-assisted-text": if (typeof input.id !== "string" || !updateAssistedText(user, input.id, input.expectedText, input.text)) throw new Error("Assisted item not found."); break;
       case "update-assisted-video": if (typeof input.id !== "string" || !updateAssistedVideo(user, input.id, input.expectedVideoId, input.videoId)) throw new Error("Assisted item not found."); break;
+      case "update-assisted-images": if (typeof input.id !== "string" || !updateAssistedImages(user, input.id, input.expectedMediaIds, input.expectedMediaAlt, input.mediaIds, input.mediaAlt)) throw new Error("Assisted item not found."); break;
       case "update-assisted-media-alt": if (typeof input.id !== "string" || !updateAssistedMediaAlt(user, input.id, input.expectedMediaAlt, input.mediaAlt)) throw new Error("Assisted item not found."); break;
       case "mark-assisted-notified": markAssistedNotified(user, input.ids); break;
       case "delete-assisted": if (typeof input.id !== "string" || !deleteAssisted(user, input.id)) throw new Error("Assisted item not found."); break;

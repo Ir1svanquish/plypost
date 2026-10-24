@@ -307,6 +307,34 @@ export function updateAssistedVideo(userId: string, id: string, expectedVideoId:
   });
 }
 
+/** Change one queued handoff's images without altering its source draft or sibling handoffs. */
+export function updateAssistedImages(userId: string, id: string, expectedMediaIds: unknown, expectedMediaAlt: unknown, mediaIds: unknown, mediaAlt: unknown): boolean {
+  if (!validId(id) || !validMediaAlt(expectedMediaAlt, expectedMediaIds) || !validMediaAlt(mediaAlt, mediaIds)) {
+    throw new Error("Choose up to four distinct images and provide a description for each selection.");
+  }
+  const previousIds = expectedMediaIds as string[];
+  const nextIds = mediaIds as string[];
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
+    if (!row) throw new AssistedConflictError("This handoff is no longer available. Refresh the list before editing.");
+    const current = JSON.parse(row.payload) as AssistedPost;
+    const savedIds = current.mediaIds ?? [];
+    const savedAlt = current.mediaAlt ?? savedIds.map(() => "");
+    if (current.status !== "queued" || savedIds.some((value, index) => value !== previousIds[index]) ||
+        savedIds.length !== previousIds.length || savedAlt.some((value, index) => value !== expectedMediaAlt[index])) {
+      throw new AssistedConflictError("The handoff images changed or it was marked posted. Refresh the list before editing.");
+    }
+    if (savedIds.length === nextIds.length && savedIds.every((value, index) => value === nextIds[index] && savedAlt[index] === mediaAlt[index])) return true;
+    assertOwnedMedia(userId, nextIds);
+    const stamp = new Date().toISOString();
+    const updated: AssistedPost = { ...current, mediaIds: [...nextIds], mediaAlt: [...mediaAlt] };
+    db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(JSON.stringify(updated), stamp, id, userId);
+    audit(userId, "assisted.images_changed", id);
+    return true;
+  });
+}
+
 /** Correct descriptions on a queued manual handoff without changing its images or source draft. */
 export function updateAssistedMediaAlt(userId: string, id: string, expectedMediaAlt: unknown, mediaAlt: unknown): boolean {
   if (!validId(id)) throw new Error("Invalid handoff ID.");

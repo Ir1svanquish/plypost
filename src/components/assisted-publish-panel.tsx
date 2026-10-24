@@ -9,6 +9,7 @@ import { validatePlatformText } from "@/lib/platform-validation";
 import { assistedState, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
+import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { PrivateVideoPreview, VideoAttachmentPicker } from "@/components/video-attachment-picker";
 
 type Props = {
@@ -31,6 +32,7 @@ type Props = {
   onMarkPosted: (id: string, postUrl?: string) => void;
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
   onUpdateVideo: (id: string, expectedVideoId: string | null, videoId: string | null) => Promise<boolean>;
+  onUpdateImages: (id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaIds: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdateDescriptions: (id: string, expectedMediaAlt: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdatePostUrl: (id: string, postUrl: string | null) => Promise<boolean>;
   onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null) => Promise<boolean>;
@@ -44,6 +46,7 @@ type Props = {
 };
 
 type OutcomeForm = { views: string; likes: string; replies: string; notes: string };
+type ImageEdit = { itemId: string; expectedIds: string[]; expectedAlt: string[]; ids: string[]; descriptions: Record<string, string> };
 const statusFilters = [
   { id: "to-post", label: "To post" },
   { id: "due", label: "Due now" },
@@ -87,12 +90,15 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
   const [videoEdits, setVideoEdits] = useState<Record<string, { expectedVideoId: string | null; value: string | null }>>({});
   const [videoSavingId, setVideoSavingId] = useState<string | null>(null);
+  const [imageEdit, setImageEdit] = useState<ImageEdit | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageSavingId, setImageSavingId] = useState<string | null>(null);
   const [editingLinks, setEditingLinks] = useState<Record<string, boolean>>({});
   const [linkSavingId, setLinkSavingId] = useState<string | null>(null);
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, OutcomeForm>>({});
@@ -103,6 +109,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
   const [composerInitialized, setComposerInitialized] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("to-post");
   const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
+  const [showVideoDestinations, setShowVideoDestinations] = useState(() => assistedVideoDisplayIds.some((id) => id === destination));
   const [videoId, setVideoId] = useState<string | null>(null);
   const [videoBusy, setVideoBusy] = useState(false);
   const handledFocusRef = useRef<string | null>(null);
@@ -136,6 +143,10 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
     setComposerOpen(items.length === 0 || Boolean(time));
     setComposerInitialized(true);
   }, [workspaceReady, composerInitialized, items.length, time]);
+
+  useEffect(() => {
+    setShowVideoDestinations(assistedVideoDisplayIds.some((id) => id === destination));
+  }, [destination]);
 
   useEffect(() => {
     if (!focusItemId) { handledFocusRef.current = null; return; }
@@ -183,6 +194,21 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
     try {
       if (await onUpdateVideo(id, expectedVideoId, videoId)) closeVideoEditor(id);
     } finally { setVideoSavingId(null); }
+  }
+
+  function startImageEdit(item: AssistedPost) {
+    const ids = [...(item.mediaIds ?? [])];
+    const alt = ids.map((_, index) => item.mediaAlt?.[index] ?? "");
+    setImageEdit({ itemId: item.id, expectedIds: ids, expectedAlt: alt, ids, descriptions: Object.fromEntries(ids.map((id, index) => [id, alt[index]])) });
+  }
+
+  async function saveImageEdit(edit: ImageEdit) {
+    if (busy || mediaBusy || imageBusy || imageSavingId) return;
+    setImageSavingId(edit.itemId);
+    try {
+      const nextAlt = edit.ids.map((id) => (edit.descriptions[id] ?? "").trim());
+      if (await onUpdateImages(edit.itemId, edit.expectedIds, edit.expectedAlt, edit.ids, nextAlt)) setImageEdit(null);
+    } finally { setImageSavingId(null); }
   }
 
   async function updateLink(id: string, postUrl: string | null) {
@@ -264,13 +290,13 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         <div className="sm:col-span-2">
           <p id="assisted-destination-label" className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Destination</p>
           <div role="group" aria-label="Platform type" className="mb-3 inline-flex rounded-xl border border-[var(--line)] bg-[var(--field)] p-1">
-            <button type="button" aria-pressed={!videoFirst} onClick={() => chooseDestination(assistedTextImageDisplayIds[0])} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${!videoFirst ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Photo &amp; text-first</button>
-            <button type="button" aria-pressed={videoFirst} onClick={() => chooseDestination(assistedVideoDisplayIds[0])} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${videoFirst ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Video-first</button>
+            <button type="button" aria-pressed={!showVideoDestinations} onClick={() => setShowVideoDestinations(false)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${!showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Photo &amp; text-first</button>
+            <button type="button" aria-pressed={showVideoDestinations} onClick={() => setShowVideoDestinations(true)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Video-first</button>
           </div>
           <div role="group" aria-labelledby="assisted-destination-label" className="flex flex-wrap gap-2">
-            {(videoFirst ? assistedVideoDisplayIds : assistedTextImageDisplayIds).map((id) => <button key={id} type="button" aria-pressed={destination === id} onClick={() => chooseDestination(id)} className={`rounded-lg border px-3 py-2 text-[12px] font-semibold ${destination === id ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--accent-border)]"}`}>{assistedDestinations[id].name}</button>)}
+            {(showVideoDestinations ? assistedVideoDisplayIds : assistedTextImageDisplayIds).map((id) => <button key={id} type="button" aria-pressed={destination === id} onClick={() => chooseDestination(id)} className={`rounded-lg border px-3 py-2 text-[12px] font-semibold ${destination === id ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--accent-border)]"}`}>{assistedDestinations[id].name}</button>)}
           </div>
-          <p className="mt-2 text-[11px] text-[var(--text-muted)]">These groups describe the usual posting format. Some platforms support both.</p>
+          <p className="mt-2 text-[11px] text-[var(--text-muted)]">Selected: {selected.name}. Choose a platform above to change it. Some platforms support both formats.</p>
         </div>
         <LocalDateTimeField id="assisted-time" label="Reminder time" value={time} minTimestamp={now} optional onChange={onTimeChange} />
         <div className="sm:col-span-2">
@@ -300,7 +326,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         <label htmlFor="assisted-list-destination" className="text-[11px] font-semibold text-[var(--text-secondary)]">Platform
           <select id="assisted-list-destination" value={activeDestinationFilter} onChange={(event) => setDestinationFilter(event.target.value as AssistedDestinationId | "all")} className="mt-1 block min-w-40 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
             <option value="all">All platforms</option>
-            {availableTextImageDestinations.length > 0 && <optgroup label="Text &amp; image-first">{availableTextImageDestinations.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>}
+            {availableTextImageDestinations.length > 0 && <optgroup label="Photo &amp; text-first">{availableTextImageDestinations.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>}
             {availableVideoDestinations.length > 0 && <optgroup label="Video-first">{availableVideoDestinations.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>}
           </select>
         </label>
@@ -341,6 +367,14 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
             const videoEdit = videoEdits[item.id];
             const videoEditStale = Boolean(videoEdit && videoEdit.expectedVideoId !== (item.videoId ?? null));
             const canSaveVideo = Boolean(videoEdit && !videoEditStale && videoEdit.value !== videoEdit.expectedVideoId);
+            const editingImages = imageEdit?.itemId === item.id ? imageEdit : null;
+            const savedImageIds = item.mediaIds ?? [];
+            const savedImageAlt = savedImageIds.map((_, index) => item.mediaAlt?.[index] ?? "");
+            const imageEditStale = Boolean(editingImages && (savedImageIds.length !== editingImages.expectedIds.length ||
+              savedImageIds.some((id, index) => id !== editingImages.expectedIds[index] || savedImageAlt[index] !== editingImages.expectedAlt[index])));
+            const imageEditChanged = Boolean(editingImages && (editingImages.ids.length !== editingImages.expectedIds.length ||
+              editingImages.ids.some((id, index) => id !== editingImages.expectedIds[index] ||
+                (editingImages.descriptions[id] ?? "").trim() !== editingImages.expectedAlt[index])));
             return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Due now · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && missingMedia && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{missingMedia === "video" ? "No video attached here. Bring one when posting." : "No photo or video attached here. Bring one when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
@@ -362,7 +396,22 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                   <button type="button" onClick={() => closeTextEditor(item.id)} disabled={busy || textSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                 </div>
               </div>}
-              <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expected, next) => onUpdateDescriptions(item.id, expected, next) : undefined} />
+              {!editingImages && <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expected, next) => onUpdateDescriptions(item.id, expected, next) : undefined} />}
+              {item.status === "queued" && !editingImages && <button type="button" onClick={() => startImageEdit(item)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedImageIds.length ? "Change images for this handoff" : "Attach images to this handoff"}</button>}
+              {item.status === "queued" && editingImages && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+                <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Images for {target.name}</p>
+                <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Choose, reorder or upload images here. Save to change only this handoff; the source draft and other handoffs stay as they are.</p>
+                <ImageAttachmentPicker context="handoff" selectedIds={editingImages.ids} descriptions={editingImages.descriptions}
+                  onChange={(ids) => setImageEdit((current) => current?.itemId === item.id ? { ...current, ids } : current)}
+                  onDescriptionChange={(id, description) => setImageEdit((current) => current?.itemId === item.id ? { ...current, descriptions: { ...current.descriptions, [id]: description } } : current)}
+                  onBusyChange={setImageBusy} disabled={busy || mediaBusy || imageSavingId !== null} />
+                {imageEditStale && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">These saved images changed elsewhere. Copy your descriptions if needed, then cancel and reopen this handoff.</p>}
+                <p className="mt-2 text-[11px] text-[var(--text-muted)]">Uploaded images remain in your private library even if you cancel this edit.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button type="button" onClick={() => void saveImageEdit(editingImages)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null || imageEditStale || !imageEditChanged} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{imageSavingId === item.id ? "Saving…" : "Save images"}</button>
+                  <button type="button" onClick={() => setImageEdit(null)} disabled={imageBusy || imageSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
+                </div>
+              </div>}
               {item.status === "queued" && !videoEdit && <button type="button" onClick={() => setVideoEdits({ [item.id]: { expectedVideoId: item.videoId ?? null, value: item.videoId ?? null } })} disabled={busy || videoBusy} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.videoId ? "Change attached video" : "Attach a video"}</button>}
               {item.status === "queued" && videoEdit && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
                 <VideoAttachmentPicker selectedId={videoEdit.value} onChange={(value) => setVideoEdits((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? videoEdit), value } }))} onBusyChange={setVideoBusy} disabled={busy || mediaBusy || videoBusy} />
@@ -385,7 +434,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
-                {item.status === "queued" ? <button type="button" onClick={() => { closeVideoEditor(item.id); onMarkPosted(item.id, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { closeOutcomeEditor(item.id); onUndo(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+                {item.status === "queued" ? <button type="button" onClick={() => { closeVideoEditor(item.id); onMarkPosted(item.id, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { closeOutcomeEditor(item.id); onUndo(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
               {item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
               {item.status === "posted" && <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">

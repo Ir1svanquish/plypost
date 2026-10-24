@@ -1178,6 +1178,24 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
+  async function updateAssistedImages(id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaIds: string[], mediaAlt: string[]): Promise<boolean> {
+    if (assistedMutation.current) return false;
+    assistedMutation.current = true;
+    setAssistedBusy(true);
+    try {
+      await changeWorkspace("update-assisted-images", { id, expectedMediaIds, expectedMediaAlt, mediaIds, mediaAlt });
+      setNotice({ kind: "success", text: "Images updated for this handoff. Its text, reminder and source draft were kept." });
+      return true;
+    } catch (error) {
+      if ((error as { code?: string }).code === "ASSISTED_CONFLICT") await refreshWorkspace().catch(() => {});
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not update handoff images." });
+      return false;
+    } finally {
+      assistedMutation.current = false;
+      setAssistedBusy(false);
+    }
+  }
+
   async function updateAssistedDescriptions(id: string, expectedMediaAlt: string[], nextMediaAlt: string[]): Promise<boolean> {
     if (assistedMutation.current) return false;
     assistedMutation.current = true;
@@ -1349,7 +1367,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           </div>
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
+            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} />}
         </main>

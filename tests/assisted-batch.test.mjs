@@ -10,7 +10,7 @@ import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
 import { createVideo } from "../src/lib/server/video.ts";
-import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedMediaAlt, updateAssistedText } from "../src/lib/server/workspace.ts";
+import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText } from "../src/lib/server/workspace.ts";
 import { parseWorkspace } from "../src/lib/workspace.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
 
@@ -177,6 +177,43 @@ test("queued handoff descriptions can be corrected without changing the draft or
   assert.equal(legacyHandoff.mediaAlt, undefined);
   assert.equal(updateAssistedMediaAlt(owner, legacyHandoff.id, [""], ["Added later"]), true);
   assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === legacyHandoff.id).mediaAlt, ["Added later"]);
+});
+
+test("one queued handoff can replace and reorder images without changing its draft or sibling", async () => {
+  const bytes = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#6688aa" } }).png().toBuffer();
+  const firstImage = (await createMedia(owner, { name: "first.png", type: "image/png", bytes })).media;
+  const secondImage = (await createMedia(owner, { name: "second.png", type: "image/png",
+    bytes: await sharp({ create: { width: 4, height: 4, channels: 3, background: "#bb5533" } }).png().toBuffer() })).media;
+  const foreignImage = (await createMedia(other, { name: "foreign.png", type: "image/png", bytes })).media;
+  const saved = saveDraft(owner, { ...draft("Channel images", undefined, undefined, [firstImage.id]), mediaAlt: ["Original"] });
+  const [first, sibling] = prepareAssistedBatch(owner, saved.id, randomUUID(), handoffs());
+  assert.equal(updateAssistedImages(owner, first.id, [firstImage.id], ["Original"], [secondImage.id, firstImage.id], ["New cover", "Original"]), true);
+  let workspace = listWorkspace(owner);
+  assert.deepEqual(workspace.assisted.find((item) => item.id === first.id).mediaIds, [secondImage.id, firstImage.id]);
+  assert.deepEqual(workspace.assisted.find((item) => item.id === first.id).mediaAlt, ["New cover", "Original"]);
+  assert.deepEqual(workspace.assisted.find((item) => item.id === sibling.id).mediaIds, [firstImage.id]);
+  assert.deepEqual(workspace.drafts.find((item) => item.id === saved.id).mediaIds, [firstImage.id]);
+  assert.equal(workspace.assisted.find((item) => item.id === first.id).text, first.text);
+  assert.equal(workspace.assisted.find((item) => item.id === first.id).scheduledFor, first.scheduledFor);
+  assert.throws(() => updateAssistedImages(owner, first.id, [firstImage.id], ["Original"], [], []), /images changed/);
+  assert.throws(() => updateAssistedImages(other, first.id, [secondImage.id, firstImage.id], ["New cover", "Original"], [], []), /no longer available/);
+  assert.throws(() => updateAssistedImages(owner, first.id, [secondImage.id, firstImage.id], ["New cover", "Original"], [foreignImage.id], [""]), /missing from your media library/);
+  assert.throws(() => updateAssistedImages(owner, first.id, [secondImage.id, firstImage.id], ["New cover", "Original"], [secondImage.id, secondImage.id], ["", ""]), /distinct images/);
+  const token = createSession(owner);
+  const request = (cookie, origin = "http://localhost:3000") => new globalThis.Request("http://localhost:3000/api/workspace", {
+    method: "POST", headers: { origin, "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify({ action: "update-assisted-images", id: first.id,
+      expectedMediaIds: [secondImage.id, firstImage.id], expectedMediaAlt: ["New cover", "Original"],
+      mediaIds: [firstImage.id], mediaAlt: ["Only image"] }),
+  });
+  assert.equal((await workspacePost(request())).status, 401);
+  assert.equal((await workspacePost(request(`${SESSION_COOKIE}=${token}`, "https://other.example"))).status, 403);
+  assert.equal((await workspacePost(request(`${SESSION_COOKIE}=${token}`))).status, 200);
+  workspace = listWorkspace(owner);
+  assert.deepEqual(workspace.assisted.find((item) => item.id === first.id).mediaIds, [firstImage.id]);
+  assert.deepEqual(workspace.assisted.find((item) => item.id === first.id).mediaAlt, ["Only image"]);
+  assert.equal(setAssistedStatus(owner, first.id, "posted"), true);
+  assert.throws(() => updateAssistedImages(owner, first.id, [firstImage.id], ["Only image"], [], []), /marked posted/);
 });
 
 test("a revised handoff stays separate from its source draft and sibling destination", () => {

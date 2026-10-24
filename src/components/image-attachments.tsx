@@ -26,6 +26,7 @@ type ImageAttachmentPickerProps = {
   onDescriptionChange: (id: string, description: string) => void;
   onBusyChange: (busy: boolean) => void;
   disabled?: boolean;
+  context?: "draft" | "handoff";
 };
 
 function isMediaAsset(value: unknown): value is MediaAsset {
@@ -57,10 +58,10 @@ async function responseError(response: Response, fallback: string) {
 }
 
 /**
- * A private image library selector. Selection is controlled by the draft editor;
- * uploading an asset alone does not publish it or attach it to a saved draft.
+ * A private image library selector. Selection is controlled by its parent;
+ * uploading an asset alone does not publish or attach it to saved work.
  */
-export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onDescriptionChange, onBusyChange, disabled = false }: ImageAttachmentPickerProps) {
+export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onDescriptionChange, onBusyChange, disabled = false, context = "draft" }: ImageAttachmentPickerProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef(selectedIds);
@@ -72,6 +73,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [error, setError] = useState("");
+  const subject = context === "handoff" ? "handoff" : "draft";
 
   selectedRef.current = selectedIds;
 
@@ -105,11 +107,11 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
     const remaining = MAX_IMAGES - selectedRef.current.length;
     const picked = Array.from(files);
     if (remaining <= 0) {
-      setError("A draft can use up to four images. Remove one before adding another.");
+      setError(`A ${subject} can use up to four images. Remove one before adding another.`);
       return;
     }
     if (picked.length > remaining) {
-      setError(`Only ${remaining} more ${remaining === 1 ? "image" : "images"} can be added to this draft.`);
+      setError(`Only ${remaining} more ${remaining === 1 ? "image" : "images"} can be added to this ${subject}.`);
       return;
     }
     for (const file of picked) {
@@ -158,7 +160,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
     } else if (selectedRef.current.length < MAX_IMAGES) {
       setSelection([...selectedRef.current, id]);
     } else {
-      setError("A draft can use up to four images. Remove one before adding another.");
+      setError(`A ${subject} can use up to four images. Remove one before adding another.`);
     }
   }
 
@@ -221,14 +223,14 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
             <div className="flex items-center gap-1">
               <button type="button" onClick={() => moveImage(item.id, -1)} disabled={disabled || uploading || deletingId !== null || index === 0} aria-label={`Move image ${index + 1} earlier`} title="Move earlier" className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-40"><ArrowUp size={15} aria-hidden="true" /></button>
               <button type="button" onClick={() => moveImage(item.id, 1)} disabled={disabled || uploading || deletingId !== null || index === selectedIds.length - 1} aria-label={`Move image ${index + 1} later`} title="Move later" className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-40"><ArrowDown size={15} aria-hidden="true" /></button>
-              <button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null} aria-label={`Remove ${item.name} from draft`} title="Remove from draft" className="ml-auto rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><X size={15} aria-hidden="true" /></button>
+              <button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null} aria-label={`Remove ${item.name} from ${subject}`} title={`Remove from ${subject}`} className="ml-auto rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><X size={15} aria-hidden="true" /></button>
             </div>
           </div>
         </div>
         <label htmlFor={`${inputId}-${item.id}-alt`} className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Image description <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
         <input id={`${inputId}-${item.id}-alt`} type="text" value={descriptions[item.id] ?? ""} onChange={(event) => onDescriptionChange(item.id, Array.from(event.target.value).filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127).join(""))} disabled={disabled || uploading || deletingId !== null} maxLength={MAX_IMAGE_ALT_CHARS} placeholder="Describe what this image shows" className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-2.5 py-2 text-[12px] text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
       </li>)}</ul>}
-      {selectedIds.length === 0 && !loading && <p className="mt-3 text-[12px] text-[var(--text-soft)]">No images selected for this draft.</p>}
+      {selectedIds.length === 0 && !loading && <p className="mt-3 text-[12px] text-[var(--text-soft)]">No images selected for this {subject}.</p>}
 
       <div id={`${inputId}-library`} hidden={!libraryOpen} className="mt-4 border-t border-[var(--line)] pt-4">
         {libraryOpen && <>
@@ -238,13 +240,13 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
           return <li key={item.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
             <div className="relative aspect-square overflow-hidden bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id)} alt={item.name} fill sizes="(max-width: 640px) 50vw, 160px" className="object-cover" /></div>
             <div className="p-2"><p className="truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{item.name}</p><p className="mt-0.5 text-[10px] text-[var(--text-soft)]">{fileSize(item.sizeBytes)} · {item.width} × {item.height}</p>
-              <div className="mt-2 flex items-center justify-between gap-1"><button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null || (!attached && selectedIds.length >= MAX_IMAGES)} aria-pressed={attached} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">{attached ? <Check size={12} aria-hidden="true" /> : <ImagePlus size={12} aria-hidden="true" />}{attached ? "Added" : "Use"}</button><div className="flex items-center gap-0.5"><a href={imageUrl(item.id)} download={item.name} title={`Download ${item.name}`} aria-label={`Download ${item.name}`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><Download size={14} aria-hidden="true" /></a><button type="button" onClick={() => { void deleteAsset(item); }} disabled={disabled || uploading || deletingId !== null} title={`Delete ${item.name} from library`} aria-label={`Delete ${item.name} from library`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50">{deletingId === item.id ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}</button></div></div>
+              <div className="mt-2 flex items-center justify-between gap-1"><button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null || (!attached && selectedIds.length >= MAX_IMAGES)} aria-pressed={attached} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">{attached ? <Check size={12} aria-hidden="true" /> : <ImagePlus size={12} aria-hidden="true" />}{attached ? "Added" : "Use"}</button><div className="flex items-center gap-0.5"><a href={imageUrl(item.id)} download={item.name} title={`Download ${item.name}`} aria-label={`Download ${item.name}`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><Download size={14} aria-hidden="true" /></a>{context === "draft" && <button type="button" onClick={() => { void deleteAsset(item); }} disabled={disabled || uploading || deletingId !== null} title={`Delete ${item.name} from library`} aria-label={`Delete ${item.name} from library`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50">{deletingId === item.id ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}</button>}</div></div>
             </div>
           </li>;
         })}</ul>}
         </>}
       </div>
-      <p className="mt-4 text-[11px] leading-5 text-[var(--text-soft)]">Image order and descriptions stay with this draft. When publishing yourself, download the images and add their descriptions on the platform. Removing an image keeps it in your private library.</p>
+      <p className="mt-4 text-[11px] leading-5 text-[var(--text-soft)]">{context === "handoff" ? "Save to attach this image order and its descriptions to the handoff." : "Image order and descriptions stay with this draft."} When publishing yourself, download the images and add their descriptions on the platform. Removing an image keeps it in your private library.</p>
     </section>
   );
 }
