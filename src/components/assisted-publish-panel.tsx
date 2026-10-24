@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Bell, CalendarClock, Check, Copy, Download, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
-import { assistedDestinations, assistedIds, type AssistedDestinationId } from "@/lib/assisted";
+import { assistedDestinations, assistedOnlyDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
+import { characterCount, isPlatformId, platformDisplayIds, platforms } from "@/lib/platforms";
 import { buildManualReminderCalendar, upcomingManualReminders } from "@/lib/calendar-export";
-import { characterCount, isPlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
 import { assistedState, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
@@ -187,8 +187,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         <div>
           <label htmlFor="assisted-destination" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Destination</label>
           <select id="assisted-destination" value={destination} onChange={(event) => onDestinationChange(event.target.value as AssistedDestinationId)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]">
-            <optgroup label="More platforms">{assistedIds.slice(0, 7).map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
-            <optgroup label="Current destinations">{assistedIds.slice(7).map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
+            <optgroup label="More platforms">{assistedOnlyDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
+            <optgroup label="Current destinations">{platformDisplayIds.map((id) => <option key={id} value={id}>{platforms[id].name}</option>)}</optgroup>
           </select>
         </div>
         <LocalDateTimeField id="assisted-time" label="Reminder time" value={time} minTimestamp={now} optional onChange={onTimeChange} />

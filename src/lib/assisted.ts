@@ -4,6 +4,9 @@ export const assistedIds = [
 ] as const;
 
 export type AssistedDestinationId = (typeof assistedIds)[number];
+export const assistedOnlyDisplayIds = [
+  "facebook", "instagram", "youtube", "tiktok", "reddit", "x", "pinterest",
+] as const satisfies readonly AssistedDestinationId[];
 
 export type AssistedDestination = {
   name: string;

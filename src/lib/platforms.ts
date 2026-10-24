@@ -1,5 +1,6 @@
 export const platformIds = ["bluesky", "mastodon", "linkedin", "threads"] as const;
 export type PlatformId = (typeof platformIds)[number];
+export const platformDisplayIds = ["linkedin", "threads", "bluesky", "mastodon"] as const satisfies readonly PlatformId[];
 
 export type Platform = {
   id: PlatformId;

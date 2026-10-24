@@ -4,8 +4,8 @@ import { useRef, useState } from "react";
 import { ArrowRight, Check, Copy, ShieldCheck } from "lucide-react";
 import { LocalDateTimeField, isValidLocalDateTime } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
-import { adaptDraft, characterCount, isPlatformId, platformIds, platforms, type PlatformId } from "@/lib/platforms";
-import { assistedDestinations, assistedIds, type AssistedDestinationId } from "@/lib/assisted";
+import { adaptDraft, characterCount, isPlatformId, platformDisplayIds, platforms, type PlatformId } from "@/lib/platforms";
+import { assistedDestinations, assistedOnlyDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { validatePlatformText } from "@/lib/platform-validation";
 import type { AssistedPost, SavedDraft } from "@/lib/workspace";
 
@@ -25,8 +25,8 @@ type Props = {
 
 export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, mediaBusy, onPrepare, onOpenAssisted }: Props) {
   const [open, setOpen] = useState(false);
-  const [destinations, setDestinations] = useState<AssistedDestinationId[]>(() => draft.selected.filter((id) =>
-    !existing.some((item) => item.sourceDraftId === draft.id && item.destination === id)));
+  const [destinations, setDestinations] = useState<AssistedDestinationId[]>(() => platformDisplayIds.filter((id) =>
+    draft.selected.includes(id) && !existing.some((item) => item.sourceDraftId === draft.id && item.destination === id)));
   const [reminders, setReminders] = useState<Partial<Record<AssistedDestinationId, string>>>({});
   const [texts, setTexts] = useState<Partial<Record<AssistedDestinationId, string>>>({});
   const [slotPreview, setSlotPreview] = useState<{ timeZone: string; suggestions: { platform: PlatformId; scheduledFor: string; skippedConflicts: number }[] } | null>(null);
@@ -43,9 +43,9 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const submittingRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const reviewRef = useRef<HTMLDivElement>(null);
-  const savedPlatforms = platformIds.filter((id) => draft.selected.includes(id));
+  const savedPlatforms = platformDisplayIds.filter((id) => draft.selected.includes(id));
   const availableDestinations: AssistedDestinationId[] = [
-    ...savedPlatforms, ...assistedIds.filter((id) => !isPlatformId(id)),
+    ...savedPlatforms, ...assistedOnlyDisplayIds,
   ];
   const selectedSlotPlatforms = savedPlatforms.filter((id) => destinations.includes(id));
   const priorHandoffs = existing.filter((item) => item.sourceDraftId === draft.id);
@@ -87,7 +87,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     attemptedSlotModeRef.current = false;
     setAttempted(false);
     setPrepared(false);
-    setDestinations(draft.selected.filter((id) => !existing.some((item) =>
+    setDestinations(platformDisplayIds.filter((id) => draft.selected.includes(id) && !existing.some((item) =>
       item.sourceDraftId === draft.id && item.destination === id)));
     setReminders({});
     setTexts({});
@@ -174,7 +174,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         {savedPlatforms.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{savedPlatforms.map(destinationOption)}</div>}
         <details className="mt-2">
           <summary className="cursor-pointer py-2 text-[12px] font-semibold text-[var(--accent-text)]">More platforms</summary>
-          <div className="grid gap-2 pt-1 sm:grid-cols-2">{assistedIds.filter((id) => !isPlatformId(id)).map(destinationOption)}</div>
+          <div className="grid gap-2 pt-1 sm:grid-cols-2">{assistedOnlyDisplayIds.map(destinationOption)}</div>
         </details>
       </div>
       {!attempted && <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Slots apply to the four draft platforms. Other platforms can use custom reminder times.</p>

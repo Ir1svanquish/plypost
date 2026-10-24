@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { CalendarClock, ChevronLeft, ChevronRight, RotateCcw, Trash2 } from "lucide-react";
 import { assistedState, localDateTimeValue, scheduleState, type AssistedPost, type ScheduledPost } from "@/lib/workspace";
-import { platformIds, platforms } from "@/lib/platforms";
+import { platformDisplayIds, platforms } from "@/lib/platforms";
 import { agendaForMonth, buildPlanAgenda, localAgendaDay, matchesPlanAgendaFilter, realMastodonNeedsAttention, type PlanAgendaFilter, type PlanAgendaItem, type RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations } from "@/lib/assisted";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
@@ -311,7 +311,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><h4 className="break-words text-[13px] font-bold text-[var(--text-secondary)]">{post.title}</h4><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "failed" || state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "simulated" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{label}</span></div>
-              <p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(post.scheduledFor)} · {platformIds.filter((id) => post.posts[id] !== undefined).map((id) => platforms[id].name).join(", ")}</p>
+              <p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(post.scheduledFor)} · {platformDisplayIds.filter((id) => post.posts[id] !== undefined).map((id) => platforms[id].name).join(", ")}</p>
               {retryPending && post.nextAttemptAt && <p className="mt-1 text-[12px] text-[var(--warning)]">Next automatic retry: {formatLocalDateTime(post.nextAttemptAt)}</p>}
               {post.lastError && <p className="mt-1 text-[12px] text-[var(--danger)]">Attempt {post.attempts ?? 0}/3: {post.lastError}</p>}
               {!!post.receipts?.length && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Already simulated: {post.receipts.map((receipt) => platforms[receipt.platform as keyof typeof platforms]?.name ?? receipt.platform).join(", ")}</p>}

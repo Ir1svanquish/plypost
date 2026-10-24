@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Clock3, Plus, Trash2 } from "lucide-react";
-import { platformIds, platforms, type PlatformId } from "@/lib/platforms";
+import { platformDisplayIds, platforms, type PlatformId } from "@/lib/platforms";
 import { parseSlotSettings, type SlotSettings } from "@/lib/slot-settings";
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -12,7 +12,7 @@ const deviceZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UT
 export function WeeklySlotsPanel() {
   const [settings, setSettings] = useState<SlotSettings | null>(null);
   const [zoneInput, setZoneInput] = useState("");
-  const [platform, setPlatform] = useState<PlatformId>("bluesky");
+  const [platform, setPlatform] = useState<PlatformId>(platformDisplayIds[0]);
   const [days, setDays] = useState<number[]>([1]);
   const [time, setTime] = useState("09:00");
   const [loading, setLoading] = useState(true);
@@ -82,7 +82,7 @@ export function WeeklySlotsPanel() {
         <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">Use an IANA name such as Asia/Hong_Kong. Changing this changes future suggestions, not items already scheduled.</p>
       </div>
       <div className="rounded-xl border border-[var(--line)] p-4">
-        <div className="grid gap-3 sm:grid-cols-2"><label className="text-[12px] font-semibold text-[var(--text-secondary)]">Platform<select value={platform} onChange={(event) => setPlatform(event.target.value as PlatformId)} disabled={saving} className="mt-1 block w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)]">{platformIds.map((id) => <option key={id} value={id}>{platforms[id].name}</option>)}</select></label><label className="text-[12px] font-semibold text-[var(--text-secondary)]">Local time (24h)<input type="text" inputMode="numeric" autoComplete="off" placeholder="HH:mm" maxLength={5} value={time} onChange={(event) => setTime(event.target.value)} disabled={saving} className="mt-1 block w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)]" /></label></div>
+        <div className="grid gap-3 sm:grid-cols-2"><label className="text-[12px] font-semibold text-[var(--text-secondary)]">Platform<select value={platform} onChange={(event) => setPlatform(event.target.value as PlatformId)} disabled={saving} className="mt-1 block w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)]">{platformDisplayIds.map((id) => <option key={id} value={id}>{platforms[id].name}</option>)}</select></label><label className="text-[12px] font-semibold text-[var(--text-secondary)]">Local time (24h)<input type="text" inputMode="numeric" autoComplete="off" placeholder="HH:mm" maxLength={5} value={time} onChange={(event) => setTime(event.target.value)} disabled={saving} className="mt-1 block w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)]" /></label></div>
         <fieldset className="mt-4"><legend className="text-[12px] font-semibold text-[var(--text-secondary)]">Days</legend><div className="mt-2 flex flex-wrap gap-2">{dayOrder.map((day) => <label key={day} className={`cursor-pointer rounded-full border px-3 py-1.5 text-[12px] font-semibold focus-within:ring-2 focus-within:ring-[var(--accent)] ${days.includes(day) ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] text-[var(--text-secondary)]"}`}><input type="checkbox" className="sr-only" checked={days.includes(day)} disabled={saving} onChange={() => setDays((current) => current.includes(day) ? current.filter((value) => value !== day) : [...current, day].sort((a, b) => (a + 6) % 7 - (b + 6) % 7))} />{dayNames[day]}</label>)}</div></fieldset>
         <button type="button" onClick={add} disabled={saving || !days.length} className="gradient-button mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-45"><Plus size={15} aria-hidden="true" /> Add weekly {days.length === 1 ? "slot" : "slots"}</button>
       </div>
