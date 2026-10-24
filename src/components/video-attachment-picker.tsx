@@ -7,7 +7,11 @@ type VideoItem = { id: string; name: string; mimeType: string; sizeBytes: number
 type Props = { selectedId: string | null; onChange: (id: string | null) => void; onBusyChange: (busy: boolean) => void; disabled: boolean };
 const MAX_VIDEO_BYTES = 32 * 1024 * 1024;
 
-function fileSize(bytes: number): string { return `${(bytes / 1024 / 1024).toFixed(1)} MiB`; }
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return "<1 KiB";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+}
 
 export function PrivateVideoPreview({ id, name, preload = "none" }: { id: string; name?: string; preload?: "none" | "metadata" }) {
   const [details, setDetails] = useState<string | null>(null);
