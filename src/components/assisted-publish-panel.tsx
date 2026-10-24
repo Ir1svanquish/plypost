@@ -17,6 +17,7 @@ type Props = {
   drafts: SavedDraft[];
   destination: AssistedDestinationId;
   text: string;
+  customText: boolean;
   time: string;
   now: number;
   workspaceReady: boolean;
@@ -26,6 +27,7 @@ type Props = {
   notificationPermission: NotificationPermission | "unsupported";
   onDestinationChange: (destination: AssistedDestinationId) => void;
   onTextChange: (text: string) => void;
+  onResetText: () => void;
   onTimeChange: (time: string) => void;
   onAdd: (videoId?: string) => Promise<boolean>;
   onSetReminder: (post: AssistedPost, scheduledFor: string | null) => Promise<void>;
@@ -91,7 +93,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -268,6 +270,12 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
     onDestinationChange(next);
   }
 
+  function choosePlatformType(videoFirst: boolean) {
+    setShowVideoDestinations(videoFirst);
+    const choices = videoFirst ? assistedVideoDisplayIds : assistedTextImageDisplayIds;
+    if (!choices.some((id) => id === destination)) chooseDestination(choices[0]);
+  }
+
   async function saveReminder(item: AssistedPost, scheduledFor: string | null) {
     if (busy || reminderSavingId) return;
     setReminderSavingId(item.id);
@@ -306,8 +314,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         <div className="sm:col-span-2">
           <p id="assisted-destination-label" className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Destination</p>
           <div role="group" aria-label="Platform type" className="mb-3 inline-flex rounded-xl border border-[var(--line)] bg-[var(--field)] p-1">
-            <button type="button" aria-pressed={!showVideoDestinations} onClick={() => setShowVideoDestinations(false)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${!showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Photo &amp; text-first</button>
-            <button type="button" aria-pressed={showVideoDestinations} onClick={() => setShowVideoDestinations(true)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Video-first</button>
+            <button type="button" aria-pressed={!showVideoDestinations} onClick={() => choosePlatformType(false)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${!showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Photo &amp; text-first</button>
+            <button type="button" aria-pressed={showVideoDestinations} onClick={() => choosePlatformType(true)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Video-first</button>
           </div>
           <div role="group" aria-labelledby="assisted-destination-label" className="flex flex-wrap gap-2">
             {(showVideoDestinations ? assistedVideoDisplayIds : assistedTextImageDisplayIds).map((id) => <button key={id} type="button" aria-pressed={destination === id} onClick={() => chooseDestination(id)} className={`rounded-lg border px-3 py-2 text-[12px] font-semibold ${destination === id ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--accent-border)]"}`}>{assistedDestinations[id].name}</button>)}
@@ -316,7 +324,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         </div>
         <LocalDateTimeField id="assisted-time" label="Reminder time" value={time} minTimestamp={now} optional onChange={onTimeChange} />
         <div className="sm:col-span-2">
-          <label htmlFor="assisted-text" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Text to copy</label>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><label htmlFor="assisted-text" className="text-[12px] font-bold text-[var(--text-secondary)]">Text to copy · {customText ? `Custom for ${selected.name}` : "From current draft"}</label>{customText && <button type="button" onClick={onResetText} className="text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use current draft text</button>}</div>
           <textarea id="assisted-text" value={text} maxLength={5000} onChange={(event) => onTextChange(event.target.value)} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
           <p className="mt-2 text-[12px] text-[var(--text-secondary)]">{imageCount ? `${imageCount} ${imageCount === 1 ? "image" : "images"} from the current draft will be saved with this handoff.` : "No images selected in the current draft."} <button type="button" onClick={onEditImages} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit images in Create</button></p>

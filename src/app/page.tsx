@@ -165,7 +165,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const initialWorkspaceLoad = useRef(true);
   const pendingNotificationIds = useRef(new Set<string>());
   const [assistDestination, setAssistDestination] = useState<AssistedDestinationId>(assistedOnlyDisplayIds[0]);
-  const [assistOverride, setAssistOverride] = useState<string | null>(null);
+  const [assistOverrides, setAssistOverrides] = useState<Partial<Record<AssistedDestinationId, string>>>({});
   const [assistTime, setAssistTime] = useState("");
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [title, setTitle] = useState("");
@@ -510,7 +510,25 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   );
   const canPublish = selected.length > 0 && invalidSelected.length === 0 && !publishing;
   const suggestedAssistText = isPlatformId(assistDestination) ? textFor(assistDestination) : source;
-  const assistText = assistOverride ?? suggestedAssistText;
+  const assistText = assistOverrides[assistDestination] ?? suggestedAssistText;
+  const assistTextIsCustom = assistOverrides[assistDestination] !== undefined;
+
+  function setAssistedComposerText(value: string) {
+    setAssistOverrides((current) => {
+      const next = { ...current };
+      if (value === suggestedAssistText) delete next[assistDestination];
+      else next[assistDestination] = value;
+      return next;
+    });
+  }
+
+  function resetAssistedComposerText() {
+    setAssistOverrides((current) => {
+      const next = { ...current };
+      delete next[assistDestination];
+      return next;
+    });
+  }
 
   function togglePlatform(id: PlatformId) {
     editorRevision.current += 1;
@@ -1367,7 +1385,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           </div>
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
+            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} />}
         </main>
