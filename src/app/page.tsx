@@ -571,11 +571,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   function togglePlatform(id: PlatformId) {
     editorRevision.current += 1;
-    setSelected((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) :
-        platformDisplayIds.filter((item) => current.includes(item) || item === id),
-    );
-    setActive(id);
+    const next = selected.includes(id) ? selected.filter((item) => item !== id) :
+      platformDisplayIds.filter((item) => selected.includes(item) || item === id);
+    setSelected(next);
+    setActive(next.includes(id) ? id : platformDisplayIds.find((item) => next.includes(item)) ?? id);
     setNotice(null);
   }
 
