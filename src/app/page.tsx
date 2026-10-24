@@ -21,6 +21,7 @@ import { validatePlatformText } from "@/lib/platform-validation";
 import { DraftLibraryPanel } from "@/components/workspace-panels";
 import { ServerSchedulePanel } from "@/components/server-schedule-panel";
 import { StrategyPanel } from "@/components/strategy-panel";
+import { PostingResultsPanel } from "@/components/posting-results-panel";
 import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
 import { BatchHandoffPanel, type BatchHandoffItem, type BatchPrepareResult } from "@/components/batch-handoff-panel";
 import { WeeklySlotsPanel } from "@/components/weekly-slots-panel";
@@ -73,7 +74,7 @@ type EditorContent = {
   mediaAlt: readonly string[];
 };
 type EditorOrigin = "starter" | "new" | "planned";
-type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft } | { kind: "planned"; post: ScheduledPost };
+type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft } | { kind: "planned"; post: ScheduledPost } | { kind: "assisted"; post: AssistedPost };
 
 function sameItems(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
@@ -706,7 +707,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById(Object.fromEntries((draft.mediaIds ?? []).map((id, index) => [id, draft.mediaAlt?.[index] ?? ""])));
       setActive(platformDisplayIds.find((id) => draft.selected.includes(id)) ?? platformDisplayIds[0]);
       setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
-    } else {
+    } else if (next.kind === "planned") {
       const { post } = next;
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
@@ -720,6 +721,20 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById(Object.fromEntries((post.mediaIds ?? []).map((id, index) => [id, post.mediaAlt?.[index] ?? ""])));
       setActive(platformDisplayIds.find((id) => post.posts[id] !== undefined) ?? platformDisplayIds[0]);
       setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
+    } else {
+      const { post } = next;
+      setCurrentDraftId(null);
+      setCurrentDraftVersion(null);
+      setDraftConflict(false);
+      setEditorOrigin("new");
+      setTitle(post.title);
+      setSource(post.text);
+      setSelected(isPlatformId(post.destination) ? [post.destination] : []);
+      setVariants(isPlatformId(post.destination) ? { [post.destination]: post.text } : {});
+      setMediaIds([]);
+      setMediaAltById({});
+      setActive(isPlatformId(post.destination) ? post.destination : platformDisplayIds[0]);
+      setNotice({ kind: "success", text: "Started an unsaved draft from your posted text. Review and rewrite it before sharing; media was not copied." });
     }
     openView("compose");
   }
@@ -1379,6 +1394,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">{showMastodonQueue ? "See real Mastodon posts, simulations and manual handoffs together." : "Plan drafts, simulations and manual handoffs in one place."}</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{canSaveEditor ? draftTitle(title, source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "") : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
             <ServerSchedulePanel schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
+            <PostingResultsPanel posts={assisted} onOpenRecord={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onReuseText={(item) => requestEditorSwitch({ kind: "assisted", post: item })} />
             <details className="mt-6"><summary className="cursor-pointer rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] font-bold text-[var(--text-secondary)]">Weekly posting slots · set recurring times for manual handoffs</summary><div className="mt-3"><WeeklySlotsPanel key={slotsRefreshEpoch} /></div></details>
             <div hidden={!showMastodonQueue}><MastodonSchedulePanel items={realMastodonSchedules} onItemsChange={setRealMastodonSchedules} onLoadErrorChange={setRealMastodonQueueError} connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected={selected.includes("mastodon")} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} now={now} visible={view === "schedule"} workerLastSeen={workerLastSeen} onOpenAccount={() => openView("account")} onOpenEditor={() => openView("compose")} /></div>
             <div className="mt-6"><StrategyPanel drafts={drafts} assisted={assisted} refreshToken={strategyRefreshEpoch} onDirtyChange={setStrategyDirty} onDraftApproved={() => { void refreshWorkspace().catch(() => setNotice({ kind: "error", text: "The idea was approved, but the draft library could not refresh. Reload this page to see it." })); }} onOpenDraft={loadDraft} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} /></div>
@@ -1418,7 +1434,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     </dialog>}
     {pendingEditorSwitch && <dialog ref={switchDialogRef} onCancel={(event) => { event.preventDefault(); if (!switchSaving) setPendingEditorSwitch(null); }} aria-labelledby="unsaved-editor-title" aria-describedby="unsaved-editor-description" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">Unsaved changes</h2>
-      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">Your current text, platform versions, and image choices have changed. {needsDraftRecovery ? "The saved draft changed elsewhere. Save your edits as a new draft" : "Save your edits"} before {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : "opening a copy of this planned post"}, or discard them.</p>
+      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">Your current text, platform versions, and image choices have changed. {needsDraftRecovery ? "The saved draft changed elsewhere. Save your edits as a new draft" : "Save your edits"} before {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : pendingEditorSwitch.kind === "planned" ? "opening a copy of this planned post" : "starting a draft from a posted handoff"}, or discard them.</p>
       {!canSaveEditor && <p className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Add a title, caption, platform text or image before saving.</p>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
         <button type="button" autoFocus onClick={() => setPendingEditorSwitch(null)} disabled={switchSaving} className="rounded-lg px-3 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Keep editing</button>
