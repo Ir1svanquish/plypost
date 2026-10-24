@@ -35,7 +35,7 @@ import { MastodonLivePanel, isMastodonConnection, type MastodonConnection } from
 import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@/components/bluesky-live-panel";
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
-import { assistedDestinations, assistedOnlyDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
+import { assistedDestinations, assistedOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -271,12 +271,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     if (scrollTop) window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function openManualComposer(videoFirst = false) {
+  function openManualComposer(destination?: AssistedDestinationId) {
     if (videoBusyRef.current) { setNotice({ kind: "error", text: "Wait for the video upload before preparing a post." }); return; }
     setFocusedAssistedId(null);
     setOpenAssistedComposer(true);
-    setOpenAssistedVideoGroup(videoFirst);
-    if (videoFirst) setAssistDestination("youtube");
+    setOpenAssistedVideoGroup(destination ? assistedVideoDisplayIds.some((id) => id === destination) : false);
+    if (destination) setAssistDestination(destination);
     openView("assisted");
   }
 
@@ -1434,7 +1434,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                         return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition sm:gap-2 sm:px-3 ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" /><span className="min-w-0 truncate">{platforms[id].name}</span><span className={`ml-auto hidden h-4 w-4 shrink-0 items-center justify-center rounded border sm:flex ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
                       })}
                     </div>
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] pt-4 text-[12px]"><span className="font-bold text-[var(--text-secondary)]">Video-first · TikTok, YouTube</span><button type="button" onClick={() => openManualComposer(true)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Choose in Assisted →</button></div>
+                    <div className="mt-4 border-t border-[var(--line)] pt-4">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="text-[13px] font-bold text-[var(--text)]">Video-first</h3><span className="text-[11px] text-[var(--text-muted)]">Manual post preparation</span></div>
+                      <div role="group" aria-label="Video-first destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                        {assistedVideoDisplayIds.map((id) => <button key={id} type="button" onClick={() => openManualComposer(id)} className="inline-flex min-w-0 items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] transition hover:border-[var(--accent-border)] hover:text-[var(--accent-text)]"><span className="truncate">{assistedDestinations[id].name}</span><ArrowRight size={13} className="shrink-0" aria-hidden="true" /></button>)}
+                      </div>
+                    </div>
                   </div>
                   <details className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
                     <summary className="cursor-pointer text-[13px] font-bold text-[var(--text-secondary)]">Adapt with AI <span className="ml-1 text-[11px] font-normal text-[var(--text-soft)]">Optional · Nemotron</span></summary>
