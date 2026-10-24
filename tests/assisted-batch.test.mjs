@@ -8,7 +8,7 @@ import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
-import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft } from "../src/lib/server/workspace.ts";
+import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, updateAssistedText } from "../src/lib/server/workspace.ts";
 import { parseWorkspace } from "../src/lib/workspace.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
 
@@ -71,6 +71,25 @@ test("unmodified platform text uses the same adaptation shown in Create", () => 
   const prepared = prepareAssistedBatch(owner, saved.id, randomUUID(), handoffs());
   assert.equal(prepared.find((item) => item.destination === "bluesky").text, "First line Second line");
   assert.equal(prepared.find((item) => item.destination === "linkedin").text, "First line\nSecond line");
+});
+
+test("a revised handoff stays separate from its source draft and sibling destination", () => {
+  const saved = saveDraft(owner, draft("Original source", ["bluesky", "linkedin"], { bluesky: "Original Bluesky" }));
+  const batchId = randomUUID();
+  const slots = handoffs();
+  const [bluesky, linkedin] = prepareAssistedBatch(owner, saved.id, batchId, slots);
+  assert.throws(() => updateAssistedText(owner, bluesky.id, bluesky.text, "x".repeat(301)), /destination's text limit/);
+  updateAssistedText(owner, bluesky.id, bluesky.text, "Revised Bluesky");
+  const current = listWorkspace(owner);
+  const edited = current.assisted.find((item) => item.id === bluesky.id);
+  assert.equal(edited.text, "Revised Bluesky");
+  assert.equal(edited.sourceDraftId, saved.id);
+  assert.equal(edited.batchId, batchId);
+  assert.equal(edited.scheduledFor, bluesky.scheduledFor);
+  assert.deepEqual(edited.mediaIds, bluesky.mediaIds);
+  assert.equal(current.assisted.find((item) => item.id === linkedin.id).text, linkedin.text);
+  assert.equal(current.drafts.find((item) => item.id === saved.id).variants.bluesky, "Original Bluesky");
+  assert.equal(prepareAssistedBatch(owner, saved.id, batchId, slots)[0].text, "Revised Bluesky");
 });
 
 test("ready-now batch handoffs suppress duplicate browser alerts while future reminders remain pending", () => {

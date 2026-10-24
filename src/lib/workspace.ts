@@ -47,6 +47,8 @@ export type AssistedPost = {
   postUrl?: string;
   outcome?: AssistedOutcome;
   notifiedAt?: string;
+  /** The saved handoff text was revised after this item was prepared. */
+  contentEditedAt?: string;
 };
 
 export type AssistedOutcomeInput = {
@@ -233,6 +235,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
   if ((value.sourceDraftId !== undefined || value.batchId !== undefined) &&
       (!validUuid(value.sourceDraftId) || !validUuid(value.batchId) || !isPlatformId(value.destination))) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
+  if (value.contentEditedAt !== undefined && !validUtcInstant(value.contentEditedAt)) return null;
   if (value.postUrl !== undefined && (value.status !== "posted" ||
       normalizePublicPostUrl(value.postUrl) !== value.postUrl)) return null;
   const outcome = value.outcome === undefined ? undefined : parseAssistedOutcome(value.outcome);
@@ -252,6 +255,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
     ...(value.postUrl !== undefined ? { postUrl: value.postUrl as string } : {}),
     ...(outcome !== undefined ? { outcome } : {}),
     ...(validDate(value.notifiedAt) ? { notifiedAt: value.notifiedAt } : {}),
+    ...(value.contentEditedAt !== undefined ? { contentEditedAt: value.contentEditedAt as string } : {}),
   };
 }
 

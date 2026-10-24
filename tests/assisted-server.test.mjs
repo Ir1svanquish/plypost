@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
-import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, rescheduleAssisted, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
+import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, rescheduleAssisted, saveDraft, setAssistedStatus, updateAssistedText } from "../src/lib/server/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-assisted-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "assisted.sqlite");
@@ -98,6 +98,27 @@ test("moving a pending manual reminder keeps its content, resets notification, a
   assert.equal(setAssistedStatus(owner, post.id, "posted"), true);
   assert.throws(() => rescheduleAssisted(owner, post.id, moved, new Date(Date.now() + 172_800_000).toISOString()), /changed or is no longer queued/);
   assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).scheduledFor, moved);
+});
+
+test("editing queued handoff text preserves its reminder and rejects stale or posted edits", () => {
+  const post = item("First version");
+  post.title = post.text;
+  addAssisted(owner, post);
+  assert.throws(() => updateAssistedText(other, post.id, post.text, "Other owner's edit"), /no longer available/);
+  assert.equal(updateAssistedText(owner, post.id, post.text, "Corrected version"), true);
+  const revised = listWorkspace(owner).assisted.find((entry) => entry.id === post.id);
+  assert.equal(revised.text, "Corrected version");
+  assert.equal(revised.title, "Corrected version");
+  assert.equal(revised.scheduledFor, post.scheduledFor);
+  assert.equal(revised.destination, post.destination);
+  assert.match(revised.contentEditedAt, /^\d{4}-\d\d-\d\dT/);
+  assert.throws(() => updateAssistedText(owner, post.id, post.text, "Stale overwrite"), /text changed/);
+  for (const invalid of ["  ", "x".repeat(5001)]) {
+    assert.throws(() => updateAssistedText(owner, post.id, revised.text, invalid), /up to 5,000/);
+  }
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).text, revised.text);
+  setAssistedStatus(owner, post.id, "posted");
+  assert.throws(() => updateAssistedText(owner, post.id, revised.text, "Too late"), /marked posted/);
 });
 
 test("browser migration merges missing IDs idempotently and enforces the list cap atomically", () => {

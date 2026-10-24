@@ -192,6 +192,14 @@ test("stores assisted checklist actions behind the owner session", async () => {
   const staleMove = await post("/api/workspace", moveRequest);
   assert.equal(staleMove.status, 409);
   assert.equal((await staleMove.json()).code, "ASSISTED_CONFLICT");
+  const editRequest = { action: "update-assisted-text", id: assisted.id, expectedText: assisted.text, text: "Corrected X" };
+  assert.equal((await post("/api/workspace", editRequest, false)).status, 401);
+  const edited = await post("/api/workspace", editRequest);
+  assert.equal(edited.status, 200);
+  assert.equal((await edited.json()).assisted[0].text, "Corrected X");
+  const staleEdit = await post("/api/workspace", editRequest);
+  assert.equal(staleEdit.status, 409);
+  assert.equal((await staleEdit.json()).code, "ASSISTED_CONFLICT");
   const postUrl = "https://social.example/creator/post/42";
   assert.equal((await post("/api/workspace", { action: "set-assisted-status", id: assisted.id, status: "posted", postUrl }, false)).status, 401);
   for (const invalidUrl of ["javascript:alert(1)", "http://social.example/post/42", "https://user:pass@social.example/post/42"]) {

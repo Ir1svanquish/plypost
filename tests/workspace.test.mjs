@@ -29,9 +29,10 @@ test("backup parser rejects wrong versions and skips invalid content", () => {
 });
 
 test("assisted posts round trip and invalid destinations are skipped", () => {
-  const post = { id: "a1", title: "Launch", destination: "x", text: "Hello X", scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  const post = { id: "a1", title: "Launch", destination: "x", text: "Hello X", scheduledFor: stamp, createdAt: stamp, status: "queued", contentEditedAt: stamp };
   const backup = { version: 3, drafts: [], schedule: [], assisted: [post, { ...post, id: "a2", destination: "unknown" }] };
   assert.deepEqual(parseWorkspace(backup), { ...backup, assisted: [post] });
+  assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...post, contentEditedAt: "not-a-date" }] })?.assisted, []);
   assert.equal(parseWorkspace({ version: 3, drafts: [], schedule: [] }), null);
   const dueAt = Date.parse(stamp);
   assert.equal(assistedState(post, dueAt - 1), "upcoming");

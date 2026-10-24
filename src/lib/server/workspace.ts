@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
 import { draftTitle, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
-import { adaptDraft, isPlatformId, platformIds, type PlatformId } from "../platforms";
+import { adaptDraft, characterCount, isPlatformId, platformIds, type PlatformId } from "../platforms";
 import { validatePlatformText } from "../platform-validation";
 import { assertOwnedMedia } from "./media";
 import { slotIsFree } from "./slots";
@@ -233,7 +233,36 @@ export function setAssistedStatus(userId: string, id: string, status: unknown, p
 }
 
 export class AssistedConflictError extends Error {
-  constructor() { super("This manual reminder changed or is no longer queued. Refresh the plan before moving it."); }
+  constructor(message = "This manual reminder changed or is no longer queued. Refresh the plan before moving it.") { super(message); }
+}
+
+/** Edit only the queued handoff snapshot, leaving its time, media and draft provenance intact. */
+export function updateAssistedText(userId: string, id: string, expectedText: unknown, text: unknown): boolean {
+  if (!validId(id) || typeof expectedText !== "string" || expectedText.length > 10_000 ||
+      typeof text !== "string" || text.length > 10_000 || !text.trim() || characterCount(text) > 5000) {
+    throw new Error("Enter nonempty handoff text of up to 5,000 characters and refresh the item before editing.");
+  }
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
+    if (!row) throw new AssistedConflictError("This handoff is no longer available. Refresh the list before editing.");
+    const current = JSON.parse(row.payload) as AssistedPost;
+    if (current.status !== "queued" || current.text !== expectedText) {
+      throw new AssistedConflictError("This handoff text changed or was marked posted. Refresh the list before editing.");
+    }
+    const nextText = text.trim();
+    if (isPlatformId(current.destination) && !validatePlatformText(current.destination, nextText).valid) {
+      throw new Error("Fix the destination's text limit before saving this handoff.");
+    }
+    if (nextText === current.text) return true;
+    const stamp = new Date().toISOString();
+    const title = !current.sourceDraftId && current.title === draftTitle("", current.text)
+      ? draftTitle("", nextText) : current.title;
+    const updated: AssistedPost = { ...current, title, text: nextText, contentEditedAt: stamp };
+    db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(JSON.stringify(updated), stamp, id, userId);
+    audit(userId, "assisted.text_edited", id);
+    return true;
+  });
 }
 
 /** Move only a pending handoff; retain its reviewed text, media and source draft. */
