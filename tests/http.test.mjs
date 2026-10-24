@@ -131,6 +131,30 @@ test("stores account drafts and scheduled snapshots", async () => {
   assert.equal((await loaded.json()).drafts[0].id, draft.id);
 });
 
+test("stale draft saves return a conflict instead of overwriting newer content", async () => {
+  const stamp = new Date().toISOString();
+  const draft = { id: randomUUID(), title: "Concurrency", source: "Initial", selected: ["bluesky"], variants: {}, createdAt: stamp, updatedAt: stamp };
+  const created = await post("/api/workspace", { action: "save-draft", item: draft, expectedUpdatedAt: null });
+  assert.equal(created.status, 200);
+  const createdBody = await created.json();
+  const first = createdBody.drafts.find((item) => item.id === draft.id);
+  assert.deepEqual(createdBody.savedDraft, first);
+  const edited = await post("/api/workspace", { action: "save-draft", item: { ...first, source: "Newer" }, expectedUpdatedAt: first.updatedAt });
+  assert.equal(edited.status, 200);
+  const editedBody = await edited.json();
+  const latest = editedBody.drafts.find((item) => item.id === draft.id);
+  assert.deepEqual(editedBody.savedDraft, latest);
+  assert.ok(latest.updatedAt > first.updatedAt);
+  const stale = await post("/api/workspace", { action: "save-draft", item: { ...first, source: "Older" }, expectedUpdatedAt: first.updatedAt });
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).code, "DRAFT_CONFLICT");
+  const staleDelete = await post("/api/workspace", { action: "delete-draft", id: draft.id, expectedUpdatedAt: first.updatedAt });
+  assert.equal(staleDelete.status, 409);
+  assert.equal((await staleDelete.json()).code, "DRAFT_CONFLICT");
+  const loaded = await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } });
+  assert.equal((await loaded.json()).drafts.find((item) => item.id === draft.id).source, "Newer");
+});
+
 test("reschedule route requires the owner session and validates UTC time and timezone", async () => {
   const original = new Date(Date.now() + 60_000);
   const moved = new Date(Date.now() + 180_000);

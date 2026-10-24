@@ -317,7 +317,7 @@ test("full backup remaps batch handoff origins while preserving snapshots from d
   const deleted = saveDraft(sourceOwner, draft(randomUUID()));
   const orphanBatchId = randomUUID();
   const orphan = prepareAssistedBatch(sourceOwner, deleted.id, orphanBatchId, [items[0]])[0];
-  assert.equal(deleteDraft(sourceOwner, deleted.id), true);
+  assert.equal(deleteDraft(sourceOwner, deleted.id, deleted.updatedAt), true);
 
   const archive = JSON.parse(exportPortableBackup(sourceOwner));
   const altered = globalThis.structuredClone(archive);

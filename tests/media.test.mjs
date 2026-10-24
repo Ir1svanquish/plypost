@@ -100,7 +100,7 @@ test("planned and assisted snapshots keep images after their source draft change
   const image = (await createMedia(owner, { name: "handoff.png", type: "image/png", bytes })).media;
   const stamp = new Date().toISOString();
   const draft = { id: randomUUID(), title: "Original", source: "Text", selected: ["bluesky"], variants: {}, mediaIds: [image.id], createdAt: stamp, updatedAt: stamp };
-  saveDraft(owner, draft);
+  const savedDraft = saveDraft(owner, draft);
   const plan = { id: randomUUID(), title: "Plan", source: "Text", posts: { bluesky: "Text" }, mediaIds: [image.id], scheduledFor: new Date(Date.now() + 60_000).toISOString(), createdAt: stamp, status: "queued" };
   const assisted = { id: randomUUID(), title: "Handoff", destination: "instagram", text: "Caption", mediaIds: [image.id], scheduledFor: stamp, createdAt: stamp, status: "queued" };
   assert.deepEqual(addSchedule(owner, plan, "UTC").mediaIds, [image.id]);
@@ -110,8 +110,8 @@ test("planned and assisted snapshots keep images after their source draft change
   assert.equal(listWorkspace(other).schedule.some((item) => item.mediaIds?.includes(image.id)), false);
   assert.equal(listWorkspace(other).assisted.some((item) => item.mediaIds?.includes(image.id)), false);
 
-  saveDraft(owner, { ...draft, mediaIds: [], source: "Edited source" });
-  deleteDraft(owner, draft.id);
+  saveDraft(owner, { ...draft, mediaIds: [], source: "Edited source" }, savedDraft.updatedAt);
+  deleteDraft(owner, draft.id, listWorkspace(owner).drafts.find((item) => item.id === draft.id).updatedAt);
   assert.deepEqual(listWorkspace(owner).schedule.find((item) => item.id === plan.id)?.mediaIds, [image.id]);
   assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === assisted.id)?.mediaIds, [image.id]);
   assert.throws(() => deleteMedia(owner, image.id), /planned posts/);

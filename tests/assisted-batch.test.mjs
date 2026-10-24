@@ -53,7 +53,7 @@ test("batch handoffs snapshot saved platform versions and media, while repeat re
   assert.deepEqual(listWorkspace(other).assisted, []);
   assert.throws(() => prepareAssistedBatch(other, saved.id, randomUUID(), items), /Saved draft not found/);
 
-  saveDraft(owner, { ...saved, source: "New source", variants: { bluesky: "New version" } });
+  saveDraft(owner, { ...saved, source: "New source", variants: { bluesky: "New version" } }, saved.updatedAt);
   assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, items).map((item) => item.text), first.map((item) => item.text));
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, items.slice(0, 1)), /different or partial/);
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, [items[0], { ...items[1], scheduledFor: new Date(Date.now() + 180_000).toISOString() }]), /different or partial/);

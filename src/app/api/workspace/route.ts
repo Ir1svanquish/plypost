@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus } from "@/lib/server/workspace";
+import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 
@@ -14,13 +14,14 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; timezone?: unknown; backup?: unknown };
+  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; timezone?: unknown; backup?: unknown; expectedUpdatedAt?: unknown };
   try { input = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
   let assistedMigration: "imported" | "skipped" | undefined;
+  let savedDraftResult: ReturnType<typeof saveDraft> | undefined;
   try {
     switch (input.action) {
-      case "save-draft": saveDraft(user, input.item); break;
-      case "delete-draft": if (typeof input.id !== "string" || !deleteDraft(user, input.id)) throw new Error("Draft not found."); break;
+      case "save-draft": savedDraftResult = saveDraft(user, input.item, input.expectedUpdatedAt); break;
+      case "delete-draft": if (typeof input.id !== "string" || !deleteDraft(user, input.id, input.expectedUpdatedAt)) throw new Error("Draft not found."); break;
       case "add-assisted": addAssisted(user, input.item); break;
       case "prepare-assisted-batch": prepareAssistedBatch(user, input.draftId, input.batchId, input.items, input.requireFreeSlots); break;
       case "set-assisted-status": if (typeof input.id !== "string" || !setAssistedStatus(user, input.id, input.status, input.postUrl)) throw new Error("Assisted item not found."); break;
@@ -38,7 +39,9 @@ export async function POST(request: Request) {
       default: throw new Error("Unknown action.");
     }
   } catch (error) {
+    if (error instanceof DraftConflictError) return NextResponse.json({ error: error.message, code: "DRAFT_CONFLICT" }, { status: 409 });
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update workspace." }, { status: 400 });
   }
-  return NextResponse.json({ ...listWorkspace(user), ...(assistedMigration ? { assistedMigration } : {}) }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ...listWorkspace(user), ...(savedDraftResult ? { savedDraft: savedDraftResult } : {}),
+    ...(assistedMigration ? { assistedMigration } : {}) }, { headers: { "Cache-Control": "no-store" } });
 }

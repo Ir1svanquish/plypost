@@ -309,16 +309,23 @@ export function migrateAssisted(userId: string, raw: unknown): "imported" | "ski
   });
 }
 
-export function saveDraft(userId: string, value: unknown): SavedDraft {
+export class DraftConflictError extends Error {
+  constructor(message = "This draft changed or was deleted in another window. Review the latest saved copy or save your edits as a new draft.") { super(message); }
+}
+
+export function saveDraft(userId: string, value: unknown, expectedUpdatedAt: unknown = null): SavedDraft {
   const draft = validDraft(value);
   if (!draft || !/^[a-f0-9-]{36}$/i.test(draft.id)) throw new Error("Invalid draft.");
   transaction((db) => {
     assertOwnedMedia(userId, draft.mediaIds ?? []);
     const existing = db.prepare("SELECT user_id, payload FROM drafts WHERE id=?").get(draft.id) as { user_id: string; payload: string } | undefined;
     if (existing && existing.user_id !== userId) throw new Error("Draft not found.");
+    const previous = existing ? JSON.parse(existing.payload) as SavedDraft : null;
+    if ((previous && expectedUpdatedAt !== previous.updatedAt) || (!previous && expectedUpdatedAt !== null)) throw new DraftConflictError();
     const count = db.prepare("SELECT COUNT(*) AS count FROM drafts WHERE user_id=?").get(userId) as { count: number };
     if (!existing && count.count >= 100) throw new Error("Draft library is full.");
-    const normalized = { ...draft, createdAt: existing ? (JSON.parse(existing.payload) as SavedDraft).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const updatedAt = new Date(Math.max(Date.now(), previous ? Date.parse(previous.updatedAt) + 1 : 0)).toISOString();
+    const normalized = { ...draft, createdAt: previous?.createdAt ?? updatedAt, updatedAt };
     db.prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at")
       .run(normalized.id, userId, JSON.stringify(normalized), normalized.updatedAt);
     audit(userId, existing ? "draft.updated" : "draft.created", draft.id);
@@ -327,10 +334,17 @@ export function saveDraft(userId: string, value: unknown): SavedDraft {
   return draft;
 }
 
-export function deleteDraft(userId: string, id: string) {
-  const result = database().prepare("DELETE FROM drafts WHERE id=? AND user_id=?").run(id, userId);
-  if (result.changes) audit(userId, "draft.deleted", id);
-  return Boolean(result.changes);
+export function deleteDraft(userId: string, id: string, expectedUpdatedAt: unknown) {
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM drafts WHERE id=? AND user_id=?").get(id, userId) as { payload: string } | undefined;
+    if (!row) return false;
+    if ((JSON.parse(row.payload) as SavedDraft).updatedAt !== expectedUpdatedAt) {
+      throw new DraftConflictError("This draft changed in another window. Review the latest library version before deleting.");
+    }
+    db.prepare("DELETE FROM drafts WHERE id=? AND user_id=?").run(id, userId);
+    audit(userId, "draft.deleted", id);
+    return true;
+  });
 }
 
 export function addSchedule(userId: string, value: unknown, timezone: unknown): ServerSchedule {
@@ -415,6 +429,8 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
       if (count.count + missingAssisted.length > 100) throw new Error("Assisted publishing list is full.");
     }
     if (replaceSaved) {
+      const existingDraftVersions = new Map((db.prepare("SELECT id,payload FROM drafts WHERE user_id=?").all(userId) as { id: string; payload: string }[])
+        .map((row) => [row.id, (JSON.parse(row.payload) as SavedDraft).updatedAt]));
       // A text workspace backup has no weekly plans; replacing its drafts invalidates approved idea links.
       db.prepare("DELETE FROM weekly_plans WHERE user_id=?").run(userId);
       db.prepare("DELETE FROM drafts WHERE user_id=?").run(userId);
@@ -423,8 +439,12 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
       if (running.count) throw new Error("Wait for running jobs before importing.");
       for (const draft of workspace.drafts) {
         assertOwnedMedia(userId, draft.mediaIds ?? []);
+        const previousVersion = existingDraftVersions.get(draft.id);
+        const updatedAt = new Date(Math.max(Date.now(), Date.parse(draft.updatedAt) + 1,
+          previousVersion ? Date.parse(previousVersion) + 1 : 0)).toISOString();
+        const imported = { ...draft, updatedAt };
         db.prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?)")
-          .run(draft.id, userId, JSON.stringify(draft), draft.updatedAt);
+          .run(draft.id, userId, JSON.stringify(imported), updatedAt);
       }
       for (const post of workspace.schedule) {
         assertOwnedMedia(userId, post.mediaIds ?? []);

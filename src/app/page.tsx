@@ -161,6 +161,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [title, setTitle] = useState("");
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [currentDraftVersion, setCurrentDraftVersion] = useState<string | null>(null);
+  const [draftConflict, setDraftConflict] = useState(false);
   const [editorOrigin, setEditorOrigin] = useState<EditorOrigin>("starter");
   const [pendingEditorSwitch, setPendingEditorSwitch] = useState<EditorSwitch | null>(null);
   const [switchSaving, setSwitchSaving] = useState(false);
@@ -192,6 +194,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   editorContentRef.current = editorContent;
   const editorDirty = hasUnsavedEditorChanges(editorContent, currentDraftId, drafts, editorOrigin);
   const currentSavedDraft = currentDraftId ? drafts.find((draft) => draft.id === currentDraftId) ?? null : null;
+  const needsDraftRecovery = draftConflict || Boolean(currentDraftId && workspaceReady && currentSavedDraft?.updatedAt !== currentDraftVersion);
 
   useEffect(() => {
     const dialog = switchDialogRef.current;
@@ -330,7 +333,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       body: JSON.stringify({ action, ...extra }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Could not update workspace.");
+    if (!response.ok) {
+      const failure = new Error(data.error || "Could not update workspace.") as Error & { code?: string };
+      if (typeof data.code === "string") failure.code = data.code;
+      throw failure;
+    }
     setDrafts(data.drafts);
     setSchedule(data.schedule);
     setAssisted(data.assisted);
@@ -351,6 +358,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           activity?: unknown;
           title?: unknown;
           currentDraftId?: unknown;
+          currentDraftVersion?: unknown;
           mediaIds?: unknown;
           editorOrigin?: unknown;
         };
@@ -374,7 +382,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         if (data.provider === "nvidia" || data.provider === "nebius") setProvider(data.provider);
         if (Array.isArray(data.activity)) setActivity(data.activity.slice(0, 12));
         if (typeof data.title === "string") setTitle(data.title.slice(0, 120));
-        if (typeof data.currentDraftId === "string") setCurrentDraftId(data.currentDraftId);
+        if (typeof data.currentDraftId === "string") {
+          setCurrentDraftId(data.currentDraftId);
+          if (typeof data.currentDraftVersion === "string") setCurrentDraftVersion(data.currentDraftVersion);
+          else setDraftConflict(true);
+        }
         if (Array.isArray(data.mediaIds) && data.mediaIds.length <= 4 && data.mediaIds.every((id) => typeof id === "string")) setMediaIds(data.mediaIds);
         if (data.editorOrigin === "starter" || data.editorOrigin === "new" || data.editorOrigin === "planned") setEditorOrigin(data.editorOrigin);
       }
@@ -414,12 +426,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     if (!hydrated) return;
     try {
-      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, provider, activity, title, currentDraftId, editorOrigin }));
+      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, provider, activity, title, currentDraftId, editorOrigin, hydrated, email]);
+  }, [source, selected, variants, mediaIds, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -542,7 +554,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function saveDraft(preserveTitle = false): Promise<boolean> {
+  async function saveDraft(preserveTitle = false, asCopy = false): Promise<boolean> {
     if (draftSaveBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the current draft save to finish." });
       return false;
@@ -555,28 +567,33 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Write a source draft before saving it." });
       return false;
     }
-    if (!currentDraftId && drafts.length >= 100) {
+    if ((!currentDraftId || asCopy) && drafts.length >= 100) {
       setNotice({ kind: "error", text: "The library is full. Delete an old draft before saving another." });
       return false;
     }
     const stamp = new Date().toISOString();
     const existing = drafts.find((draft) => draft.id === currentDraftId);
     const saved: SavedDraft = {
-      id: existing?.id ?? crypto.randomUUID(),
-      title: draftTitle(title, source),
+      id: !asCopy && currentDraftId ? currentDraftId : crypto.randomUUID(),
+      title: asCopy ? `${draftTitle(title, source).slice(0, 113)} (copy)` : draftTitle(title, source),
       source,
       selected: [...selected],
       variants: { ...variants },
       mediaIds: [...mediaIds],
-      createdAt: existing?.createdAt ?? stamp,
+      createdAt: !asCopy && existing ? existing.createdAt : stamp,
       updatedAt: stamp,
     };
     const revisionAtStart = editorRevision.current;
     draftSaveBusyRef.current = true;
     setDraftSaveBusy(true);
     try {
-      await changeWorkspace("save-draft", { item: saved });
+      const data = await changeWorkspace("save-draft", { item: saved,
+        expectedUpdatedAt: asCopy || !currentDraftId ? null : currentDraftVersion ?? "untracked" });
+      const stored = data.savedDraft as SavedDraft | undefined;
+      if (!stored || stored.id !== saved.id) throw new Error("The draft was saved, but its version could not be confirmed. Reload before editing it again.");
       setCurrentDraftId(saved.id);
+      setCurrentDraftVersion(stored.updatedAt);
+      setDraftConflict(false);
       setEditorOrigin("new");
       if (!preserveTitle && editorRevision.current === revisionAtStart) setTitle(saved.title);
       setNotice({ kind: "success", text: editorRevision.current === revisionAtStart
@@ -584,6 +601,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         : "An earlier version was saved. Your newer edits remain unsaved." });
       return true;
     } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "DRAFT_CONFLICT") {
+        setDraftConflict(true);
+        void refreshWorkspace().catch(() => {});
+      }
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save draft." });
       return false;
     } finally {
@@ -605,6 +626,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setAiUndo(null);
     if (next.kind === "new") {
       setCurrentDraftId(null);
+      setCurrentDraftVersion(null);
+      setDraftConflict(false);
       setEditorOrigin("new");
       setTitle("");
       setSource("");
@@ -616,6 +639,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     } else if (next.kind === "draft") {
       const { draft } = next;
       setCurrentDraftId(draft.id);
+      setCurrentDraftVersion(draft.updatedAt);
+      setDraftConflict(false);
       setEditorOrigin("new");
       setTitle(draft.title);
       setSource(draft.source);
@@ -627,6 +652,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     } else {
       const { post } = next;
       setCurrentDraftId(null);
+      setCurrentDraftVersion(null);
+      setDraftConflict(false);
       setEditorOrigin("planned");
       setTitle(post.title);
       setSource(post.source);
@@ -660,6 +687,18 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   function loadDraft(draft: SavedDraft) { requestEditorSwitch({ kind: "draft", draft }); }
 
+  async function openLatestDraft() {
+    if (!currentDraftId) return;
+    try {
+      const data = await refreshWorkspace();
+      const latest = (data.drafts as SavedDraft[]).find((draft) => draft.id === currentDraftId);
+      if (!latest) { setNotice({ kind: "error", text: "This draft was deleted elsewhere. Save your editor text as a new draft if you want to keep it." }); return; }
+      requestEditorSwitch({ kind: "draft", draft: latest });
+    } catch {
+      setNotice({ kind: "error", text: "Could not load the latest saved draft. Your editor text is still here." });
+    }
+  }
+
   async function saveAndSwitch() {
     if (!pendingEditorSwitch || switchSavingRef.current) return;
     const target = pendingEditorSwitch;
@@ -668,7 +707,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     switchSavingRef.current = true;
     setSwitchSaving(true);
     try {
-      if (!await saveDraft(true)) {
+      if (!await saveDraft(true, needsDraftRecovery)) {
         setPendingEditorSwitch(null);
         openView("compose");
         return;
@@ -687,13 +726,16 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function deleteDraft(id: string) {
+  async function deleteDraft(id: string, expectedUpdatedAt: string) {
     if (!window.confirm("Delete this saved draft from your account?")) return;
     try {
-      await changeWorkspace("delete-draft", { id });
-      if (currentDraftId === id) setCurrentDraftId(null);
+      await changeWorkspace("delete-draft", { id, expectedUpdatedAt });
+      if (currentDraftId === id) { setCurrentDraftId(null); setCurrentDraftVersion(null); setDraftConflict(false); }
       setNotice({ kind: "success", text: "Saved draft deleted. The current editor was kept." });
     } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "DRAFT_CONFLICT") {
+        void refreshWorkspace().catch(() => {});
+      }
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not delete draft." });
     }
   }
@@ -849,6 +891,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       }
       restored = true;
       setCurrentDraftId(null);
+      setCurrentDraftVersion(null);
+      setDraftConflict(false);
       setMediaIds([]);
       resetMediaPicker();
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
@@ -884,6 +928,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace()));
       setLegacyWorkspace(null);
       setCurrentDraftId(null);
+      setCurrentDraftVersion(null);
+      setDraftConflict(false);
       setStrategyRefreshEpoch((epoch) => epoch + 1);
       setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts. AI weekly plans were cleared; your saved brand profile remains.` });
     } catch (error) {
@@ -902,6 +948,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setLegacyReviewOpen(false);
       if (replaceSaved) {
         setCurrentDraftId(null);
+        setCurrentDraftVersion(null);
+        setDraftConflict(false);
         setStrategyRefreshEpoch((epoch) => epoch + 1);
       }
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); }
@@ -1118,7 +1166,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
                     {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   </details>
-                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!source.trim() || mediaBusy || draftSaveBusy} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
+                  {needsDraftRecovery && currentDraftId && <div role="alert" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">This draft changed in another window or was deleted.</p><p className="mt-1">Your current editor text is still here. Save it as a new draft, or open the latest saved version after reviewing any unsaved changes.</p><div className="mt-3 flex flex-wrap gap-3"><button type="button" onClick={() => { void saveDraft(false, true); }} disabled={!source.trim() || mediaBusy || draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Save as new draft</button><button type="button" onClick={() => { void openLatestDraft(); }} disabled={draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Open latest saved version</button></div></div>}
+                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!source.trim() || mediaBusy || draftSaveBusy || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
                 </div>
               </section>
             </div>
@@ -1196,12 +1245,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     </dialog>}
     {pendingEditorSwitch && <dialog ref={switchDialogRef} onCancel={(event) => { event.preventDefault(); if (!switchSaving) setPendingEditorSwitch(null); }} aria-labelledby="unsaved-editor-title" aria-describedby="unsaved-editor-description" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">Unsaved changes</h2>
-      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">Your current text, platform versions, and image choices have changed. Save them before {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : "opening a copy of this planned post"}, or discard these edits.</p>
+      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">Your current text, platform versions, and image choices have changed. {needsDraftRecovery ? "The saved draft changed elsewhere. Save your edits as a new draft" : "Save your edits"} before {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : "opening a copy of this planned post"}, or discard them.</p>
       {!source.trim() && <p className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Add a message before saving, or keep editing.</p>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
         <button type="button" autoFocus onClick={() => setPendingEditorSwitch(null)} disabled={switchSaving} className="rounded-lg px-3 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Keep editing</button>
         <button type="button" onClick={() => { const target = pendingEditorSwitch; setPendingEditorSwitch(null); applyEditorSwitch(target); }} disabled={switchSaving} className="rounded-lg border border-[var(--danger)] px-3 py-2.5 text-[12px] font-semibold text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50">Discard changes</button>
-        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !source.trim()} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving…" : "Save and continue"}</button>
+        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !source.trim()} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving…" : needsDraftRecovery ? "Save as new and continue" : "Save and continue"}</button>
       </div>
     </dialog>}
     </>
