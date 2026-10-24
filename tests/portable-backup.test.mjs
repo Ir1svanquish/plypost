@@ -8,7 +8,8 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createMedia, getMedia, listMedia } from "../src/lib/server/media.ts";
-import { addSchedule, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
+import { createVideo, getVideo, listVideos } from "../src/lib/server/video.ts";
+import { addAssisted, addSchedule, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { approveStrategyIdea, createWeeklyPlan, listStrategy, saveBrandBrief } from "../src/lib/server/strategy.ts";
@@ -62,7 +63,8 @@ test("portable backup restores image pixels and saved records in a fresh databas
   const exported = exportPortableBackup(owner);
   const archive = JSON.parse(exported);
   assert.equal(archive.format, "plypost-portable");
-  assert.equal(archive.version, 3);
+  assert.equal(archive.version, 4);
+  assert.deepEqual(archive.videos, []);
   assert.deepEqual(archive.slotSettings, weeklySlots);
   assert.equal(archive.brandBrief, null);
   assert.deepEqual(archive.weeklyPlans, []);
@@ -81,7 +83,7 @@ test("portable backup restores image pixels and saved records in a fresh databas
   await assert.rejects(importPortableBackup(owner, brokenSlots), /invalid weekly slots/);
   assert.equal(getSlotSettings(owner), null);
   const result = await importPortableBackup(owner, archive);
-  assert.deepEqual(result, { drafts: 1, jobs: 1, assisted: 1, media: 1 });
+  assert.deepEqual(result, { drafts: 1, jobs: 1, assisted: 1, media: 1, videos: 0 });
   const restored = listWorkspace(owner);
   assert.notEqual(restored.drafts[0].id, saved.id);
   assert.notEqual(restored.drafts[0].mediaIds[0], image.id);
@@ -190,11 +192,11 @@ test("portable backup route enforces owner session, origin, type, and private re
   assert.equal((await POST(backupRequest(archive, { cookie, origin: "https://evil.example" }))).status, 403);
   assert.equal((await POST(backupRequest(archive, { cookie, contentType: "text/plain" }))).status, 415);
   assert.equal((await POST(backupRequest("not-json", { cookie }))).status, 400);
-  const tooLarge = new globalThis.Request(base, { method: "POST", headers: { cookie, origin: "http://localhost", "content-type": "application/json", "content-length": String(130 * 1024 * 1024) }, body: "{}" });
+  const tooLarge = new globalThis.Request(base, { method: "POST", headers: { cookie, origin: "http://localhost", "content-type": "application/json", "content-length": String(193 * 1024 * 1024) }, body: "{}" });
   assert.equal((await POST(tooLarge)).status, 413);
   const imported = await POST(backupRequest(archive, { cookie }));
   assert.equal(imported.status, 200);
-  assert.deepEqual((await imported.json()).restored, { drafts: 1, jobs: 1, assisted: 1, media: 1 });
+  assert.deepEqual((await imported.json()).restored, { drafts: 1, jobs: 1, assisted: 1, media: 1, videos: 0 });
 });
 
 test("backup import rejects an image whose bytes do not match its declared checksum", async () => {
@@ -203,6 +205,35 @@ test("backup import rejects an image whose bytes do not match its declared check
   archive.media[0].sizeBytes = Buffer.from("not a real image").length;
   archive.media[0].sha256 = createHash("sha256").update("not a real image").digest("hex");
   await assert.rejects(importPortableBackup(owner, archive), /undecodable image/);
+});
+
+test("full backup restores video bytes and remaps the saved handoff", async () => {
+  const sourceOwner = "video-source@example.test";
+  const destinationOwner = "video-restored@example.test";
+  // This ftyp fixture checks exact backup bytes, not media playback.
+  const bytes = Buffer.from([0, 0, 0, 16, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 0, 0]);
+  const video = createVideo(sourceOwner, { name: "launch.mp4", type: "video/mp4", bytes }).video;
+  const createdAt = stamp();
+  const handoff = addAssisted(sourceOwner, { id: randomUUID(), title: "Video launch", destination: "youtube",
+    text: "Watch this", videoId: video.id, scheduledFor: createdAt, createdAt, status: "queued" });
+  const archive = JSON.parse(exportPortableBackup(sourceOwner));
+  assert.equal(archive.videos.length, 1);
+  assert.equal(archive.assisted[0].videoId, video.id);
+  const corrupt = globalThis.structuredClone(archive);
+  corrupt.videos[0].base64 = Buffer.from("not-video-bytes").toString("base64");
+  await assert.rejects(importPortableBackup(destinationOwner, corrupt), /video format, size or checksum/);
+  assert.deepEqual(listWorkspace(destinationOwner).assisted, []);
+  assert.deepEqual(listVideos(destinationOwner), []);
+  const result = await importPortableBackup(destinationOwner, archive);
+  assert.equal(result.videos, 1);
+  const restored = listWorkspace(destinationOwner).assisted[0];
+  assert.notEqual(restored.id, handoff.id);
+  assert.notEqual(restored.videoId, video.id);
+  assert.deepEqual(getVideo(destinationOwner, restored.videoId).bytes, bytes);
+  const legacy = globalThis.structuredClone(archive);
+  legacy.version = 3;
+  delete legacy.videos;
+  await assert.rejects(importPortableBackup(destinationOwner, legacy), /references videos without including/);
 });
 
 test("restore rejects concurrent account edits instead of overwriting them", async () => {
@@ -272,7 +303,7 @@ test("full backup preserves brand details, reviewed ideas, and their remapped dr
   }]);
   const originalDraft = approveStrategyIdea(sourceOwner, plan.id, plan.ideas[0].id);
   const archive = JSON.parse(exportPortableBackup(sourceOwner));
-  assert.equal(archive.version, 3);
+  assert.equal(archive.version, 4);
   assert.equal(archive.brandBrief.brandName, "Plypost");
   assert.equal(archive.weeklyPlans[0].ideas[0].draftId, originalDraft.id);
 

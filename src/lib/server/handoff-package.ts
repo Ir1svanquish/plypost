@@ -3,6 +3,7 @@ import { assistedDestinations } from "../assisted";
 import { parseWorkspace } from "../workspace";
 import { database } from "./db";
 import { getMedia, MAX_IMAGE_BYTES } from "./media";
+import { getVideo, MAX_VIDEO_BYTES } from "./video";
 
 const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const extension: Record<string, string> = {
@@ -15,7 +16,7 @@ export class HandoffPackageError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }
 }
 
-/** One private download contains the caption and every saved image in the handoff snapshot. */
+/** One private download contains the caption and saved assets in the handoff snapshot. */
 export function buildHandoffPackage(userId: string, id: string): { bytes: Uint8Array; filename: string } {
   if (!uuid.test(id)) throw new HandoffPackageError("Handoff not found.", 404);
   const row = database().prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?")
@@ -42,8 +43,16 @@ export function buildHandoffPackage(userId: string, id: string): { bytes: Uint8A
     files[name] = new Uint8Array(found.bytes);
     notes.push("", `Image ${index + 1}: ${name}`, `Description: ${item.mediaAlt?.[index] || "(none saved)"}`);
   }
-  if (item.destination === "youtube" || item.destination === "tiktok") {
-    notes.push("", "Video files are not stored in Plypost. Bring your video separately.");
+  if (item.videoId) {
+    const found = getVideo(userId, item.videoId);
+    if (!found || found.bytes.length > MAX_VIDEO_BYTES) {
+      throw new HandoffPackageError("The saved video is unavailable. Check this handoff before downloading.", 409);
+    }
+    const path = `video/clip.${found.video.name.split(".").at(-1)}`;
+    files[path] = new Uint8Array(found.bytes);
+    notes.push("", `Video: ${path}`, `Original name: ${found.video.name}`);
+  } else if (item.destination === "youtube" || item.destination === "tiktok") {
+    notes.push("", "No video is attached to this handoff. Bring your video separately.");
   }
   files["handoff.txt"] = strToU8(`${notes.join("\n")}\n`);
   const filename = `plypost-${item.destination}-${item.id.slice(0, 8)}.zip`;

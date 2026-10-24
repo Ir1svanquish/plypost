@@ -9,6 +9,7 @@ import { validatePlatformText } from "@/lib/platform-validation";
 import { assistedState, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
+import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
 
 type Props = {
   items: AssistedPost[];
@@ -25,7 +26,7 @@ type Props = {
   onDestinationChange: (destination: AssistedDestinationId) => void;
   onTextChange: (text: string) => void;
   onTimeChange: (time: string) => void;
-  onAdd: () => void;
+  onAdd: (videoId?: string) => Promise<boolean>;
   onCopy: (text: string, destination: AssistedDestinationId) => void;
   onMarkPosted: (id: string, postUrl?: string) => void;
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
@@ -98,11 +99,14 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
   const [composerOpen, setComposerOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("to-post");
   const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
+  const [videoId, setVideoId] = useState<string | null>(null);
+  const [videoBusy, setVideoBusy] = useState(false);
   const composerInitializedRef = useRef(false);
   const handledFocusRef = useRef<string | null>(null);
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
+  const videoFirst = assistedVideoDisplayIds.some((id) => id === destination);
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
   const availableTextImageDestinations = assistedTextImageDisplayIds.filter((id) => items.some((item) => item.destination === id));
   const availableVideoDestinations = assistedVideoDisplayIds.filter((id) => items.some((item) => item.destination === id));
@@ -214,6 +218,18 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
     }
   }
 
+  function chooseDestination(next: AssistedDestinationId) {
+    if (next === destination) return;
+    setVideoId(null);
+    onDestinationChange(next);
+  }
+
+  async function addPost() {
+    setStatusFilter("to-post");
+    setDestinationFilter("all");
+    if (await onAdd(videoId ?? undefined)) setVideoId(null);
+  }
+
   return (
     <section id="assisted" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="assisted-heading">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
@@ -230,12 +246,16 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
       {calendarError && <p role="alert" className="mx-6 mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)] sm:mx-7">{calendarError}</p>}
 
       {composerOpen && <div id="assisted-compose-form" className="grid gap-4 p-6 sm:grid-cols-2 sm:p-7">
-        <div>
-          <label htmlFor="assisted-destination" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Destination</label>
-          <select id="assisted-destination" value={destination} onChange={(event) => onDestinationChange(event.target.value as AssistedDestinationId)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[14px] text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
-            <optgroup label="Text &amp; image-first">{assistedTextImageDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
-            <optgroup label="Video-first">{assistedVideoDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
-          </select>
+        <div className="sm:col-span-2">
+          <p id="assisted-destination-label" className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Destination</p>
+          <div role="group" aria-label="Platform type" className="mb-3 inline-flex rounded-xl border border-[var(--line)] bg-[var(--field)] p-1">
+            <button type="button" aria-pressed={!videoFirst} onClick={() => chooseDestination(assistedTextImageDisplayIds[0])} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${!videoFirst ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Photo &amp; text-first</button>
+            <button type="button" aria-pressed={videoFirst} onClick={() => chooseDestination(assistedVideoDisplayIds[0])} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${videoFirst ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Video-first</button>
+          </div>
+          <div role="group" aria-labelledby="assisted-destination-label" className="flex flex-wrap gap-2">
+            {(videoFirst ? assistedVideoDisplayIds : assistedTextImageDisplayIds).map((id) => <button key={id} type="button" aria-pressed={destination === id} onClick={() => chooseDestination(id)} className={`rounded-lg border px-3 py-2 text-[12px] font-semibold ${destination === id ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--accent-border)]"}`}>{assistedDestinations[id].name}</button>)}
+          </div>
+          <p className="mt-2 text-[11px] text-[var(--text-muted)]">These groups describe the usual posting format. Some platforms support both.</p>
         </div>
         <LocalDateTimeField id="assisted-time" label="Reminder time" value={time} minTimestamp={now} optional onChange={onTimeChange} />
         <div className="sm:col-span-2">
@@ -243,14 +263,15 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
           <textarea id="assisted-text" value={text} maxLength={5000} onChange={(event) => onTextChange(event.target.value)} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
           <p className="mt-2 text-[12px] text-[var(--text-secondary)]">{imageCount ? `${imageCount} ${imageCount === 1 ? "image" : "images"} from the current draft will be saved with this handoff.` : "No images selected in the current draft."} <button type="button" onClick={onEditImages} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit images in Create</button></p>
-          {selected.needsMedia && <p className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">{destination === "youtube" ? "Bring a video when you publish. Plypost stores images, not video files; this handoff saves only the text and any selected images." : imageCount === 0 ? "Bring a photo or video when you publish. This handoff has no saved media." : "Check the selected images against this platform's current media options before posting. You can also bring media directly to the platform."}</p>}
+          <details key={destination} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
+          {selected.needsMedia && <p className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">{destination === "youtube" && !videoId ? "Attach a video here or bring one when you publish on YouTube." : imageCount === 0 && !videoId ? "Bring a photo or video when you publish. This handoff has no saved media." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
             <p className={validation.valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}>{validation.count} / {validation.limit} {destination === "bluesky" ? "graphemes" : "characters"}{validation.byteCount !== undefined ? ` · ${validation.byteCount} / ${validation.byteLimit} UTF-8 bytes` : ""}</p>
             {validation.issues.map((issue) => <p key={issue.code} className={issue.severity === "error" ? "text-[var(--danger)]" : "text-[var(--warning)]"}>{issue.message}</p>)}
           </div>}
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <button type="button" onClick={() => { setStatusFilter("to-post"); setDestinationFilter("all"); onAdd(); }} disabled={busy || mediaBusy || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {mediaBusy ? "Wait for images…" : busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
+          <button type="button" onClick={() => void addPost()} disabled={busy || mediaBusy || videoBusy || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {mediaBusy || videoBusy ? "Wait for media…" : busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
           {notificationPermission === "default" && <button type="button" onClick={onEnableNotifications} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Bell size={14} /> Enable browser alerts</button>}
           <span className="text-[12px] leading-5 text-[var(--text-soft)]">{notificationPermission === "granted" ? "Browser alerts enabled while this page is open." : "Due items appear here while this page is open."}</span>
         </div>
@@ -303,17 +324,17 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
               textEdit.value.trim() !== item.text && textEditCount <= 5000 && textEditValidation?.valid !== false);
             return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && target.needsMedia && !item.mediaIds?.length && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{item.destination === "youtube" ? "Bring a video when posting." : "Add a photo or video when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && target.needsMedia && !item.mediaIds?.length && !item.videoId && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{item.destination === "youtube" ? "Bring a video when posting." : "Add a photo or video when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
                 <button type="button" aria-label={`Remove ${target.name} handoff: ${item.title}`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
               <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
-                <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Post details{item.mediaIds?.length ? ` · ${item.mediaIds.length} ${item.mediaIds.length === 1 ? "image" : "images"}` : item.status === "queued" ? " · optional link" : ""}</summary>
+                <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Post details{item.mediaIds?.length ? ` · ${item.mediaIds.length} ${item.mediaIds.length === 1 ? "image" : "images"}` : ""}{item.videoId ? " · video" : ""}</summary>
                 <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-[var(--surface)] p-3 leading-5 text-[var(--text-secondary)]">{item.text}</p>
               {item.status === "queued" && !textEdit && <button type="button" onClick={() => setTextEdits((current) => ({ ...current, [item.id]: { expectedText: item.text, value: item.text } }))} disabled={busy} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">Edit saved text</button>}
               {item.status === "queued" && textEdit && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
                 <label htmlFor={`assisted-edit-text-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Saved handoff text · {target.name}</label>
                 <textarea id={`assisted-edit-text-${item.id}`} value={textEdit.value} maxLength={5000} rows={5} aria-invalid={!canSaveText && Boolean(textEdit.value.trim() !== item.text)} onChange={(event) => setTextEdits((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? { expectedText: item.text, value: item.text }), value: event.target.value } }))} disabled={busy || textSavingId === item.id} className="w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
-                <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">{textEditCount} / {textEditValidation?.limit ?? 5000} {item.destination === "bluesky" ? "graphemes" : "characters"}. This changes only this manual handoff; its reminder, images and source draft stay as saved.</p>
+                <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">{textEditCount} / {textEditValidation?.limit ?? 5000} {item.destination === "bluesky" ? "graphemes" : "characters"}. This changes only this manual handoff; its reminder, media and source draft stay as saved.</p>
                 {textEditStale && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">The saved text changed elsewhere. Copy your edits if needed, then cancel and reopen the latest version.</p>}
                 {textEditValidation?.issues.map((issue) => <p key={issue.code} className={`mt-1 text-[11px] ${issue.severity === "error" ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}>{issue.message}</p>)}
                 {textEditCount > 5000 && <p className="mt-1 text-[11px] text-[var(--danger)]">Keep the handoff within 5,000 characters.</p>}
@@ -323,7 +344,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                 </div>
               </div>}
               <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expected, next) => onUpdateDescriptions(item.id, expected, next) : undefined} />
-              {Boolean(item.mediaIds?.length) && <a href={`/api/assisted/${encodeURIComponent(item.id)}/package`} download className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download caption and images (.zip)</a>}
+              {item.videoId && <a href={`/api/videos/${encodeURIComponent(item.videoId)}`} download className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Download size={13} aria-hidden="true" /> Download saved video</a>}
+              {Boolean(item.mediaIds?.length || item.videoId) && <a href={`/api/assisted/${encodeURIComponent(item.id)}/package`} download className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download caption and media (.zip)</a>}
               {item.status === "queued" && <div className="mt-3 max-w-xl">
                 <label htmlFor={`assisted-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Public post link · optional</label>
                 <input id={`assisted-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={enteredUrl} placeholder="https://social.example/your-post" aria-invalid={invalidUrl} aria-describedby={`assisted-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />

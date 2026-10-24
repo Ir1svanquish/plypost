@@ -864,7 +864,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       await changeWorkspace("reschedule-assisted", {
         id: post.id, expectedScheduledFor: post.scheduledFor, scheduledFor: scheduledForIso,
       });
-      setNotice({ kind: "success", text: "Manual reminder moved. Its text, images and source draft were kept." });
+      setNotice({ kind: "success", text: "Manual reminder moved. Its text, media and source draft were kept." });
     } catch (error) {
       if ((error as { code?: string }).code === "ASSISTED_CONFLICT") {
         await refreshWorkspace().catch(() => {});
@@ -895,7 +895,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     link.download = `plypost-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setNotice({ kind: "success", text: "Text JSON exported without image files. Use Download full backup to include them." });
+    setNotice({ kind: "success", text: "Text JSON exported without image or video files. Use Download full backup to include them." });
   }
 
   async function downloadFullBackup() {
@@ -914,7 +914,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       link.download = `plypost-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      setNotice({ kind: "success", text: "Full backup downloaded with your saved images. Keep the file private." });
+      setNotice({ kind: "success", text: "Full backup downloaded with your saved images and videos. Keep the file private." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not download the full backup." });
     } finally {
@@ -929,14 +929,14 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Wait for the current image operation before restoring a backup." });
       return;
     }
-    if (!file.size || file.size > 128 * 1024 * 1024) {
-      setNotice({ kind: "error", text: "Choose a full backup no larger than 128 MiB." });
+    if (!file.size || file.size > 192 * 1024 * 1024) {
+      setNotice({ kind: "error", text: "Choose a full backup no larger than 192 MiB." });
       return;
     }
     const unsavedStrategyWarning = strategyDirty
       ? " Your unsaved brand profile or AI idea edits will be lost."
       : "";
-    if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), and images with this full backup?${unsavedStrategyWarning} This cannot be undone.`)) return;
+    if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedStrategyWarning} This cannot be undone.`)) return;
     backupMutation.current = true;
     setBackupBusy(true);
     restoringBackupRef.current = true;
@@ -962,7 +962,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       await refreshWorkspace();
       setStrategyRefreshEpoch((epoch) => epoch + 1);
       setSlotsRefreshEpoch((epoch) => epoch + 1);
-      setNotice({ kind: "success", text: "Full backup restored. Saved drafts, weekly slots, brand plans, handoffs, results and images are available in this account." });
+      setNotice({ kind: "success", text: "Full backup restored. Saved drafts, weekly slots, brand plans, handoffs, results, images, and videos are available in this account." });
     } catch (error) {
       setNotice({ kind: "error", text: restored
         ? "Full backup was restored, but the view could not refresh. Reload to see the saved work."
@@ -1050,31 +1050,31 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function addAssistedPost() {
+  async function addAssistedPost(videoId?: string): Promise<boolean> {
     if (mediaBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the image operation to finish before saving this handoff." });
-      return;
+      return false;
     }
     const text = assistText.trim();
     const scheduledFor = assistTime ? new Date(assistTime) : new Date();
     if (!text || characterCount(text) > 5000) {
       setNotice({ kind: "error", text: "Add text of up to 5,000 characters before saving." });
-      return;
+      return false;
     }
     if (isPlatformId(assistDestination)) {
       const validation = validatePlatformText(assistDestination, text);
       if (!validation.valid) {
         setNotice({ kind: "error", text: validation.issues.find((issue) => issue.severity === "error")?.message ?? "Review the platform draft before saving." });
-        return;
+        return false;
       }
     }
     if (!Number.isFinite(scheduledFor.getTime()) || (assistTime && scheduledFor.getTime() <= Date.now())) {
       setNotice({ kind: "error", text: "Choose a future reminder time, or leave it blank for now." });
-      return;
+      return false;
     }
     if (assisted.length >= 100) {
       setNotice({ kind: "error", text: "The assisted publishing list is full. Remove an old item first." });
-      return;
+      return false;
     }
     const item: AssistedPost = {
       id: crypto.randomUUID(),
@@ -1083,6 +1083,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       text,
       mediaIds: [...mediaIds],
       mediaAlt: mediaAlt.map((value) => value.trim()),
+      ...(videoId ? { videoId } : {}),
       scheduledFor: scheduledFor.toISOString(),
       createdAt: new Date().toISOString(),
       status: "queued",
@@ -1091,7 +1092,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     if (await runAssistedAction("add-assisted", { item }, `Added ${assistedDestinations[assistDestination].name} to your assisted publishing list. You will publish it yourself.`)) {
       setNow(Date.now());
       setAssistTime("");
+      return true;
     }
+    return false;
   }
 
   async function prepareAssistedBatch(draftId: string, expectedUpdatedAt: string, batchId: string, items: BatchHandoffItem[], requireFreeSlots: boolean): Promise<BatchPrepareResult> {
@@ -1143,7 +1146,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setAssistedBusy(true);
     try {
       await changeWorkspace("update-assisted-text", { id, expectedText, text });
-      setNotice({ kind: "success", text: "Saved handoff text updated. Its reminder, images and source draft were kept." });
+      setNotice({ kind: "success", text: "Saved handoff text updated. Its reminder, media and source draft were kept." });
       return true;
     } catch (error) {
       if ((error as { code?: string }).code === "ASSISTED_CONFLICT") {

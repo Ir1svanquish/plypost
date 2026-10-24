@@ -13,7 +13,7 @@ const privateHeaders = {
 async function readBoundedJson(request: Request): Promise<unknown> {
   const claimedLength = request.headers.get("content-length");
   if (claimedLength && /^\d+$/.test(claimedLength) && Number(claimedLength) > MAX_PORTABLE_BACKUP_BYTES) {
-    throw new BackupError("Backup exceeds the 128 MiB portable archive limit.", 413);
+    throw new BackupError("Backup exceeds the 192 MiB portable archive limit.", 413);
   }
   if (!request.body) throw new BackupError("Backup file is empty.");
   const reader = request.body.getReader();
@@ -26,7 +26,7 @@ async function readBoundedJson(request: Request): Promise<unknown> {
       total += value.byteLength;
       if (total > MAX_PORTABLE_BACKUP_BYTES) {
         await reader.cancel();
-        throw new BackupError("Backup exceeds the 128 MiB portable archive limit.", 413);
+        throw new BackupError("Backup exceeds the 192 MiB portable archive limit.", 413);
       }
       chunks.push(value);
     }

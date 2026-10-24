@@ -5,6 +5,7 @@ import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platfo
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
 import { validatePlatformText } from "../platform-validation";
 import { assertOwnedMedia } from "./media";
+import { assertOwnedVideo } from "./video";
 import { slotIsFree } from "./slots";
 
 type DraftRow = { payload: string };
@@ -113,6 +114,7 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
   }
   transaction((db) => {
     assertOwnedMedia(userId, item.mediaIds ?? []);
+    assertOwnedVideo(userId, item.videoId);
     if (db.prepare("SELECT id FROM assisted WHERE id=?").get(item.id)) throw new Error("Assisted item already exists.");
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
     if (count.count >= 100) throw new Error("Assisted publishing list is full.");
@@ -378,7 +380,10 @@ export function migrateAssisted(userId: string, raw: unknown): "imported" | "ski
     throw new Error("Invalid assisted migration.");
   }
   return transaction((db) => {
-    for (const item of items as AssistedPost[]) assertOwnedMedia(userId, item.mediaIds ?? []);
+    for (const item of items as AssistedPost[]) {
+      assertOwnedMedia(userId, item.mediaIds ?? []);
+      assertOwnedVideo(userId, item.videoId);
+    }
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
     const missing = (items as AssistedPost[]).filter((item) => {
       const existing = db.prepare("SELECT user_id FROM assisted WHERE id=?").get(item.id) as { user_id: string } | undefined;
@@ -509,7 +514,10 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
   transaction((db) => {
     let missingAssisted: AssistedPost[] = [];
     if (mode === "merge-legacy") {
-      for (const item of workspace.assisted) assertOwnedMedia(userId, item.mediaIds ?? []);
+      for (const item of workspace.assisted) {
+        assertOwnedMedia(userId, item.mediaIds ?? []);
+        assertOwnedVideo(userId, item.videoId);
+      }
       const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
       missingAssisted = workspace.assisted.filter((item) => {
         const existing = db.prepare("SELECT user_id FROM assisted WHERE id=?").get(item.id) as { user_id: string } | undefined;
@@ -547,6 +555,7 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
       db.prepare("DELETE FROM assisted WHERE user_id=?").run(userId);
       for (const item of workspace.assisted) {
         assertOwnedMedia(userId, item.mediaIds ?? []);
+        assertOwnedVideo(userId, item.videoId);
         db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
           .run(item.id, userId, JSON.stringify(item), item.scheduledFor, new Date().toISOString());
       }

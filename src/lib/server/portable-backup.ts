@@ -3,11 +3,12 @@ import { isDeepStrictEqual } from "node:util";
 import sharp from "sharp";
 import { transaction, audit, database } from "./db";
 import { listMedia, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_OWNER_MEDIA_BYTES, MAX_OWNER_MEDIA_COUNT } from "./media";
+import { listVideos, MAX_OWNER_VIDEO_BYTES, MAX_OWNER_VIDEO_COUNT, MAX_VIDEO_BYTES, safeVideoName, validVideoBytes } from "./video";
 import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { parseBrandBrief, parseWeeklyPlan, type BrandBrief, type WeeklyPlan } from "../strategy";
 import { parseSlotSettings, type SlotSettings } from "../slot-settings";
 
-export const MAX_PORTABLE_BACKUP_BYTES = 128 * 1024 * 1024;
+export const MAX_PORTABLE_BACKUP_BYTES = 192 * 1024 * 1024;
 
 const validId = (value: unknown): value is string =>
   typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value);
@@ -39,14 +40,24 @@ type PortableMedia = {
   sha256: string;
   base64: string;
 };
+type PortableVideo = {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+  sha256: string;
+  base64: string;
+};
 export type PortableBackup = {
   format: "plypost-portable";
-  version: 3;
+  version: 4;
   exportedAt: string;
   drafts: SavedDraft[];
   jobs: PortableJob[];
   assisted: AssistedPost[];
   media: PortableMedia[];
+  videos: PortableVideo[];
   brandBrief: BrandBrief | null;
   weeklyPlans: WeeklyPlan[];
   slotSettings: SlotSettings | null;
@@ -56,6 +67,10 @@ type StoredMedia = {
   id: string; original_name: string; mime_type: string; byte_size: number; width: number; height: number;
   created_at: string; sha256: string; body: Uint8Array;
 };
+type StoredVideo = {
+  id: string; original_name: string; mime_type: string; byte_size: number;
+  created_at: string; sha256: string; body: Uint8Array;
+};
 type StoredJob = {
   id: string; payload: string; timezone: string; status: string; attempts: number; next_attempt_at: string;
   last_error: string | null; completed_at: string | null; receipts: string;
@@ -63,6 +78,10 @@ type StoredJob = {
 type PreparedMedia = {
   oldId: string; newId: string; name: string; mimeType: string; sizeBytes: number;
   width: number; height: number; createdAt: string; sha256: string; body: Buffer;
+};
+type PreparedVideo = {
+  oldId: string; newId: string; name: string; mimeType: string; sizeBytes: number;
+  createdAt: string; sha256: string; body: Buffer;
 };
 
 export class BackupError extends Error {
@@ -127,6 +146,7 @@ function validateCollection<T extends { id: string }>(raw: unknown, parsed: T[],
         ((item.postedAt !== undefined && item.postedAt !== normalized.postedAt) ||
           (item.postUrl !== undefined && item.postUrl !== normalized.postUrl) ||
           (item.notifiedAt !== undefined && item.notifiedAt !== normalized.notifiedAt) ||
+          item.videoId !== normalized.videoId ||
           item.sourceDraftId !== normalized.sourceDraftId || item.batchId !== normalized.batchId)) {
       invalid("Backup contains invalid assisted item history.");
     }
@@ -226,13 +246,13 @@ function assertUniqueIds(items: { id: string }[]) {
   if (new Set(items.map((item) => item.id)).size !== items.length) invalid("Backup contains duplicate IDs.");
 }
 
-function decodeCanonicalBase64(value: unknown): Buffer {
-  if (typeof value !== "string" || value.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 ||
+function decodeCanonicalBase64(value: unknown, maxBytes = MAX_IMAGE_BYTES, label = "image"): Buffer {
+  if (typeof value !== "string" || value.length > Math.ceil(maxBytes / 3) * 4 ||
       value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
-    invalid("Backup contains invalid image data.");
+    invalid(`Backup contains invalid ${label} data.`);
   }
   const body = Buffer.from(value, "base64");
-  if (body.toString("base64") !== value) invalid("Backup contains invalid image data.");
+  if (body.toString("base64") !== value) invalid(`Backup contains invalid ${label} data.`);
   return body;
 }
 
@@ -303,6 +323,36 @@ async function prepareMedia(raw: unknown): Promise<PreparedMedia[]> {
   return prepared;
 }
 
+function prepareVideos(raw: unknown): PreparedVideo[] {
+  if (!Array.isArray(raw) || raw.length > MAX_OWNER_VIDEO_COUNT) invalid("Backup contains too many videos.");
+  const prepared: PreparedVideo[] = [];
+  const ids = new Set<string>();
+  const digests = new Set<string>();
+  let totalBytes = 0;
+  for (const entry of raw) {
+    if (!isRecord(entry) || !validId(entry.id) || typeof entry.name !== "string" || entry.name.length > 120 ||
+        typeof entry.mimeType !== "string" || entry.name !== safeVideoName(entry.name, entry.mimeType) ||
+        !Number.isInteger(entry.sizeBytes) || (entry.sizeBytes as number) < 1 || (entry.sizeBytes as number) > MAX_VIDEO_BYTES ||
+        !validInstant(entry.createdAt) || typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.sha256)) {
+      invalid("Backup contains invalid video metadata.");
+    }
+    if (ids.has(entry.id)) invalid("Backup contains duplicate IDs.");
+    ids.add(entry.id);
+    const body = decodeCanonicalBase64(entry.base64, MAX_VIDEO_BYTES, "video");
+    const digest = createHash("sha256").update(body).digest("hex");
+    if (body.length !== entry.sizeBytes || !validVideoBytes(entry.mimeType, body) || digest !== entry.sha256) {
+      invalid("Backup video format, size or checksum does not match.");
+    }
+    totalBytes += body.length;
+    if (totalBytes > MAX_OWNER_VIDEO_BYTES) invalid("Backup videos exceed the 64 MiB library limit.");
+    if (digests.has(digest)) invalid("Backup contains duplicate videos.");
+    digests.add(digest);
+    prepared.push({ oldId: entry.id, newId: randomUUID(), name: entry.name, mimeType: entry.mimeType,
+      sizeBytes: body.length, createdAt: entry.createdAt, sha256: digest, body });
+  }
+  return prepared;
+}
+
 function remapMediaIds<T extends { id: string }>(item: T, mediaMap: Map<string, string>): T {
   const mediaIds = mediaReferences(item);
   return {
@@ -325,6 +375,7 @@ function ownerDataFingerprint(db: ReturnType<typeof database>, userId: string): 
     "SELECT id,payload,scheduled_for,timezone,status,attempts,next_attempt_at,last_error,completed_at,receipts FROM jobs WHERE user_id=? ORDER BY id",
     "SELECT id,payload,scheduled_for,updated_at FROM assisted WHERE user_id=? ORDER BY id",
     "SELECT id,sha256,byte_size FROM media WHERE user_id=? ORDER BY id",
+    "SELECT id,sha256,byte_size FROM videos WHERE user_id=? ORDER BY id",
     "SELECT user_id,payload FROM brand_briefs WHERE user_id=?",
     "SELECT id,payload,created_at FROM weekly_plans WHERE user_id=? ORDER BY id",
     "SELECT user_id,payload,updated_at FROM slot_settings WHERE user_id=?",
@@ -334,8 +385,9 @@ function ownerDataFingerprint(db: ReturnType<typeof database>, userId: string): 
 }
 
 export function exportPortableBackup(userId: string): string {
-  // Create the media table before the snapshot transaction; no schema DDL is run inside it.
+  // Create asset tables before the snapshot transaction; no schema DDL is run inside it.
   listMedia(userId);
+  listVideos(userId);
   const snapshot = transaction((db) => {
     const rows = db.prepare("SELECT id,payload,timezone,status,attempts,next_attempt_at,last_error,completed_at,receipts FROM jobs WHERE user_id=? ORDER BY scheduled_for,id")
       .all(userId) as StoredJob[];
@@ -360,6 +412,8 @@ export function exportPortableBackup(userId: string): string {
     });
     const media = db.prepare("SELECT id,original_name,mime_type,byte_size,width,height,created_at,sha256,body FROM media WHERE user_id=? ORDER BY created_at DESC,id")
       .all(userId) as StoredMedia[];
+    const videos = db.prepare("SELECT id,original_name,mime_type,byte_size,created_at,sha256,body FROM videos WHERE user_id=? ORDER BY created_at DESC,id")
+      .all(userId) as StoredVideo[];
     const briefRow = db.prepare("SELECT payload FROM brand_briefs WHERE user_id=?")
       .get(userId) as { payload: string } | undefined;
     const brandBrief = briefRow ? JSON.parse(briefRow.payload) as BrandBrief : null;
@@ -368,10 +422,10 @@ export function exportPortableBackup(userId: string): string {
     const slotRow = db.prepare("SELECT payload FROM slot_settings WHERE user_id=?")
       .get(userId) as { payload: string } | undefined;
     const slotSettings = slotRow ? JSON.parse(slotRow.payload) as SlotSettings : null;
-    return { drafts, assisted, jobs, media, brandBrief, weeklyPlans, slotSettings };
+    return { drafts, assisted, jobs, media, videos, brandBrief, weeklyPlans, slotSettings };
   });
   const archive: PortableBackup = {
-    format: "plypost-portable", version: 3, exportedAt: new Date().toISOString(),
+    format: "plypost-portable", version: 4, exportedAt: new Date().toISOString(),
     drafts: snapshot.drafts, jobs: snapshot.jobs, assisted: snapshot.assisted,
     brandBrief: snapshot.brandBrief, weeklyPlans: snapshot.weeklyPlans,
     slotSettings: snapshot.slotSettings,
@@ -386,56 +440,80 @@ export function exportPortableBackup(userId: string): string {
         base64: body.toString("base64"),
       };
     }),
+    videos: snapshot.videos.map((row) => {
+      const body = Buffer.from(row.body);
+      if (body.length !== row.byte_size || !validVideoBytes(row.mime_type, body) ||
+          createHash("sha256").update(body).digest("hex") !== row.sha256) {
+        invalid("Stored video integrity check failed; backup was not created.");
+      }
+      return { id: row.id, name: row.original_name, mimeType: row.mime_type,
+        sizeBytes: row.byte_size, createdAt: row.created_at, sha256: row.sha256, base64: body.toString("base64") };
+    }),
   };
   const validated = validateWorkspace(archive);
   validateStrategy(archive);
   validateSlots(archive);
+  if (archive.videos.length > MAX_OWNER_VIDEO_COUNT ||
+      archive.videos.reduce((total, item) => total + item.sizeBytes, 0) > MAX_OWNER_VIDEO_BYTES) {
+    invalid("Stored videos exceed the private library limit.");
+  }
   const allIds = [
     ...validated.drafts.map((item) => item.id), ...validated.jobs.map((item) => item.post.id),
     ...validated.assisted.map((item) => item.id), ...archive.media.map((item) => item.id),
+    ...archive.videos.map((item) => item.id),
     ...archive.weeklyPlans.map((item) => item.id),
   ];
   assertUniqueIds(allIds.map((id) => ({ id })));
   const mediaIds = new Set(archive.media.map((item) => item.id));
+  const videoIds = new Set(archive.videos.map((item) => item.id));
   for (const item of [...validated.drafts, ...validated.jobs.map((job) => job.post), ...validated.assisted]) {
     for (const id of mediaReferences(item)) {
       if (!mediaIds.has(id)) invalid("Stored work references an image that is missing from the library.");
     }
   }
+  for (const item of validated.assisted) {
+    if (item.videoId && !videoIds.has(item.videoId)) invalid("Stored work references a video that is missing from the library.");
+  }
   const serialized = JSON.stringify(archive);
   if (Buffer.byteLength(serialized) > MAX_PORTABLE_BACKUP_BYTES) {
-    throw new BackupError("Backup exceeds the 128 MiB portable archive limit.", 413);
+    throw new BackupError("Backup exceeds the 192 MiB portable archive limit.", 413);
   }
   return serialized;
 }
 
 export async function importPortableBackup(userId: string, raw: unknown) {
-  if (!isRecord(raw) || raw.format !== "plypost-portable" || (raw.version !== 1 && raw.version !== 2 && raw.version !== 3) ||
+  if (!isRecord(raw) || raw.format !== "plypost-portable" || (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4) ||
       !validInstant(raw.exportedAt)) invalid("This is not a supported Plypost portable backup.");
   const workspace = validateWorkspace(raw);
+  if (raw.version !== 4 && workspace.assisted.some((item) => item.videoId)) invalid("Backup references videos without including their files.");
   const strategy = validateStrategy(raw);
   const slotSettings = validateSlots(raw);
   listMedia(userId);
-  // Reject a restore if another tab or request changes this account while images are prepared.
+  listVideos(userId);
+  // Reject a restore if another tab or request changes this account while assets are prepared.
   const startingData = transaction((db) => ownerDataFingerprint(db, userId));
   const media = await prepareMedia(raw.media);
+  const videos = prepareVideos(raw.version === 4 ? raw.videos : []);
   const allIds = [
     ...workspace.drafts.map((item) => item.id), ...workspace.jobs.map((item) => item.post.id),
-    ...workspace.assisted.map((item) => item.id), ...media.map((item) => item.oldId),
+    ...workspace.assisted.map((item) => item.id), ...media.map((item) => item.oldId), ...videos.map((item) => item.oldId),
     ...strategy.weeklyPlans.map((item) => item.id),
   ];
   if (new Set(allIds).size !== allIds.length) invalid("Backup contains duplicate IDs.");
   const mediaMap = new Map(media.map((item) => [item.oldId, item.newId]));
+  const videoMap = new Map(videos.map((item) => [item.oldId, item.newId]));
   const drafts = workspace.drafts.map((item) => remapMediaIds(item, mediaMap));
   const draftIdMap = new Map(workspace.drafts.map((item, index) => [item.id, drafts[index].id]));
   const jobs = workspace.jobs.map((item) => ({ ...item, post: remapMediaIds(item.post, mediaMap) }));
   const assisted = workspace.assisted.map((item) => {
     const restored = remapMediaIds(item, mediaMap);
+    const videoId = item.videoId ? videoMap.get(item.videoId) : undefined;
+    if (item.videoId && !videoId) invalid("Backup references a video that is missing from the archive.");
     // A deleted source draft is allowed: its handoff is still a valid immutable snapshot.
     // Remap only links whose source draft is present in this archive.
-    return item.sourceDraftId && draftIdMap.has(item.sourceDraftId)
-      ? { ...restored, sourceDraftId: draftIdMap.get(item.sourceDraftId)! }
-      : restored;
+    return { ...restored, ...(videoId ? { videoId } : {}),
+      ...(item.sourceDraftId && draftIdMap.has(item.sourceDraftId)
+        ? { sourceDraftId: draftIdMap.get(item.sourceDraftId)! } : {}) };
   });
   const weeklyPlans = strategy.weeklyPlans.map((plan) => ({
     ...plan,
@@ -445,7 +523,7 @@ export async function importPortableBackup(userId: string, raw: unknown) {
       ...(idea.draftId && draftIdMap.has(idea.draftId) ? { draftId: draftIdMap.get(idea.draftId)! } : {}),
     })),
   }));
-  // No user data is changed until every image and every reference has passed validation.
+  // No user data is changed until every asset and reference has passed validation.
   transaction((db) => {
     if (ownerDataFingerprint(db, userId) !== startingData) {
       throw new BackupError("Saved work changed while the backup was being prepared. Reload and retry the restore.", 409);
@@ -459,10 +537,15 @@ export async function importPortableBackup(userId: string, raw: unknown) {
     db.prepare("DELETE FROM weekly_plans WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM slot_settings WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM media WHERE user_id=?").run(userId);
+    db.prepare("DELETE FROM videos WHERE user_id=?").run(userId);
     for (const image of media) {
       db.prepare("INSERT INTO media(id,user_id,original_name,mime_type,byte_size,width,height,sha256,body,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
         .run(image.newId, userId, image.name, image.mimeType, image.sizeBytes, image.width, image.height,
           image.sha256, image.body, image.createdAt);
+    }
+    for (const video of videos) {
+      db.prepare("INSERT INTO videos(id,user_id,original_name,mime_type,byte_size,sha256,body,created_at) VALUES (?,?,?,?,?,?,?,?)")
+        .run(video.newId, userId, video.name, video.mimeType, video.sizeBytes, video.sha256, video.body, video.createdAt);
     }
     for (const draft of drafts) {
       db.prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?)")
@@ -491,7 +574,7 @@ export async function importPortableBackup(userId: string, raw: unknown) {
         .run(userId, JSON.stringify(slotSettings), new Date().toISOString());
     }
     audit(userId, "workspace.portable_imported", undefined,
-      `${drafts.length} drafts; ${jobs.length} jobs; ${assisted.length} assisted; ${media.length} images; ${weeklyPlans.length} weekly plans`);
+      `${drafts.length} drafts; ${jobs.length} jobs; ${assisted.length} assisted; ${media.length} images; ${videos.length} videos; ${weeklyPlans.length} weekly plans`);
   });
-  return { drafts: drafts.length, jobs: jobs.length, assisted: assisted.length, media: media.length };
+  return { drafts: drafts.length, jobs: jobs.length, assisted: assisted.length, media: media.length, videos: videos.length };
 }

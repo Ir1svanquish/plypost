@@ -1,6 +1,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,7 @@ import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia, getMedia } from "../src/lib/server/media.ts";
+import { createVideo } from "../src/lib/server/video.ts";
 import { addAssisted } from "../src/lib/server/workspace.ts";
 import { buildHandoffPackage } from "../src/lib/server/handoff-package.ts";
 import { GET } from "../src/app/api/assisted/[id]/package/route.ts";
@@ -76,5 +78,20 @@ test("video-first handoff keeps text export honest when no video is stored", asy
   assert.equal(response.status, 200);
   const files = unzipSync(new Uint8Array(await response.arrayBuffer()));
   assert.deepEqual(Object.keys(files).sort(), ["caption.txt", "handoff.txt"]);
-  assert.match(strFromU8(files["handoff.txt"]), /Video files are not stored in Plypost/);
+  assert.match(strFromU8(files["handoff.txt"]), /No video is attached to this handoff/);
+});
+
+test("video handoff ZIP contains exact saved clip and caption", async () => {
+  const bytes = Buffer.from([0, 0, 0, 16, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 0, 0]);
+  const video = createVideo(owner, { name: "launch.mp4", type: "video/mp4", bytes }).video;
+  const now = new Date().toISOString();
+  const saved = addAssisted(owner, { id: randomUUID(), title: "Clip", destination: "youtube", text: "Watch this clip",
+    videoId: video.id, scheduledFor: now, createdAt: now, status: "queued" });
+  const response = await GET(new globalThis.Request(`${base}/${saved.id}/package`, { headers: { cookie } }), context(saved.id));
+  assert.equal(response.status, 200);
+  const files = unzipSync(new Uint8Array(await response.arrayBuffer()));
+  assert.deepEqual(Object.keys(files).sort(), ["caption.txt", "handoff.txt", "video/clip.mp4"]);
+  assert.deepEqual(Buffer.from(files["video/clip.mp4"]), bytes);
+  assert.equal(strFromU8(files["caption.txt"]), "Watch this clip\n");
+  assert.match(strFromU8(files["handoff.txt"]), /Video: video\/clip\.mp4/);
 });

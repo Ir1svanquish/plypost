@@ -41,6 +41,8 @@ export type AssistedPost = {
   text: string;
   mediaIds?: string[];
   mediaAlt?: string[];
+  /** A private clip for manual handoff; publishing adapters never upload it. */
+  videoId?: string;
   /** Present together for handoffs prepared from a saved draft. */
   sourceDraftId?: string;
   batchId?: string;
@@ -263,6 +265,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
       (!validUuid(value.sourceDraftId) || !validUuid(value.batchId))) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
+  if (value.videoId !== undefined && !validUuid(value.videoId)) return null;
   if (value.contentEditedAt !== undefined && !validUtcInstant(value.contentEditedAt)) return null;
   if (value.postUrl !== undefined && (value.status !== "posted" ||
       normalizePublicPostUrl(value.postUrl) !== value.postUrl)) return null;
@@ -276,6 +279,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
     text: value.text,
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
+    ...(value.videoId !== undefined ? { videoId: value.videoId as string } : {}),
     ...(value.sourceDraftId !== undefined ? { sourceDraftId: value.sourceDraftId as string, batchId: value.batchId as string } : {}),
     scheduledFor: value.scheduledFor,
     createdAt: value.createdAt,
