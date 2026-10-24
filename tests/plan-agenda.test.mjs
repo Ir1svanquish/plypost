@@ -18,6 +18,18 @@ const real = (id, day, hour, status, resolution) => ({
   status, ...(resolution ? { resolution } : {}),
 });
 
+test("dated drafts appear on their local target day without becoming reminders", () => {
+  const draft = { id: "idea", title: "An idea", source: "Work in progress", selected: [], variants: {},
+    plannedDate: "2026-10-22", createdAt: localInstant(20, 8), updatedAt: localInstant(20, 8) };
+  const undated = { ...draft, id: "undated", plannedDate: undefined };
+  const items = buildPlanAgenda([], [manual("handoff", 22, 15, "queued")], [], [draft, undated]);
+  assert.deepEqual(items.map((item) => item.kind), ["draft", "manual"]);
+  assert.equal(localAgendaDay(items[0].scheduledFor), "2026-10-22");
+  assert.deepEqual(items.filter((item) => matchesPlanAgendaFilter(item, "draft-target")).map((item) => item.post.id), ["idea"]);
+  assert.deepEqual(items.filter((item) => matchesPlanAgendaFilter(item, "manual-pending")).map((item) => item.post.id), ["handoff"]);
+  assert.equal(agendaForMonth(items, 2026, 9).length, 2);
+});
+
 test("plan agenda interleaves simulation and manual handoff by local scheduled time", () => {
   const items = buildPlanAgenda(
     [scheduled("simulation-later", 22, 16, "queued"), scheduled("simulation-first", 21, 10, "simulated")],

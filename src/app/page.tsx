@@ -30,13 +30,14 @@ import { AccountPanel } from "@/components/account-panel";
 import { PlatformPreview } from "@/components/platform-preview";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
+import { LocalDateField } from "@/components/local-date-time-field";
 import { MastodonLivePanel, isMastodonConnection, type MastodonConnection } from "@/components/mastodon-live-panel";
 import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@/components/bluesky-live-panel";
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
-import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, hasManualReminder, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
   "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.";
@@ -74,6 +75,7 @@ type EditorContent = {
   mediaIds: readonly string[];
   mediaAlt: readonly string[];
   videoId: string | null;
+  plannedDate: string;
 };
 type EditorOrigin = "starter" | "new" | "planned";
 type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft } | { kind: "planned"; post: ScheduledPost } | { kind: "assisted"; post: AssistedPost };
@@ -90,6 +92,7 @@ function sameEditorContent(left: EditorContent, right: EditorContent | SavedDraf
   return left.title === right.title && left.source === right.source &&
     samePlatforms(left.selected, right.selected) && sameItems(left.mediaIds, right.mediaIds ?? []) &&
     left.videoId === (right.videoId ?? null) &&
+    left.plannedDate === (right.plannedDate ?? "") &&
     sameItems(left.mediaAlt.map((value) => value.trim()), (right.mediaAlt ?? (right.mediaIds ?? []).map(() => "")).map((value) => value.trim())) &&
     platformIds.every((id) => left.variants[id] === right.variants[id]);
 }
@@ -102,7 +105,7 @@ function hasUnsavedEditorChanges(editor: EditorContent, currentDraftId: string |
   if (origin === "planned") return true;
   return !sameEditorContent(editor, {
     title: "", source: origin === "starter" ? sampleDraft : "",
-    selected: platformIds, variants: {}, mediaIds: [], mediaAlt: [], videoId: null,
+    selected: platformIds, variants: {}, mediaIds: [], mediaAlt: [], videoId: null, plannedDate: "",
   });
 }
 
@@ -139,6 +142,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [mediaIds, setMediaIds] = useState<string[]>([]);
   const [mediaAltById, setMediaAltById] = useState<Record<string, string>>({});
   const [videoId, setVideoId] = useState<string | null>(null);
+  const [plannedDate, setPlannedDate] = useState("");
   const videoBusyRef = useRef(false);
   const [videoBusy, setVideoBusy] = useState(false);
   const [mediaPickerEpoch, setMediaPickerEpoch] = useState(0);
@@ -208,10 +212,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [blueskyLoading, setBlueskyLoading] = useState(true);
   const [blueskyError, setBlueskyError] = useState<string | null>(null);
   const mediaAlt = mediaIds.map((id) => mediaAltById[id] ?? "");
-  const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt, videoId };
+  const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt, videoId, plannedDate };
   const editorContentRef = useRef(editorContent);
   editorContentRef.current = editorContent;
-  const canSaveEditor = hasDraftContent(editorContent);
+  const canSaveEditor = hasDraftContent(editorContent) && (!plannedDate || validCalendarDate(plannedDate));
   const editorDirty = hasUnsavedEditorChanges(editorContent, currentDraftId, drafts, editorOrigin);
   const currentSavedDraft = currentDraftId ? drafts.find((draft) => draft.id === currentDraftId) ?? null : null;
   const needsDraftRecovery = draftConflict || Boolean(currentDraftId && workspaceReady && currentSavedDraft?.updatedAt !== currentDraftVersion);
@@ -397,6 +401,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           mediaIds?: unknown;
           mediaAlt?: unknown;
           videoId?: unknown;
+          plannedDate?: unknown;
           editorOrigin?: unknown;
         };
         if (typeof data.source === "string") {
@@ -434,6 +439,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           }
         }
         if (typeof data.videoId === "string" && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(data.videoId)) setVideoId(data.videoId);
+        if (typeof data.plannedDate === "string" && data.plannedDate.length <= 10 && /^[\d-]*$/.test(data.plannedDate)) setPlannedDate(data.plannedDate);
         if (data.editorOrigin === "starter" || data.editorOrigin === "new" || data.editorOrigin === "planned") setEditorOrigin(data.editorOrigin);
       }
     } catch {
@@ -472,12 +478,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     if (!hydrated) return;
     try {
-      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
+      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId, plannedDate, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, mediaAltById, videoId, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
+  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -648,6 +654,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Add a title, caption, platform text, image or video before saving." });
       return false;
     }
+    if (plannedDate && !validCalendarDate(plannedDate)) {
+      setNotice({ kind: "error", text: "Enter a real target date as YYYY-MM-DD, or clear it." });
+      return false;
+    }
     if ((!currentDraftId || asCopy) && drafts.length >= 100) {
       setNotice({ kind: "error", text: "The library is full. Delete an old draft before saving another." });
       return false;
@@ -665,6 +675,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       mediaIds: [...mediaIds],
       mediaAlt: mediaAlt.map((value) => value.trim()),
       ...(videoId ? { videoId } : {}),
+      ...(plannedDate ? { plannedDate } : {}),
       createdAt: !asCopy && existing ? existing.createdAt : stamp,
       updatedAt: stamp,
     };
@@ -720,6 +731,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaIds([]);
       setMediaAltById({});
       setVideoId(null);
+      setPlannedDate("");
       setSelected([...platformIds]);
       setActive(platformDisplayIds[0]);
       setNotice(null);
@@ -736,6 +748,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaIds([...(draft.mediaIds ?? [])]);
       setMediaAltById(Object.fromEntries((draft.mediaIds ?? []).map((id, index) => [id, draft.mediaAlt?.[index] ?? ""])));
       setVideoId(draft.videoId ?? null);
+      setPlannedDate(draft.plannedDate ?? "");
       setActive(platformDisplayIds.find((id) => draft.selected.includes(id)) ?? platformDisplayIds[0]);
       setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
     } else if (next.kind === "planned") {
@@ -751,6 +764,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaIds([...(post.mediaIds ?? [])]);
       setMediaAltById(Object.fromEntries((post.mediaIds ?? []).map((id, index) => [id, post.mediaAlt?.[index] ?? ""])));
       setVideoId(null);
+      setPlannedDate("");
       setActive(platformDisplayIds.find((id) => post.posts[id] !== undefined) ?? platformDisplayIds[0]);
       setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
     } else {
@@ -766,6 +780,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaIds([]);
       setMediaAltById({});
       setVideoId(null);
+      setPlannedDate("");
       setActive(isPlatformId(post.destination) ? post.destination : platformDisplayIds[0]);
       setNotice({ kind: "success", text: "Started an unsaved draft from your posted text. Review and rewrite it before sharing; media was not copied." });
     }
@@ -1028,6 +1043,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setDraftConflict(false);
       setMediaIds([]);
       setVideoId(null);
+      setPlannedDate("");
       resetMediaPicker();
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
@@ -1398,6 +1414,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
                     {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   </details>
+                  <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3" open={plannedDate ? true : undefined}>
+                    <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Draft target date · {plannedDate || "optional"}</summary>
+                    <div className="mt-3"><LocalDateField id="draft-planned-date" label="Target day" value={plannedDate} onChange={(next) => { editorRevision.current += 1; setPlannedDate(next); }} /></div>
+                  </details>
                   {needsDraftRecovery && currentDraftId && <div role="alert" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">This draft changed in another window or was deleted.</p><p className="mt-1">Your current editor text is still here. Save it as a new draft, or open the latest saved version after reviewing any unsaved changes.</p><div className="mt-3 flex flex-wrap gap-3"><button type="button" onClick={() => { void saveDraft(false, true); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Save as new draft</button><button type="button" onClick={() => { void openLatestDraft(); }} disabled={draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Open latest saved version</button></div></div>}
                   <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : videoBusy ? "Working with video…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
                 </div>
@@ -1437,7 +1457,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <div hidden={view !== "schedule"}>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">{showMastodonQueue ? "See real Mastodon posts, simulations and manual handoffs together." : "Plan drafts, simulations and manual handoffs in one place."}</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{canSaveEditor ? draftTitle(title, source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "") : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
-            <ServerSchedulePanel schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
+            <ServerSchedulePanel drafts={drafts} schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenDraft={loadDraft} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
             <PostingResultsPanel posts={assisted} onOpenRecord={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onReuseText={(item) => requestEditorSwitch({ kind: "assisted", post: item })} />
             <details className="mt-6"><summary className="cursor-pointer rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] font-bold text-[var(--text-secondary)]">Weekly posting slots · set recurring times for manual handoffs</summary><div className="mt-3"><WeeklySlotsPanel key={slotsRefreshEpoch} /></div></details>
             <div hidden={!showMastodonQueue}><MastodonSchedulePanel items={realMastodonSchedules} onItemsChange={setRealMastodonSchedules} onLoadErrorChange={setRealMastodonQueueError} connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected={selected.includes("mastodon")} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} now={now} visible={view === "schedule"} workerLastSeen={workerLastSeen} onOpenAccount={() => openView("account")} onOpenEditor={() => openView("compose")} /></div>

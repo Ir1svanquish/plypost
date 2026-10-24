@@ -45,7 +45,7 @@ function backupRequest(body, { cookie, origin = "http://localhost", contentType 
 test("portable backup restores image pixels and saved records in a fresh database", async () => {
   const image = (await createMedia(owner, { name: "cover.png", type: "image/png", bytes: await png() })).media;
   const originalPixels = await sharp(getMedia(owner, image.id).bytes).raw().toBuffer();
-  const saved = saveDraft(owner, { ...draft(randomUUID(), [image.id]), mediaAlt: ["Pink cover image"] });
+  const saved = saveDraft(owner, { ...draft(randomUUID(), [image.id]), mediaAlt: ["Pink cover image"], plannedDate: "2026-11-02" });
   const plan = { id: randomUUID(), title: "Planned", source: "A saved idea", posts: { bluesky: "A saved idea" }, mediaIds: [image.id], mediaAlt: ["Pink cover image"],
     scheduledFor: new Date(Date.now() + 3_600_000).toISOString(), createdAt: stamp(), status: "queued" };
   addSchedule(owner, plan, "Asia/Hong_Kong");
@@ -71,6 +71,7 @@ test("portable backup restores image pixels and saved records in a fresh databas
   assert.equal(archive.media.length, 1);
   assert.equal(archive.drafts[0].mediaIds[0], image.id);
   assert.deepEqual(archive.drafts[0].mediaAlt, ["Pink cover image"]);
+  assert.equal(archive.drafts[0].plannedDate, "2026-11-02");
   assert.equal(archive.jobs[0].timezone, "Asia/Hong_Kong");
   assert.equal(archive.assisted[0].postUrl, postUrl);
   assert.ok(archive.assisted[0].postedAt);
@@ -86,6 +87,7 @@ test("portable backup restores image pixels and saved records in a fresh databas
   assert.deepEqual(result, { drafts: 1, jobs: 1, assisted: 1, media: 1, videos: 0 });
   const restored = listWorkspace(owner);
   assert.notEqual(restored.drafts[0].id, saved.id);
+  assert.equal(restored.drafts[0].plannedDate, "2026-11-02");
   assert.notEqual(restored.drafts[0].mediaIds[0], image.id);
   assert.equal(restored.schedule[0].status, "queued");
   assert.equal(restored.schedule[0].scheduledFor, plan.scheduledFor);
@@ -131,6 +133,9 @@ test("tampered or incomplete archives fail without changing saved work", async (
   const droppedVariant = globalThis.structuredClone(original);
   droppedVariant.drafts[0].variants.threads = "x".repeat(5001);
   await assert.rejects(importPortableBackup(owner, droppedVariant), /platform versions/);
+  const badDraftDate = globalThis.structuredClone(original);
+  badDraftDate.drafts[0].plannedDate = "2026-11-31";
+  await assert.rejects(importPortableBackup(owner, badDraftDate), /invalid drafts/);
   const droppedHistory = globalThis.structuredClone(original);
   droppedHistory.assisted[0].postedAt = "not-a-date";
   await assert.rejects(importPortableBackup(owner, droppedHistory), /assisted item history/);

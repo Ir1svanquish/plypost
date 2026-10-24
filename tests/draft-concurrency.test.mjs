@@ -44,6 +44,20 @@ test("an unfinished idea can be saved, completed later, and cannot be empty", ()
   assert.throws(() => saveDraft(owner, initial("")), /Add a title, caption, platform text, image or video/);
 });
 
+test("draft target dates persist, can move or clear, and never create jobs", () => {
+  const saved = saveDraft(owner, { ...initial("Plan the workshop"), plannedDate: "2026-11-02" });
+  assert.equal(listWorkspace(owner).drafts.find((draft) => draft.id === saved.id)?.plannedDate, "2026-11-02");
+  assert.equal(listWorkspace(owner).schedule.length, 0);
+  assert.throws(() => saveDraft(owner, { ...saved, plannedDate: "2026-11-31" }, saved.updatedAt), /Invalid draft/);
+  const moved = saveDraft(owner, { ...saved, plannedDate: "2026-11-09" }, saved.updatedAt);
+  assert.equal(moved.plannedDate, "2026-11-09");
+  const withoutDate = { ...moved };
+  delete withoutDate.plannedDate;
+  const cleared = saveDraft(owner, withoutDate, moved.updatedAt);
+  assert.equal(cleared.plannedDate, undefined);
+  assert.equal(listWorkspace(owner).schedule.length, 0);
+});
+
 test("a deleted draft cannot be silently recreated by an old window", () => {
   const saved = saveDraft(owner, initial("Delete me"));
   assert.equal(deleteDraft(owner, saved.id, saved.updatedAt), true);

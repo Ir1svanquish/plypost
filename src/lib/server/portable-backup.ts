@@ -138,7 +138,8 @@ function validateCollection<T extends { id: string }>(raw: unknown, parsed: T[],
     if (label === "drafts") {
       if (!Array.isArray(item.selected) || item.selected.length !== (normalized.selected as unknown[]).length ||
           item.selected.some((id) => !(normalized.selected as unknown[]).includes(id)) ||
-          !sameVariants(item.variants, normalized.variants) || item.videoId !== normalized.videoId) {
+          !sameVariants(item.variants, normalized.variants) || item.videoId !== normalized.videoId ||
+          item.plannedDate !== normalized.plannedDate) {
         invalid("Backup contains invalid draft destinations or platform versions.");
       }
     }

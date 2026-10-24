@@ -1,8 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assistedState, draftTitle, emptyWorkspace, hasDraftContent, localDateTimeValue, normalizePublicPostUrl, parseWorkspace, scheduleState } from "../src/lib/workspace.ts";
+import { assistedState, draftTitle, emptyWorkspace, hasDraftContent, localDateTimeValue, normalizePublicPostUrl, parseWorkspace, scheduleState, validCalendarDate } from "../src/lib/workspace.ts";
 
 const stamp = "2026-10-22T12:00:00.000Z";
+
+test("a draft target is a real calendar day and does not become a publishing job", () => {
+  const draft = { id: "dated-draft", title: "Launch idea", source: "Later", selected: [], variants: {},
+    plannedDate: "2028-02-29", createdAt: stamp, updatedAt: stamp };
+  const backup = { version: 3, drafts: [draft], schedule: [], assisted: [] };
+  assert.equal(validCalendarDate(draft.plannedDate), true);
+  assert.deepEqual(parseWorkspace(backup), backup);
+  for (const date of ["2027-02-29", "2026-04-31", "2026-13-01", "2026-10-1", "2026-10-25T12:00:00Z"]) {
+    assert.equal(validCalendarDate(date), false);
+    assert.deepEqual(parseWorkspace({ ...backup, drafts: [{ ...draft, plannedDate: date }] })?.drafts, []);
+  }
+});
 
 test("a video-only idea is a valid draft, while malformed video references are rejected", () => {
   const draft = { id: "video-draft", title: "", source: "", selected: [], variants: {},

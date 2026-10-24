@@ -15,6 +15,8 @@ export type SavedDraft = {
   mediaAlt?: string[];
   /** A private clip for manual handoffs; simulated and live text publishers ignore it. */
   videoId?: string;
+  /** A local calendar day for planning this draft; it never queues a post or reminder. */
+  plannedDate?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -105,6 +107,10 @@ const validDate = (value: unknown): value is string =>
 const validUtcInstant = (value: unknown): value is string =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
   Number.isFinite(new Date(value).getTime()) && new Date(value).toISOString() === value;
+export const validCalendarDate = (value: unknown): value is string =>
+  typeof value === "string" && /^[1-9]\d{3}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(value) &&
+  Number.isFinite(Date.parse(`${value}T12:00:00.000Z`)) &&
+  new Date(`${value}T12:00:00.000Z`).toISOString().slice(0, 10) === value;
 const validUuid = (value: unknown): value is string =>
   typeof value === "string" && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(value);
 
@@ -209,6 +215,7 @@ function parseDraft(value: unknown): SavedDraft | null {
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
   if (value.videoId !== undefined && !validUuid(value.videoId)) return null;
+  if (value.plannedDate !== undefined && !validCalendarDate(value.plannedDate)) return null;
   return {
     id: value.id,
     title: value.title,
@@ -218,6 +225,7 @@ function parseDraft(value: unknown): SavedDraft | null {
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
     ...(value.videoId !== undefined ? { videoId: value.videoId as string } : {}),
+    ...(value.plannedDate !== undefined ? { plannedDate: value.plannedDate as string } : {}),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   };

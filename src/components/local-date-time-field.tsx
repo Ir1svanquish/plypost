@@ -1,6 +1,6 @@
 "use client";
 
-import { localDateTimeValue } from "@/lib/workspace";
+import { localDateTimeValue, validCalendarDate } from "@/lib/workspace";
 
 type Props = {
   id: string;
@@ -33,6 +33,21 @@ function formatTypedDigits(value: string, groups: number[]): string {
     offset += length;
   }
   return parts.join(groups.length === 2 ? ":" : "-");
+}
+
+export function LocalDateField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (value: string) => void }) {
+  const invalid = Boolean(value) && !validCalendarDate(value);
+  const hintId = `${id}-hint`;
+  return <div className="min-w-0">
+    <label htmlFor={id} className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">{label} · optional</label>
+    <div className="flex flex-wrap items-center gap-2">
+      <input id={id} type="text" inputMode="numeric" autoComplete="off" maxLength={10} placeholder="YYYY-MM-DD" value={value} aria-invalid={invalid} aria-describedby={hintId} onChange={(event) => onChange(formatTypedDigits(event.target.value, [4, 2, 2]))} className="w-40 min-w-0 rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
+      {value && <button type="button" onClick={() => onChange("")} className="text-[12px] font-semibold text-[var(--accent-text)]">Clear date</button>}
+    </div>
+    <p id={hintId} aria-live="polite" className={`mt-1.5 text-[11px] leading-4 ${invalid ? "text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>
+      {invalid ? "Enter a real date as YYYY-MM-DD." : "For planning only. No reminder or post is sent."}
+    </p>
+  </div>;
 }
 
 export function LocalDateTimeField({ id, label, value, minTimestamp, optional = false, onChange }: Props) {
