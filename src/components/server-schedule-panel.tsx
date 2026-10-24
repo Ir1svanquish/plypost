@@ -16,6 +16,7 @@ type Props = {
   onReschedule: (post: ScheduledPost, scheduledForIso: string) => Promise<void>;
   onOpenAssisted: (item: AssistedPost) => void;
   onOpenRealMastodon: (item: RealMastodonSchedule) => void;
+  onPrepareManual: (localTime: string) => void;
 };
 
 type Month = { year: number; index: number };
@@ -58,7 +59,15 @@ function attentionPriority(item: PlanAgendaItem): number {
   return item.post.status === "failed" ? 2 : 5;
 }
 
-export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onOpenAssisted, onOpenRealMastodon }: Props) {
+function nextManualTimeOnDay(day: string, now: number): string | null {
+  const morning = new Date(`${day}T09:00`);
+  if (!Number.isFinite(morning.getTime()) || localAgendaDay(morning) !== day) return null;
+  if (morning.getTime() > now + 60_000) return localDateTimeValue(morning);
+  const nextQuarter = new Date(Math.ceil((now + 15 * 60_000) / (15 * 60_000)) * 15 * 60_000);
+  return localAgendaDay(nextQuarter) === day ? localDateTimeValue(nextQuarter) : null;
+}
+
+export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onOpenAssisted, onOpenRealMastodon, onPrepareManual }: Props) {
   const [month, setMonth] = useState<Month>(() => {
     const today = new Date(now || Date.now());
     return { year: today.getFullYear(), index: today.getMonth() };
@@ -91,6 +100,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueu
   const agenda = showAllDates ? filtered : monthItems.filter((item) => !selectedDay || localAgendaDay(item.scheduledFor) === selectedDay);
   const today = new Date(now || Date.now());
   const todayKey = localAgendaDay(today);
+  const selectedManualTime = selectedDay && !showAllDates ? nextManualTimeOnDay(selectedDay, now) : null;
   const firstWeekday = (new Date(month.year, month.index, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(month.year, month.index + 1, 0).getDate();
   const cells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
@@ -220,7 +230,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueu
       </div>
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] pb-3">
         <div><h3 className="text-[15px] font-bold text-[var(--text)]">{showAllDates ? "All dates" : selectedDay ? new Date(`${selectedDay}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : monthLabel(month)} agenda</h3><p className="mt-0.5 text-[12px] text-[var(--text-muted)]">{agenda.length} {agenda.length === 1 ? "item" : "items"} shown · real, simulated and manual</p></div>
-        <div className="flex items-center gap-2">{selectedDay && !showAllDates && <button type="button" onClick={() => setSelectedDay(null)} className="rounded-lg px-2 py-1.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Show month</button>}<button type="button" onClick={() => { setShowAllDates((current) => !current); setSelectedDay(null); }} aria-pressed={showAllDates} className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold ${showAllDates ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`}>{showAllDates ? "This month" : "All dates"}</button></div>
+        <div className="flex flex-wrap items-center gap-2">{selectedManualTime && <button type="button" onClick={() => onPrepareManual(selectedManualTime)} className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--surface-hover)]">Prepare manual post for this day</button>}{selectedDay && !showAllDates && <button type="button" onClick={() => setSelectedDay(null)} className="rounded-lg px-2 py-1.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Show month</button>}<button type="button" onClick={() => { setShowAllDates((current) => !current); setSelectedDay(null); }} aria-pressed={showAllDates} className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold ${showAllDates ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`}>{showAllDates ? "This month" : "All dates"}</button></div>
       </div>
       {agenda.length === 0 ? <div className="py-10 text-center text-[13px] text-[var(--text-muted)]">{allItems.length === 0 ? "Nothing on your plan yet. Add a simulation, manual handoff or reviewed real Mastodon schedule to get started." : "No items match this date and status. Choose another day, month, or filter."}</div> :
       <div className="divide-y divide-[var(--line)]">{agenda.map((item) => {
