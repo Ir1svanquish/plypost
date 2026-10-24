@@ -7,6 +7,7 @@ import {
 import { owner } from "./auth";
 import { audit, database, transaction } from "./db";
 import { validatePlatformText } from "../platform-validation";
+import { boundedBlueskyFetch } from "./bounded-bluesky-fetch";
 
 const SCOPE = "atproto repo:app.bsky.feed.post?action=create";
 const OAUTH_COOKIE = "plypost_bluesky_oauth";
@@ -118,6 +119,7 @@ function client(config: Configuration): Client {
   return new NodeOAuthClient({
     clientMetadata: buildAtprotoLoopbackClientMetadata({ scope: SCOPE, redirect_uris: [config.redirectUri] }),
     ...blueskyStores(config), requestLock: requestLocalLock,
+    fetch: boundedBlueskyFetch,
   });
 }
 

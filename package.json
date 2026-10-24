@@ -8,7 +8,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "worker": "tsx scripts/worker.ts",
     "hash-password": "tsx scripts/hash-password.ts",
