@@ -14,6 +14,7 @@ type Props = {
   runningId: string | null; onValueChange: (value: string) => void; onAdd: () => void;
   onLoad: (post: ScheduledPost) => void; onRun: (post: ScheduledPost) => void; onRemove: (id: string) => void;
   onReschedule: (post: ScheduledPost, scheduledForIso: string) => Promise<void>;
+  onRescheduleAssisted: (post: AssistedPost, scheduledForIso: string) => Promise<void>;
   onOpenAssisted: (item: AssistedPost) => void;
   onOpenRealMastodon: (item: RealMastodonSchedule) => void;
   onPrepareManual: (localTime: string) => void;
@@ -67,7 +68,7 @@ function nextManualTimeOnDay(day: string, now: number): string | null {
   return localAgendaDay(nextQuarter) === day ? localDateTimeValue(nextQuarter) : null;
 }
 
-export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onOpenAssisted, onOpenRealMastodon, onPrepareManual }: Props) {
+export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onRescheduleAssisted, onOpenAssisted, onOpenRealMastodon, onPrepareManual }: Props) {
   const [month, setMonth] = useState<Month>(() => {
     const today = new Date(now || Date.now());
     return { year: today.getFullYear(), index: today.getMonth() };
@@ -136,6 +137,12 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueu
     setEditError("");
   }
 
+  function beginManualReschedule(post: AssistedPost) {
+    setEditingId(`manual:${post.id}`);
+    setEditValue(localDateTimeValue(new Date(post.scheduledFor)));
+    setEditError("");
+  }
+
   async function saveReschedule(event: FormEvent<HTMLFormElement>, post: ScheduledPost) {
     event.preventDefault();
     if (!isValidLocalDateTime(editValue, Date.now() + 10_000)) {
@@ -149,6 +156,27 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueu
       setEditingId(null);
     } catch (cause) {
       setEditError(cause instanceof Error ? cause.message : "Could not move this item. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function saveManualReschedule(event: FormEvent<HTMLFormElement>, post: AssistedPost) {
+    event.preventDefault();
+    if (!isValidLocalDateTime(editValue, Date.now() + 10_000)) {
+      setEditError("Choose a local date and time at least 10 seconds from now.");
+      return;
+    }
+    setSaving(true);
+    setEditError("");
+    try {
+      const next = new Date(editValue);
+      await onRescheduleAssisted(post, next.toISOString());
+      setEditingId(null);
+      setMonth({ year: next.getFullYear(), index: next.getMonth() });
+      setSelectedDay(localAgendaDay(next));
+      setShowAllDates(false);
+    } catch (cause) {
+      setEditError(cause instanceof Error ? cause.message : "Could not move this reminder. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -261,8 +289,14 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, realQueu
                 <p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(manual.scheduledFor)} · {assistedDestinations[manual.destination].name} · manual handoff</p>
                 <p className="mt-1 text-[11px] text-[var(--text-soft)]">Plypost did not send or verify this post.</p>
               </div>
-              <button type="button" onClick={() => onOpenAssisted(manual)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Open handoff</button>
+              <div className="flex flex-wrap gap-2"><button type="button" onClick={() => onOpenAssisted(manual)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Open handoff</button>{manual.status === "queued" && <button type="button" onClick={() => beginManualReschedule(manual)} disabled={saving} aria-expanded={editingId === `manual:${manual.id}`} className="rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-45">Move reminder</button>}</div>
             </div>
+            {editingId === `manual:${manual.id}` && <form onSubmit={(event) => void saveManualReschedule(event, manual)} className="mt-4 rounded-xl border border-[var(--accent-border)] bg-[var(--surface-muted)] p-4">
+              <LocalDateTimeField id={`move-manual-${manual.id}`} label="New manual reminder time" value={editValue} minTimestamp={now + 10_000} onChange={(next) => { setEditValue(next); setEditError(""); }} />
+              <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">This only changes your manual reminder. The saved text, images and destination stay the same.</p>
+              {editError && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{editError}</p>}
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => setEditingId(null)} disabled={saving} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Cancel</button><button type="submit" disabled={saving || !isValidLocalDateTime(editValue, now + 10_000)} className="gradient-button rounded-lg px-3 py-2 text-[12px] font-bold text-white disabled:opacity-50">{saving ? "Moving..." : "Save new time"}</button></div>
+            </form>}
             <MediaHandoff mediaIds={manual.mediaIds} />
           </article>;
         }

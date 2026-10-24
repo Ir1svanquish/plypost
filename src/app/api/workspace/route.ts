@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus } from "@/lib/server/workspace";
+import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; timezone?: unknown; backup?: unknown; expectedUpdatedAt?: unknown };
+  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; expectedScheduledFor?: unknown; timezone?: unknown; backup?: unknown; expectedUpdatedAt?: unknown };
   try { input = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
   let assistedMigration: "imported" | "skipped" | undefined;
   let savedDraftResult: ReturnType<typeof saveDraft> | undefined;
@@ -26,6 +26,7 @@ export async function POST(request: Request) {
       case "prepare-assisted-batch": prepareAssistedBatch(user, input.draftId, input.batchId, input.items, input.requireFreeSlots); break;
       case "set-assisted-status": if (typeof input.id !== "string" || !setAssistedStatus(user, input.id, input.status, input.postUrl)) throw new Error("Assisted item not found."); break;
       case "set-assisted-outcome": if (typeof input.id !== "string" || !setAssistedOutcome(user, input.id, input.outcome)) throw new Error("Assisted item not found."); break;
+      case "reschedule-assisted": if (typeof input.id !== "string" || !rescheduleAssisted(user, input.id, input.expectedScheduledFor, input.scheduledFor)) throw new Error("Assisted item not found."); break;
       case "mark-assisted-notified": markAssistedNotified(user, input.ids); break;
       case "delete-assisted": if (typeof input.id !== "string" || !deleteAssisted(user, input.id)) throw new Error("Assisted item not found."); break;
       case "migrate-assisted": assistedMigration = migrateAssisted(user, input.items); break;
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     if (error instanceof DraftConflictError) return NextResponse.json({ error: error.message, code: "DRAFT_CONFLICT" }, { status: 409 });
+    if (error instanceof AssistedConflictError) return NextResponse.json({ error: error.message, code: "ASSISTED_CONFLICT" }, { status: 409 });
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update workspace." }, { status: 400 });
   }
   return NextResponse.json({ ...listWorkspace(user), ...(savedDraftResult ? { savedDraft: savedDraftResult } : {}),

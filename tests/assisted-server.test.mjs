@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { closeDatabase } from "../src/lib/server/db.ts";
-import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
+import { closeDatabase, database } from "../src/lib/server/db.ts";
+import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, rescheduleAssisted, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-assisted-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "assisted.sqlite");
@@ -24,6 +24,7 @@ function item(text = "A post to publish") {
 
 test("assisted items persist and status, notification, and deletion are scoped to the owner", () => {
   const post = item();
+  post.scheduledFor = new Date(Date.now() - 1_000).toISOString();
   assert.deepEqual(addAssisted(owner, post), post);
   closeDatabase();
   assert.deepEqual(listWorkspace(owner).assisted, [post]);
@@ -72,6 +73,31 @@ test("assisted items persist and status, notification, and deletion are scoped t
   assert.equal(listWorkspace(owner).assisted[0].postUrl, undefined);
   assert.equal(deleteAssisted(owner, post.id), true);
   assert.deepEqual(listWorkspace(owner).assisted, []);
+});
+
+test("moving a pending manual reminder keeps its content, resets notification, and rejects stale edits", () => {
+  const post = item("Reviewed text and images remain attached");
+  post.scheduledFor = new Date(Date.now() - 1_000).toISOString();
+  addAssisted(owner, post);
+  markAssistedNotified(owner, [post.id]);
+  const moved = new Date(Date.now() + 86_400_000).toISOString();
+  assert.throws(() => rescheduleAssisted(other, post.id, post.scheduledFor, moved), /changed or is no longer queued/);
+  assert.equal(rescheduleAssisted(owner, post.id, post.scheduledFor, moved), true);
+  const current = listWorkspace(owner).assisted.find((entry) => entry.id === post.id);
+  assert.equal(current.scheduledFor, moved);
+  assert.equal(database().prepare("SELECT scheduled_for FROM assisted WHERE id=? AND user_id=?").get(post.id, owner).scheduled_for, moved);
+  assert.equal(current.text, post.text);
+  assert.equal(current.destination, post.destination);
+  assert.equal(current.notifiedAt, undefined);
+  markAssistedNotified(owner, [post.id]);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).notifiedAt, undefined);
+  assert.throws(() => rescheduleAssisted(owner, post.id, post.scheduledFor, new Date(Date.now() + 172_800_000).toISOString()), /changed or is no longer queued/);
+  for (const invalid of ["2026-02-30T09:00:00.000Z", new Date(Date.now() - 60_000).toISOString(), "not-a-date"]) {
+    assert.throws(() => rescheduleAssisted(owner, post.id, moved, invalid), /future UTC reminder/);
+  }
+  assert.equal(setAssistedStatus(owner, post.id, "posted"), true);
+  assert.throws(() => rescheduleAssisted(owner, post.id, moved, new Date(Date.now() + 172_800_000).toISOString()), /changed or is no longer queued/);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).scheduledFor, moved);
 });
 
 test("browser migration merges missing IDs idempotently and enforces the list cap atomically", () => {

@@ -181,6 +181,17 @@ test("stores assisted checklist actions behind the owner session", async () => {
   assert.equal((await added.json()).assisted[0].id, assisted.id);
   const notified = await post("/api/workspace", { action: "mark-assisted-notified", ids: [assisted.id] });
   assert.ok((await notified.json()).assisted[0].notifiedAt);
+  const movedTime = new Date(Date.now() + 86_400_000).toISOString();
+  const moveRequest = { action: "reschedule-assisted", id: assisted.id, expectedScheduledFor: stamp, scheduledFor: movedTime };
+  assert.equal((await post("/api/workspace", moveRequest, false)).status, 401);
+  const movedResponse = await post("/api/workspace", moveRequest);
+  assert.equal(movedResponse.status, 200);
+  const movedItem = (await movedResponse.json()).assisted[0];
+  assert.equal(movedItem.scheduledFor, movedTime);
+  assert.equal(movedItem.notifiedAt, undefined);
+  const staleMove = await post("/api/workspace", moveRequest);
+  assert.equal(staleMove.status, 409);
+  assert.equal((await staleMove.json()).code, "ASSISTED_CONFLICT");
   const postUrl = "https://social.example/creator/post/42";
   assert.equal((await post("/api/workspace", { action: "set-assisted-status", id: assisted.id, status: "posted", postUrl }, false)).status, 401);
   for (const invalidUrl of ["javascript:alert(1)", "http://social.example/post/42", "https://user:pass@social.example/post/42"]) {

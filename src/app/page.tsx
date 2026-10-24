@@ -468,6 +468,15 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }, [assisted, hydrated, workspaceReady, now, notificationPermission]);
 
+  useEffect(() => {
+    for (const id of pendingNotificationIds.current) {
+      const item = assisted.find((entry) => entry.id === id);
+      if (!item || item.status !== "queued" || Date.parse(item.scheduledFor) > now) {
+        pendingNotificationIds.current.delete(id);
+      }
+    }
+  }, [assisted, now]);
+
   const textFor = (id: PlatformId) => variants[id] ?? adaptDraft(source, id);
   const currentText = textFor(active);
   const currentValidation = validatePlatformText(active, currentText);
@@ -812,6 +821,27 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       throw error;
     } finally {
       setRunningId(null);
+    }
+  }
+
+  async function rescheduleAssistedPost(post: AssistedPost, scheduledForIso: string): Promise<void> {
+    if (assistedMutation.current) throw new Error("Another handoff update is in progress.");
+    assistedMutation.current = true;
+    setAssistedBusy(true);
+    try {
+      await changeWorkspace("reschedule-assisted", {
+        id: post.id, expectedScheduledFor: post.scheduledFor, scheduledFor: scheduledForIso,
+      });
+      setNotice({ kind: "success", text: "Manual reminder moved. Its text, images and source draft were kept." });
+    } catch (error) {
+      if ((error as { code?: string }).code === "ASSISTED_CONFLICT") {
+        await refreshWorkspace().catch(() => {});
+      }
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not move manual reminder." });
+      throw error;
+    } finally {
+      assistedMutation.current = false;
+      setAssistedBusy(false);
     }
   }
 
@@ -1205,7 +1235,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <div hidden={view !== "schedule"}>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Turn a goal into reviewed drafts and see real Mastodon posts, simulations and manual handoffs together.</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
-            <ServerSchedulePanel schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
+            <ServerSchedulePanel schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
             <details className="mt-6"><summary className="cursor-pointer rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] font-bold text-[var(--text-secondary)]">Weekly posting slots · set recurring times for manual handoffs</summary><div className="mt-3"><WeeklySlotsPanel key={slotsRefreshEpoch} /></div></details>
             <MastodonSchedulePanel items={realMastodonSchedules} onItemsChange={setRealMastodonSchedules} onLoadErrorChange={setRealMastodonQueueError} connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected={selected.includes("mastodon")} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} now={now} visible={view === "schedule"} workerLastSeen={workerLastSeen} onOpenAccount={() => openView("account")} onOpenEditor={() => openView("compose")} />
             <div className="mt-6"><StrategyPanel drafts={drafts} assisted={assisted} refreshToken={strategyRefreshEpoch} onDirtyChange={setStrategyDirty} onDraftApproved={() => { void refreshWorkspace().catch(() => setNotice({ kind: "error", text: "The idea was approved, but the draft library could not refresh. Reload this page to see it." })); }} onOpenDraft={loadDraft} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} /></div>
