@@ -8,6 +8,7 @@ Plypost is a local web app for drafting and planning social posts. It runs on yo
 - Save drafts and up to four ordered images with optional descriptions in local SQLite. Export a full backup from **Drafts**.
 - Put posts on a calendar as simulations or manual reminders. A local worker processes due simulations and individually confirmed Mastodon posts while your computer is running.
 - Prepare manual publishing checklists for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit and the four draft platforms. Copy the text and image descriptions, download images, publish on the platform, then record the result yourself. You can correct a pending handoff's text or image descriptions without changing its source draft.
+- Download future manual reminders as an iCalendar file and import it into your calendar. The file contains platform and time, not draft text or images. Calendar alerts depend on your calendar settings; edits in Plypost do not sync to imported events.
 - Generate weekly ideas from a saved brand brief. Each idea needs your review before it becomes a draft. Clicking **Generate ideas** sends the brand brief to your selected AI provider; self-reported post results stay local.
 
 | Publishing mode | What happens |

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, CalendarClock, Check, Copy, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
+import { Bell, CalendarClock, Check, Copy, Download, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 import { assistedDestinations, assistedIds, type AssistedDestinationId } from "@/lib/assisted";
+import { buildManualReminderCalendar, upcomingManualReminders } from "@/lib/calendar-export";
 import { characterCount, isPlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
 import { assistedState, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
@@ -85,7 +86,9 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, OutcomeForm>>({});
   const [editingOutcomes, setEditingOutcomes] = useState<Record<string, boolean>>({});
   const [outcomeSavingId, setOutcomeSavingId] = useState<string | null>(null);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
+  const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
   const hasFocusedItem = Boolean(focusItemId && items.some((item) => item.id === focusItemId));
@@ -139,6 +142,23 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
     }));
   }
 
+  function downloadCalendar() {
+    setCalendarError(null);
+    try {
+      const content = buildManualReminderCalendar(items);
+      const url = URL.createObjectURL(new Blob([content], { type: "text/calendar;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `plypost-reminders-${new Date().toISOString().slice(0, 10)}.ics`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (cause) {
+      setCalendarError(cause instanceof Error ? cause.message : "Could not create the calendar file.");
+    }
+  }
+
   async function updateOutcome(id: string, outcome: AssistedOutcomeInput | null) {
     if (busy || outcomeSavingId) return;
     setOutcomeSavingId(id);
@@ -156,8 +176,12 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
           <h2 id="assisted-heading" className="text-[17px] font-bold tracking-[-0.025em]">Assisted publishing</h2>
           <p className="mt-1 text-[13px] text-[var(--text-muted)]">Prepare a post for any platform, then finish it in your own account.</p>
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${dueCount ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-muted)]"}`}>{dueCount ? `${dueCount} ready now` : "Manual publishing"}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {futureReminderCount > 0 && <button type="button" onClick={downloadCalendar} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download {futureReminderCount} calendar {futureReminderCount === 1 ? "reminder" : "reminders"}</button>}
+          <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${dueCount ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-muted)]"}`}>{dueCount ? `${dueCount} ready now` : "Manual publishing"}</span>
+        </div>
       </div>
+      {calendarError && <p role="alert" className="mx-6 mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)] sm:mx-7">{calendarError}</p>}
 
       <div className="grid gap-4 p-6 sm:grid-cols-2 sm:p-7">
         <div>
@@ -186,7 +210,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         </div>
       </div>
 
-      <div className="border-t border-[var(--line)] px-6 py-3 text-[12px] leading-5 text-[var(--text-muted)] sm:px-7">Copy the saved text, download any saved images in order, then publish on the platform yourself. Opening a platform does not send the post or mark it as published.</div>
+      <div className="border-t border-[var(--line)] px-6 py-3 text-[12px] leading-5 text-[var(--text-muted)] sm:px-7">Copy the saved text, download any saved images in order, then publish on the platform yourself. Import calendar files yourself; alerts depend on your calendar settings, and later changes here do not sync.</div>
       {items.length === 0 ? (
         <div className="flex flex-col items-center border-t border-[var(--line)] px-6 py-9 text-center"><Bell size={22} className="text-[var(--accent-text)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No assisted posts yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Add one above to get a ready-to-publish checklist.</p></div>
       ) : (
