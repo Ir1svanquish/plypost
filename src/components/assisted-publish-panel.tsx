@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bell, CalendarClock, Check, Copy, Download, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 import { assistedDestinations, assistedTextImageDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { characterCount, isPlatformId } from "@/lib/platforms";
@@ -17,6 +17,7 @@ type Props = {
   text: string;
   time: string;
   now: number;
+  workspaceReady: boolean;
   busy: boolean;
   mediaBusy: boolean;
   imageCount: number;
@@ -41,6 +42,13 @@ type Props = {
 };
 
 type OutcomeForm = { views: string; likes: string; replies: string; notes: string };
+const statusFilters = [
+  { id: "to-post", label: "To post" },
+  { id: "ready", label: "Ready" },
+  { id: "upcoming", label: "Upcoming" },
+  { id: "posted", label: "Posted" },
+] as const;
+type StatusFilter = (typeof statusFilters)[number]["id"];
 
 function outcomeForm(item: AssistedPost): OutcomeForm {
   return {
@@ -77,7 +85,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, time, now, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -87,19 +95,55 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
   const [editingOutcomes, setEditingOutcomes] = useState<Record<string, boolean>>({});
   const [outcomeSavingId, setOutcomeSavingId] = useState<string | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("to-post");
+  const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
+  const composerInitializedRef = useRef(false);
+  const handledFocusRef = useRef<string | null>(null);
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
-  const hasFocusedItem = Boolean(focusItemId && items.some((item) => item.id === focusItemId));
+  const availableDestinations = [...assistedTextImageDisplayIds, ...assistedVideoDisplayIds]
+    .filter((id) => items.some((item) => item.destination === id));
+  const activeDestinationFilter = destinationFilter !== "all" && availableDestinations.includes(destinationFilter) ? destinationFilter : "all";
+  const destinationItems = activeDestinationFilter === "all" ? items : items.filter((item) => item.destination === activeDestinationFilter);
+  const statusCounts: Record<StatusFilter, number> = {
+    "to-post": destinationItems.filter((item) => item.status === "queued").length,
+    ready: destinationItems.filter((item) => assistedState(item, now) === "due").length,
+    upcoming: destinationItems.filter((item) => assistedState(item, now) === "upcoming").length,
+    posted: destinationItems.filter((item) => item.status === "posted").length,
+  };
+  const visibleItems = destinationItems.filter((item) => {
+    if (statusFilter === "to-post") return item.status === "queued";
+    if (statusFilter === "ready") return assistedState(item, now) === "due";
+    return assistedState(item, now) === statusFilter;
+  });
+  const hasFocusedItem = Boolean(focusItemId && visibleItems.some((item) => item.id === focusItemId));
   const mastodonOrigin = safeMastodonOrigin(mastodonInstance);
+
+  useEffect(() => {
+    if (!workspaceReady || composerInitializedRef.current) return;
+    composerInitializedRef.current = true;
+    setComposerOpen(items.length === 0 || Boolean(time));
+  }, [workspaceReady, items.length, time]);
+
+  useEffect(() => {
+    if (!focusItemId) { handledFocusRef.current = null; return; }
+    if (handledFocusRef.current === focusItemId) return;
+    const focused = items.find((item) => item.id === focusItemId);
+    if (!focused) return;
+    handledFocusRef.current = focusItemId;
+    setDestinationFilter("all");
+    setStatusFilter(focused.status === "posted" ? "posted" : "to-post");
+  }, [focusItemId, items]);
 
   useEffect(() => {
     if (!focusItemId || !hasFocusedItem) return;
     const element = document.getElementById(`assisted-item-${focusItemId}`);
     element?.scrollIntoView({ behavior: "smooth", block: "center" });
     element?.focus({ preventScroll: true });
-  }, [focusItemId, hasFocusedItem]);
+  }, [focusItemId, hasFocusedItem, statusFilter, activeDestinationFilter]);
 
   function closeLinkEditor(id: string) {
     setEditingLinks((current) => { const next = { ...current }; delete next[id]; return next; });
@@ -178,12 +222,13 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {futureReminderCount > 0 && <button type="button" onClick={downloadCalendar} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download {futureReminderCount} calendar {futureReminderCount === 1 ? "reminder" : "reminders"}</button>}
+          <button type="button" onClick={() => { composerInitializedRef.current = true; setComposerOpen((current) => !current); }} aria-expanded={composerOpen} aria-controls="assisted-compose-form" className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]">{composerOpen ? "Hide new post" : "New manual post"}</button>
           <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${dueCount ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-muted)]"}`}>{dueCount ? `${dueCount} ready now` : "Manual publishing"}</span>
         </div>
       </div>
       {calendarError && <p role="alert" className="mx-6 mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)] sm:mx-7">{calendarError}</p>}
 
-      <div className="grid gap-4 p-6 sm:grid-cols-2 sm:p-7">
+      {composerOpen && <div id="assisted-compose-form" className="grid gap-4 p-6 sm:grid-cols-2 sm:p-7">
         <div>
           <label htmlFor="assisted-destination" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Destination</label>
           <select id="assisted-destination" value={destination} onChange={(event) => onDestinationChange(event.target.value as AssistedDestinationId)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]">
@@ -204,18 +249,31 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
           </div>}
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <button type="button" onClick={onAdd} disabled={busy || mediaBusy || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {mediaBusy ? "Wait for images…" : busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
+          <button type="button" onClick={() => { setStatusFilter("to-post"); setDestinationFilter("all"); onAdd(); }} disabled={busy || mediaBusy || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {mediaBusy ? "Wait for images…" : busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
           {notificationPermission === "default" && <button type="button" onClick={onEnableNotifications} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Bell size={14} /> Enable browser alerts</button>}
           <span className="text-[12px] leading-5 text-[var(--text-soft)]">{notificationPermission === "granted" ? "Browser alerts enabled while this page is open." : "Due items appear here while this page is open."}</span>
         </div>
-      </div>
+      </div>}
 
-      <div className="border-t border-[var(--line)] px-6 py-3 text-[12px] leading-5 text-[var(--text-muted)] sm:px-7">Copy the saved text, download any saved images in order, then publish on the platform yourself. Import calendar files yourself; alerts depend on your calendar settings, and later changes here do not sync.</div>
+      <div className="border-t border-[var(--line)] px-6 py-3 text-[12px] leading-5 text-[var(--text-muted)] sm:px-7">Copy text, add media and publish in your own account. Calendar downloads do not sync later edits; browser alerts work while this page is open.</div>
+      {items.length > 0 && <div className="flex flex-wrap items-end justify-between gap-3 border-t border-[var(--line)] px-6 py-4 sm:px-7">
+        <div role="group" aria-label="Filter assisted posts by status" className="flex flex-wrap gap-2">
+          {statusFilters.map((filter) => <button key={filter.id} type="button" aria-pressed={statusFilter === filter.id} onClick={() => setStatusFilter(filter.id)} className={`rounded-lg border px-3 py-2 text-[12px] font-semibold ${statusFilter === filter.id ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--text-secondary)]"}`}>{filter.label} <span className="ml-1 text-[var(--text-muted)]">{statusCounts[filter.id]}</span></button>)}
+        </div>
+        <label htmlFor="assisted-list-destination" className="text-[11px] font-semibold text-[var(--text-secondary)]">Platform
+          <select id="assisted-list-destination" value={activeDestinationFilter} onChange={(event) => setDestinationFilter(event.target.value as AssistedDestinationId | "all")} className="mt-1 block min-w-40 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
+            <option value="all">All platforms</option>
+            {availableDestinations.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}
+          </select>
+        </label>
+      </div>}
       {items.length === 0 ? (
         <div className="flex flex-col items-center border-t border-[var(--line)] px-6 py-9 text-center"><Bell size={22} className="text-[var(--accent-text)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No assisted posts yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Add one above to get a ready-to-publish checklist.</p></div>
+      ) : visibleItems.length === 0 ? (
+        <div className="border-t border-[var(--line)] px-6 py-8 text-center sm:px-7"><p className="text-[13px] font-semibold text-[var(--text-secondary)]">No posts in this view</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">Choose another status or platform to see more.</p></div>
       ) : (
         <div className="divide-y divide-[var(--line)] border-t border-[var(--line)]">
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const state = assistedState(item, now);
             const target = assistedDestinations[item.destination];
             const enteredUrl = postUrls[item.id] ?? "";
