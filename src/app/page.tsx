@@ -33,6 +33,7 @@ import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
+import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
@@ -330,7 +331,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     let browserAssisted: AssistedPost[] = [];
     try {
-      const saved = localStorage.getItem("socialflow-mvp");
+      const saved = readOwnerEditorCache(localStorage, email);
       if (saved) {
         const data = JSON.parse(saved) as {
           source?: unknown;
@@ -399,12 +400,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem("socialflow-mvp", JSON.stringify({ source, selected, variants, mediaIds, provider, activity, title, currentDraftId, editorOrigin }));
+      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, provider, activity, title, currentDraftId, editorOrigin }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, provider, activity, title, currentDraftId, editorOrigin, hydrated]);
+  }, [source, selected, variants, mediaIds, provider, activity, title, currentDraftId, editorOrigin, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
