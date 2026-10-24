@@ -4,12 +4,13 @@ import { useRef, useState } from "react";
 import { ArrowRight, Check, Copy, ShieldCheck } from "lucide-react";
 import { LocalDateTimeField, isValidLocalDateTime } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
+import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
 import { adaptDraft, characterCount, isPlatformId, platformDisplayIds, platforms, type PlatformId } from "@/lib/platforms";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { validatePlatformText } from "@/lib/platform-validation";
 import type { AssistedPost, SavedDraft } from "@/lib/workspace";
 
-export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string };
+export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; videoId?: string };
 export type BatchPrepareResult = "prepared" | "rejected" | "uncertain";
 
 type Props = {
@@ -38,6 +39,8 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const [attempted, setAttempted] = useState(false);
   const [prepared, setPrepared] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [videoId, setVideoId] = useState<string | null>(null);
+  const [videoBusy, setVideoBusy] = useState(false);
   const batchIdRef = useRef<string | null>(null);
   const attemptedItemsRef = useRef<BatchHandoffItem[] | null>(null);
   const attemptedSlotModeRef = useRef(false);
@@ -63,7 +66,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const invalidReminders = destinations.filter((id) => slotApplied && isPlatformId(id)
     ? !slotTimes[id] || Date.parse(slotTimes[id]!) < currentTime + 10_000
     : reminders[id] && !isValidLocalDateTime(reminders[id]!, currentTime));
-  const canPrepare = !editorDirty && !busy && !mediaBusy && !submitting && !prepared &&
+  const canPrepare = !editorDirty && !busy && !mediaBusy && !videoBusy && !submitting && !prepared &&
     (attempted ? Boolean(attemptedItemsRef.current) :
       destinations.length > 0 && invalidText.length === 0 && invalidReminders.length === 0);
 
@@ -104,6 +107,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     setFocusedDestination(null);
     setReminders({});
     setTexts({});
+    setVideoId(null);
     setSlotPreview(null); setSlotTimes({}); setSlotApplied(false); setSlotError(null);
     openReview();
   }
@@ -137,6 +141,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           destination,
           text: textFor(destination),
           scheduledFor: slotApplied && isPlatformId(destination) ? slotTimes[destination]! : reminder ? new Date(reminder).toISOString() : new Date(timestamp).toISOString(),
+          ...(videoId ? { videoId } : {}),
         };
       });
     })();
@@ -178,7 +183,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     {editorDirty && <p role="status" className="mt-4 rounded-xl bg-[var(--warning-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--warning)]">Save your latest editor changes first. Handoffs use the saved version of this draft.</p>}
     {!editorDirty && !open && !prepared && <button ref={triggerRef} type="button" onClick={openReview} aria-expanded={open} aria-controls="batch-handoff-review" disabled={busy || mediaBusy} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] font-bold text-[var(--accent-text)] transition hover:bg-[var(--surface-hover)] disabled:opacity-45">Review manual handoffs <ArrowRight size={15} aria-hidden="true" /></button>}
     {priorHandoffs.length > 0 && !prepared && <p className="mt-3 text-[11px] leading-5 text-[var(--text-muted)]">{priorHandoffs.length} {priorHandoffs.length === 1 ? "handoff" : "handoffs"} already prepared from this draft. Previously prepared platforms are unchecked by default. <button type="button" onClick={onOpenAssisted} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">View existing handoffs</button></p>}
-    {prepared && <div role="status" className="mt-4 rounded-xl border border-[var(--positive)] bg-[var(--positive-soft)] p-4 text-[12px] leading-5 text-[var(--positive)]"><p className="flex items-center gap-2 font-bold"><Check size={15} aria-hidden="true" /> Handoffs added to Assisted.</p><p className="mt-1">Copy the saved text and images, then publish from your own accounts. Plypost has not posted anything.</p><div className="mt-3 flex flex-wrap gap-4"><button type="button" onClick={onOpenAssisted} className="inline-flex items-center gap-1 font-bold underline underline-offset-2">Open Assisted <ArrowRight size={13} aria-hidden="true" /></button><button type="button" onClick={prepareAnother} className="font-semibold underline underline-offset-2">Prepare another batch</button></div></div>}
+    {prepared && <div role="status" className="mt-4 rounded-xl border border-[var(--positive)] bg-[var(--positive-soft)] p-4 text-[12px] leading-5 text-[var(--positive)]"><p className="flex items-center gap-2 font-bold"><Check size={15} aria-hidden="true" /> Handoffs added to Assisted.</p><p className="mt-1">Copy the saved text and download any media, then publish from your own accounts. Plypost has not posted anything.</p><div className="mt-3 flex flex-wrap gap-4"><button type="button" onClick={onOpenAssisted} className="inline-flex items-center gap-1 font-bold underline underline-offset-2">Open Assisted <ArrowRight size={13} aria-hidden="true" /></button><button type="button" onClick={prepareAnother} className="font-semibold underline underline-offset-2">Prepare another batch</button></div></div>}
     {open && !prepared && <div id="batch-handoff-review" ref={reviewRef} role="dialog" aria-modal="false" aria-labelledby="batch-handoff-review-heading" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape" && !submitting) { event.preventDefault(); closeReview(); } }} className="mt-5 space-y-4 border-t border-[var(--line)] pt-5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
       <h3 id="batch-handoff-review-heading" className="text-[14px] font-bold text-[var(--text)]">Review manual handoffs</h3>
       <div className="flex items-start gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text-muted)]"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--accent-text)]" aria-hidden="true" /><span>Edit each platform's text here without changing the saved draft. Reminder times are optional. Confirming adds checklist items; you publish the posts yourself.</span></div>
@@ -222,11 +227,16 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           <label htmlFor={`batch-text-${id}`} className="text-[13px] font-bold text-[var(--text)]">{assistedDestinations[id].name} text</label>
           <textarea id={`batch-text-${id}`} value={text} onChange={(event) => setTexts((current) => ({ ...current, [id]: event.target.value }))} disabled={attempted} className="mt-2 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-70" />
           <p className={`mt-1 text-[11px] ${valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}`}>{check ? `${check.count} / ${check.limit} ${id === "bluesky" ? "graphemes" : "characters"}` : `${characterCount(text)} / 5,000 characters`}{check?.byteCount !== undefined ? ` · ${check.byteCount} / ${check.byteLimit} UTF-8 bytes` : ""}{!valid ? " · Edit this text before confirming" : ""}</p>
-          {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{assistedDestinations[id].needsMedia && !draft.mediaIds?.length ? " Bring your media when posting." : ""}</p>}
+          {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{assistedDestinations[id].needsMedia && !draft.mediaIds?.length && !videoId ? " Bring your media when posting." : ""}</p>}
           <div className="mt-3">{slotApplied && isPlatformId(id) && slotTimes[id] ? <p className="rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)]">Reminder: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview?.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(slotTimes[id]))} · {slotPreview?.timeZone}</p> : <fieldset disabled={attempted} className={attempted ? "opacity-70" : ""}><LocalDateTimeField id={`batch-reminder-${id}`} label={`${assistedDestinations[id].name} reminder`} value={reminders[id] ?? ""} minTimestamp={currentTime} optional onChange={(value) => setReminders((current) => ({ ...current, [id]: value }))} /></fieldset>}</div>
         </div>;
       })}
-      {draft.mediaIds?.length ? <MediaHandoff mediaIds={draft.mediaIds} mediaAlt={draft.mediaAlt} variant="review" /> : <p className="text-[11px] leading-5 text-[var(--text-soft)]">This draft has no saved images. You can still bring media directly to the platform when publishing.</p>}
+      {draft.mediaIds?.length ? <MediaHandoff mediaIds={draft.mediaIds} mediaAlt={draft.mediaAlt} variant="review" /> : <p className="text-[11px] leading-5 text-[var(--text-soft)]">{videoId ? "This draft has no saved images. The selected video will be attached to each handoff." : "This draft has no saved images. You can still bring media directly to the platform when publishing."}</p>}
+      <details className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
+        <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Video for this batch · {videoId ? "attached" : "optional"}</summary>
+        <div className="mt-3"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy || attempted || submitting} /></div>
+        <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">One clip is attached to every selected handoff. You can change each handoff separately in Assisted before posting.</p>
+      </details>
       {!attempted && (invalidText.length > 0 || invalidReminders.length > 0) && <div role="alert" className="rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]">
         <p className="font-semibold">Fix these posts before confirming:</p>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">

@@ -1,13 +1,15 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
+import { createVideo } from "../src/lib/server/video.ts";
 import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedMediaAlt, updateAssistedText } from "../src/lib/server/workspace.ts";
 import { parseWorkspace } from "../src/lib/workspace.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
@@ -72,6 +74,29 @@ test("unmodified platform text uses the same adaptation shown in Create", () => 
   const prepared = prepareAssistedBatch(owner, saved.id, randomUUID(), handoffs());
   assert.equal(prepared.find((item) => item.destination === "bluesky").text, "First line Second line");
   assert.equal(prepared.find((item) => item.destination === "linkedin").text, "First line\nSecond line");
+});
+
+test("one saved clip can be reused across a batch without allowing foreign or changed video references", () => {
+  const bytes = readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4"));
+  const clip = createVideo(owner, { name: "launch.mp4", type: "video/mp4", bytes }).video;
+  const secondClip = createVideo(owner, { name: "alternate.mp4", type: "video/mp4", bytes: Buffer.concat([bytes, Buffer.from([1])]) }).video;
+  const foreignClip = createVideo(other, { name: "foreign.mp4", type: "video/mp4", bytes }).video;
+  const saved = saveDraft(owner, draft("Video announcement", ["bluesky", "linkedin"], {}));
+  const batchId = randomUUID();
+  const items = handoffs().map((item) => ({ ...item, videoId: clip.id }));
+  const prepared = prepareAssistedBatch(owner, saved.id, batchId, items, false, saved.updatedAt);
+  assert.equal(prepared.length, 2);
+  assert.ok(prepared.every((item) => item.videoId === clip.id && item.sourceDraftId === saved.id));
+  assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, [...items].reverse(), false, saved.updatedAt).map((item) => item.id),
+    [...prepared].reverse().map((item) => item.id));
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId,
+    [{ ...items[0], videoId: secondClip.id }, items[1]], false, saved.updatedAt), /different or partial/);
+  const before = listWorkspace(owner).assisted.length;
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...items[0], videoId: foreignClip.id }], false, saved.updatedAt), /missing from your private library/);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...items[0], videoId: randomUUID() }], false, saved.updatedAt), /missing from your private library/);
+  assert.equal(listWorkspace(owner).assisted.length, before);
 });
 
 test("reviewed handoffs cover every assisted destination without changing the saved draft", () => {
@@ -227,8 +252,10 @@ test("provenance is a valid UUID pair, and manual action cannot forge draft-link
 
 test("batch route requires owner sign-in and same origin; response includes persisted handoffs", async () => {
   const saved = saveDraft(owner, draft("Route source", ["bluesky"], {}));
+  const clip = createVideo(owner, { name: "route.mp4", type: "video/mp4",
+    bytes: readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4")) }).video;
   const body = { action: "prepare-assisted-batch", draftId: saved.id, expectedUpdatedAt: saved.updatedAt, batchId: randomUUID(),
-    items: [{ destination: "bluesky", scheduledFor: new Date(Date.now() + 60_000).toISOString(), text: "Reviewed route copy" }] };
+    items: [{ destination: "bluesky", scheduledFor: new Date(Date.now() + 60_000).toISOString(), text: "Reviewed route copy", videoId: clip.id }] };
   const request = (cookie, origin = "http://localhost:3000") => new globalThis.Request("http://localhost:3000/api/workspace", {
     method: "POST", headers: { origin, "content-type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body),
   });
@@ -243,6 +270,7 @@ test("batch route requires owner sign-in and same origin; response includes pers
   assert.equal((await workspacePost(request(cookie))).status, 200);
   assert.equal(listWorkspace(owner).assisted.filter((post) => post.batchId === body.batchId).length, 1);
   assert.equal(listWorkspace(owner).assisted.find((post) => post.batchId === body.batchId).text, "Reviewed route copy");
+  assert.equal(listWorkspace(owner).assisted.find((post) => post.batchId === body.batchId).videoId, clip.id);
   saveDraft(owner, { ...saved, source: "Changed in another window" }, saved.updatedAt);
   const stale = { ...body, batchId: randomUUID() };
   const staleResponse = await workspacePost(new globalThis.Request("http://localhost:3000/api/workspace", {

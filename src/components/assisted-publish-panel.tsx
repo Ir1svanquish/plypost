@@ -235,7 +235,6 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
 
   function chooseDestination(next: AssistedDestinationId) {
     if (next === destination) return;
-    setVideoId(null);
     onDestinationChange(next);
   }
 

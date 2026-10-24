@@ -125,7 +125,7 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
   return item;
 }
 
-type BatchHandoff = { destination: AssistedDestinationId; scheduledFor: string; text?: string };
+type BatchHandoff = { destination: AssistedDestinationId; scheduledFor: string; text?: string; videoId?: string };
 
 /** Snapshot reviewed manual-publishing handoffs from one saved draft. */
 export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: unknown, items: unknown,
@@ -134,9 +134,10 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
   if (expectedUpdatedAt !== undefined && !validUtcInstant(expectedUpdatedAt)) throw new Error("Invalid saved draft version.");
   if (!validUuid(draftId) || !validUuid(batchId) || !Array.isArray(items) ||
       items.length < 1 || items.length > assistedIds.length || items.some((entry) =>
-        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor" && key !== "text") ||
+        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor" && key !== "text" && key !== "videoId") ||
         !isAssistedDestinationId(entry.destination) || !validUtcInstant(entry.scheduledFor) ||
-        (entry.text !== undefined && (typeof entry.text !== "string" || !entry.text.trim() || characterCount(entry.text) > 5000)))) {
+        (entry.text !== undefined && (typeof entry.text !== "string" || !entry.text.trim() || characterCount(entry.text) > 5000)) ||
+        (entry.videoId !== undefined && !validUuid(entry.videoId)))) {
     throw new Error("Choose a saved draft and one to eleven destinations with valid text and UTC reminder times.");
   }
   const requested = items as BatchHandoff[];
@@ -147,7 +148,8 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     // Keep the original request in the local audit log so a retry cannot shrink a
     // batch after one or all handoffs were deleted. Imported backups may lack this log.
     const manifest = JSON.stringify({ draftId, ...(expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : {}), items: requested
-      .map(({ destination, scheduledFor, text }) => ({ destination, scheduledFor,
+      .map(({ destination, scheduledFor, text, videoId }) => ({ destination, scheduledFor,
+        ...(videoId !== undefined ? { videoId } : {}),
         ...(text !== undefined ? { textSha256: createHash("sha256").update(text).digest("hex") } : {}) }))
       .sort((a, b) => a.destination.localeCompare(b.destination)) });
     const recorded = db.prepare("SELECT detail FROM audit WHERE user_id=? AND action='assisted.batch_prepared' AND subject_id=? ORDER BY id LIMIT 1")
@@ -184,9 +186,12 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
     if (count.count + requested.length > 100) throw new Error("Assisted publishing list is full.");
     assertOwnedMedia(userId, draft.mediaIds ?? []);
+    for (const videoId of new Set(requested.map((item) => item.videoId).filter((id): id is string => id !== undefined))) {
+      assertOwnedVideo(userId, videoId);
+    }
 
     const now = new Date().toISOString();
-    const prepared = requested.map(({ destination, scheduledFor, text: reviewedText }): AssistedPost => {
+    const prepared = requested.map(({ destination, scheduledFor, text: reviewedText, videoId }): AssistedPost => {
       const text = reviewedText ?? (isPlatformId(destination)
         ? draft.variants[destination] ?? adaptDraft(draft.source, destination)
         : draft.source);
@@ -198,6 +203,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
         id: randomUUID(), title: draftTitle(draft.title, draft.source), destination, text,
         ...(draft.mediaIds !== undefined ? { mediaIds: [...draft.mediaIds] } : {}),
         ...(draft.mediaAlt !== undefined ? { mediaAlt: [...draft.mediaAlt] } : {}),
+        ...(videoId !== undefined ? { videoId } : {}),
         sourceDraftId: draft.id, batchId, scheduledFor, createdAt: now, status: "queued",
         ...(Date.parse(scheduledFor) <= Date.parse(now) ? { notifiedAt: now } : {}),
       };
