@@ -59,6 +59,8 @@ npm run hash-password
 npm run dev
 ```
 
+The development command uses Next.js's Webpack mode. On some Windows setups, the default Turbopack mode cannot create a dependency junction and leaves API routes unavailable; Webpack avoids that development-only failure.
+
 The password command prompts without echoing what you type and prints a `PLYPOST_OWNER_PASSWORD_HASH=...` line. Put that line and an email of your choice as `PLYPOST_OWNER_EMAIL=...` in `.env.local`. These two values are required to sign in. The password itself is never written to the file or Git. On Windows PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`. Start the background worker in a second terminal:
 
 ```bash
