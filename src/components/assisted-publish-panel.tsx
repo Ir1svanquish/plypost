@@ -104,8 +104,9 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
-  const availableDestinations = [...assistedTextImageDisplayIds, ...assistedVideoDisplayIds]
-    .filter((id) => items.some((item) => item.destination === id));
+  const availableTextImageDestinations = assistedTextImageDisplayIds.filter((id) => items.some((item) => item.destination === id));
+  const availableVideoDestinations = assistedVideoDisplayIds.filter((id) => items.some((item) => item.destination === id));
+  const availableDestinations: AssistedDestinationId[] = [...availableTextImageDestinations, ...availableVideoDestinations];
   const activeDestinationFilter = destinationFilter !== "all" && availableDestinations.includes(destinationFilter) ? destinationFilter : "all";
   const destinationItems = activeDestinationFilter === "all" ? items : items.filter((item) => item.destination === activeDestinationFilter);
   const statusCounts: Record<StatusFilter, number> = {
@@ -231,8 +232,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
       {composerOpen && <div id="assisted-compose-form" className="grid gap-4 p-6 sm:grid-cols-2 sm:p-7">
         <div>
           <label htmlFor="assisted-destination" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Destination</label>
-          <select id="assisted-destination" value={destination} onChange={(event) => onDestinationChange(event.target.value as AssistedDestinationId)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]">
-            <optgroup label="Text &amp; images">{assistedTextImageDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
+          <select id="assisted-destination" value={destination} onChange={(event) => onDestinationChange(event.target.value as AssistedDestinationId)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[14px] text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
+            <optgroup label="Text &amp; image-first">{assistedTextImageDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
             <optgroup label="Video-first">{assistedVideoDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
           </select>
         </div>
@@ -263,7 +264,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         <label htmlFor="assisted-list-destination" className="text-[11px] font-semibold text-[var(--text-secondary)]">Platform
           <select id="assisted-list-destination" value={activeDestinationFilter} onChange={(event) => setDestinationFilter(event.target.value as AssistedDestinationId | "all")} className="mt-1 block min-w-40 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
             <option value="all">All platforms</option>
-            {availableDestinations.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}
+            {availableTextImageDestinations.length > 0 && <optgroup label="Text &amp; image-first">{availableTextImageDestinations.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>}
+            {availableVideoDestinations.length > 0 && <optgroup label="Video-first">{availableVideoDestinations.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>}
           </select>
         </label>
       </div>}

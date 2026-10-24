@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { draftTitle, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validMediaAlt, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { draftTitle, hasDraftContent, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validMediaAlt, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
 import { validatePlatformText } from "../platform-validation";
@@ -404,6 +404,8 @@ export class DraftConflictError extends Error {
 export function saveDraft(userId: string, value: unknown, expectedUpdatedAt: unknown = null): SavedDraft {
   const draft = validDraft(value);
   if (!draft || !/^[a-f0-9-]{36}$/i.test(draft.id)) throw new Error("Invalid draft.");
+  if (!hasDraftContent(draft)) throw new Error("Add a title, caption, platform text or image before saving.");
+  const titleSource = draft.source.trim() || platformIds.map((id) => draft.variants[id]?.trim()).find(Boolean) || "";
   transaction((db) => {
     assertOwnedMedia(userId, draft.mediaIds ?? []);
     const existing = db.prepare("SELECT user_id, payload FROM drafts WHERE id=?").get(draft.id) as { user_id: string; payload: string } | undefined;
@@ -413,7 +415,7 @@ export function saveDraft(userId: string, value: unknown, expectedUpdatedAt: unk
     const count = db.prepare("SELECT COUNT(*) AS count FROM drafts WHERE user_id=?").get(userId) as { count: number };
     if (!existing && count.count >= 100) throw new Error("Draft library is full.");
     const updatedAt = new Date(Math.max(Date.now(), previous ? Date.parse(previous.updatedAt) + 1 : 0)).toISOString();
-    const normalized = { ...draft, createdAt: previous?.createdAt ?? updatedAt, updatedAt };
+    const normalized = { ...draft, title: draftTitle(draft.title, titleSource), createdAt: previous?.createdAt ?? updatedAt, updatedAt };
     db.prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at")
       .run(normalized.id, userId, JSON.stringify(normalized), normalized.updatedAt);
     audit(userId, existing ? "draft.updated" : "draft.created", draft.id);

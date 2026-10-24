@@ -28,6 +28,22 @@ test("a stale window cannot overwrite another window's draft, and can save a cop
   assert.equal(listWorkspace(owner).drafts.find((draft) => draft.id === first.id)?.source, "Newer edit");
 });
 
+test("an unfinished idea can be saved, completed later, and cannot be empty", () => {
+  const idea = saveDraft(owner, { ...initial(""), title: "Workshop idea" });
+  assert.equal(idea.source, "");
+  assert.equal(listWorkspace(owner).drafts.find((draft) => draft.id === idea.id)?.title, "Workshop idea");
+
+  const completed = saveDraft(owner, { ...idea, source: "Doors open at 1:30." }, idea.updatedAt);
+  assert.equal(completed.source, "Doors open at 1:30.");
+
+  const platformOnly = saveDraft(owner, { ...initial(""), title: "", selected: ["linkedin"],
+    variants: { linkedin: "Behind the scenes at the workshop" } });
+  assert.equal(platformOnly.title, "Behind the scenes at the workshop");
+  assert.equal(platformOnly.variants.linkedin, "Behind the scenes at the workshop");
+
+  assert.throws(() => saveDraft(owner, initial("")), /Add a title, caption, platform text or image/);
+});
+
 test("a deleted draft cannot be silently recreated by an old window", () => {
   const saved = saveDraft(owner, initial("Delete me"));
   assert.equal(deleteDraft(owner, saved.id, saved.updatedAt), true);

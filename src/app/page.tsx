@@ -34,7 +34,7 @@ import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
-import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
   "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.";
@@ -202,6 +202,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt };
   const editorContentRef = useRef(editorContent);
   editorContentRef.current = editorContent;
+  const canSaveEditor = hasDraftContent(editorContent);
   const editorDirty = hasUnsavedEditorChanges(editorContent, currentDraftId, drafts, editorOrigin);
   const currentSavedDraft = currentDraftId ? drafts.find((draft) => draft.id === currentDraftId) ?? null : null;
   const needsDraftRecovery = draftConflict || Boolean(currentDraftId && workspaceReady && currentSavedDraft?.updatedAt !== currentDraftVersion);
@@ -596,8 +597,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Wait for the image operation to finish before saving this draft." });
       return false;
     }
-    if (!source.trim()) {
-      setNotice({ kind: "error", text: "Write a source draft before saving it." });
+    if (!hasDraftContent(editorContentRef.current)) {
+      setNotice({ kind: "error", text: "Add a title, caption, platform text or image before saving." });
       return false;
     }
     if ((!currentDraftId || asCopy) && drafts.length >= 100) {
@@ -606,9 +607,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
     const stamp = new Date().toISOString();
     const existing = drafts.find((draft) => draft.id === currentDraftId);
+    const titleSource = source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "";
+    const savedTitle = draftTitle(title, titleSource);
     const saved: SavedDraft = {
       id: !asCopy && currentDraftId ? currentDraftId : crypto.randomUUID(),
-      title: asCopy ? `${draftTitle(title, source).slice(0, 113)} (copy)` : draftTitle(title, source),
+      title: asCopy ? `${savedTitle.slice(0, 113)} (copy)` : savedTitle,
       source,
       selected: [...selected],
       variants: { ...variants },
@@ -1279,8 +1282,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
                     {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   </details>
-                  {needsDraftRecovery && currentDraftId && <div role="alert" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">This draft changed in another window or was deleted.</p><p className="mt-1">Your current editor text is still here. Save it as a new draft, or open the latest saved version after reviewing any unsaved changes.</p><div className="mt-3 flex flex-wrap gap-3"><button type="button" onClick={() => { void saveDraft(false, true); }} disabled={!source.trim() || mediaBusy || draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Save as new draft</button><button type="button" onClick={() => { void openLatestDraft(); }} disabled={draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Open latest saved version</button></div></div>}
-                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!source.trim() || mediaBusy || draftSaveBusy || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
+                  {needsDraftRecovery && currentDraftId && <div role="alert" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">This draft changed in another window or was deleted.</p><p className="mt-1">Your current editor text is still here. Save it as a new draft, or open the latest saved version after reviewing any unsaved changes.</p><div className="mt-3 flex flex-wrap gap-3"><button type="button" onClick={() => { void saveDraft(false, true); }} disabled={!canSaveEditor || mediaBusy || draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Save as new draft</button><button type="button" onClick={() => { void openLatestDraft(); }} disabled={draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Open latest saved version</button></div></div>}
+                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || draftSaveBusy || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
                 </div>
               </section>
             </div>
@@ -1317,7 +1320,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           </div>}
           <div hidden={view !== "schedule"}>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">{showMastodonQueue ? "See real Mastodon posts, simulations and manual handoffs together." : "Plan drafts, simulations and manual handoffs in one place."}</p></div>
-            <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
+            <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{canSaveEditor ? draftTitle(title, source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "") : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
             <ServerSchedulePanel schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
             <details className="mt-6"><summary className="cursor-pointer rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] font-bold text-[var(--text-secondary)]">Weekly posting slots · set recurring times for manual handoffs</summary><div className="mt-3"><WeeklySlotsPanel key={slotsRefreshEpoch} /></div></details>
             <div hidden={!showMastodonQueue}><MastodonSchedulePanel items={realMastodonSchedules} onItemsChange={setRealMastodonSchedules} onLoadErrorChange={setRealMastodonQueueError} connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected={selected.includes("mastodon")} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} now={now} visible={view === "schedule"} workerLastSeen={workerLastSeen} onOpenAccount={() => openView("account")} onOpenEditor={() => openView("compose")} /></div>
@@ -1359,11 +1362,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     {pendingEditorSwitch && <dialog ref={switchDialogRef} onCancel={(event) => { event.preventDefault(); if (!switchSaving) setPendingEditorSwitch(null); }} aria-labelledby="unsaved-editor-title" aria-describedby="unsaved-editor-description" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">Unsaved changes</h2>
       <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">Your current text, platform versions, and image choices have changed. {needsDraftRecovery ? "The saved draft changed elsewhere. Save your edits as a new draft" : "Save your edits"} before {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : "opening a copy of this planned post"}, or discard them.</p>
-      {!source.trim() && <p className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Add a message before saving, or keep editing.</p>}
+      {!canSaveEditor && <p className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Add a title, caption, platform text or image before saving.</p>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
         <button type="button" autoFocus onClick={() => setPendingEditorSwitch(null)} disabled={switchSaving} className="rounded-lg px-3 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Keep editing</button>
         <button type="button" onClick={() => { const target = pendingEditorSwitch; setPendingEditorSwitch(null); applyEditorSwitch(target); }} disabled={switchSaving} className="rounded-lg border border-[var(--danger)] px-3 py-2.5 text-[12px] font-semibold text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50">Discard changes</button>
-        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !source.trim()} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving…" : needsDraftRecovery ? "Save as new and continue" : "Save and continue"}</button>
+        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !canSaveEditor} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving…" : needsDraftRecovery ? "Save as new and continue" : "Save and continue"}</button>
       </div>
     </dialog>}
     </>

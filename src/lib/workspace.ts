@@ -78,6 +78,17 @@ export type Workspace = {
 
 export const emptyWorkspace = (): Workspace => ({ version: 3, drafts: [], schedule: [], assisted: [] });
 
+/** An idea can be saved before its main caption is ready. */
+export function hasDraftContent(value: {
+  title: string;
+  source: string;
+  variants: Partial<Record<PlatformId, string>>;
+  mediaIds?: readonly string[];
+}): boolean {
+  return Boolean(value.title.trim() || value.source.trim() || value.mediaIds?.length ||
+    platformIds.some((id) => value.variants[id]?.trim()));
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
