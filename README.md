@@ -5,7 +5,7 @@ Plypost 是一个本机运行的多平台发帖工作台。写一份草稿，再
 ## 现在能做什么
 
 - 为 Bluesky、Mastodon、LinkedIn、Threads 保存不同版本的文案和预览，草稿最多附四张图片。可以先存标题、图片或单个平台的文案，发布前再补齐内容。
-- 为上述平台以及 X、Facebook Pages、Instagram、TikTok、YouTube、Pinterest、Reddit 建立人工发布清单。平台按图文、视频为主分组；文案可以逐平台修改，视频文件仍需到目标平台上传，发帖由你完成。
+- 为上述平台以及 X、Facebook Pages、Instagram、TikTok、YouTube、Pinterest、Reddit 建立人工发布清单。平台按图文、视频为主分组；文案可以逐平台修改，附图的待办可一键下载文案和图片包。视频文件仍需到目标平台上传，发帖由你完成。
 - 保存草稿、安排提醒、导出备份。日历里的模拟发布不会向平台发帖。
 - 配置 Nebius 或 NVIDIA 后，手动生成文案改写或一周选题。不配置也能使用草稿和人工发布功能。
 
