@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { passwordHash } from "../src/lib/server/auth.ts";
 import { randomUUID } from "node:crypto";
+import { isPortIsReserved } from "next/dist/lib/helpers/get-reserved-port.js";
 
 let server;
 let baseUrl;
@@ -27,12 +28,14 @@ function post(path, body, authenticated = true) {
 }
 
 async function freePort() {
-  const probe = createServer();
-  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const address = probe.address();
-  const port = address.port;
-  await new Promise((resolve) => probe.close(resolve));
-  return port;
+  while (true) {
+    const probe = createServer();
+    await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const address = probe.address();
+    const port = address.port;
+    await new Promise((resolve) => probe.close(resolve));
+    if (!isPortIsReserved(port)) return port;
+  }
 }
 
 before(async () => {

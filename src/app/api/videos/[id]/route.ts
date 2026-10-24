@@ -17,6 +17,38 @@ export async function GET(request: Request, context: Context) {
   const { id } = await context.params;
   const found = getVideo(user, id);
   if (!found) return Response.json({ error: "Video not found." }, { status: 404, headers: privateHeaders });
+  if (new URL(request.url).searchParams.get("preview") === "1") {
+    const length = found.bytes.length;
+    const headers = { ...privateHeaders, "Content-Type": found.video.mimeType,
+      "Content-Disposition": "inline", "Accept-Ranges": "bytes" };
+    const requested = request.headers.get("range");
+    if (requested) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(requested.trim());
+      let start = -1;
+      let end = -1;
+      if (match?.[1]) {
+        start = Number(match[1]);
+        end = match[2] ? Number(match[2]) : length - 1;
+      } else if (match?.[2]) {
+        const suffixLength = Number(match[2]);
+        if (Number.isSafeInteger(suffixLength) && suffixLength > 0) {
+          start = Math.max(0, length - suffixLength);
+          end = length - 1;
+        }
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= length || end < start) {
+        return new Response(null, { status: 416, headers: { ...headers, "Content-Range": `bytes */${length}` } });
+      }
+      end = Math.min(end, length - 1);
+      return new Response(new Uint8Array(found.bytes.subarray(start, end + 1)), {
+        status: 206, headers: { ...headers, "Content-Length": String(end - start + 1),
+          "Content-Range": `bytes ${start}-${end}/${length}` },
+      });
+    }
+    return new Response(new Uint8Array(found.bytes), {
+      headers: { ...headers, "Content-Length": String(length) },
+    });
+  }
   return new Response(new Uint8Array(found.bytes), {
     headers: {
       ...privateHeaders,

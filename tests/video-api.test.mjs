@@ -28,7 +28,7 @@ function uploadRequest(bytes = mp4, { origin = "http://localhost", withCookie = 
   return new globalThis.Request(base, { method: "POST", headers: { origin, ...(withCookie ? { cookie } : {}) }, body: form });
 }
 
-test("video routes require owner, check origin, and serve private attachment downloads", async () => {
+test("video routes require owner and serve private playback ranges and attachment downloads", async () => {
   assert.equal((await list(new globalThis.Request(base))).status, 401);
   assert.equal((await upload(uploadRequest(mp4, { withCookie: false }))).status, 401);
   assert.equal((await upload(uploadRequest(mp4, { origin: "https://evil.example" }))).status, 403);
@@ -44,6 +44,27 @@ test("video routes require owner, check origin, and serve private attachment dow
   assert.match(file.headers.get("content-disposition"), /attachment; filename\*=UTF-8''launch\.mp4/);
   assert.match(file.headers.get("cache-control"), /private, no-store/);
   assert.deepEqual(Buffer.from(await file.arrayBuffer()), mp4);
+  const previewUrl = `${base}/${video.id}?preview=1`;
+  assert.equal((await download(new globalThis.Request(previewUrl), context(video.id))).status, 401);
+  const preview = await download(new globalThis.Request(previewUrl, { headers: { cookie } }), context(video.id));
+  assert.equal(preview.status, 200);
+  assert.equal(preview.headers.get("content-disposition"), "inline");
+  assert.equal(preview.headers.get("accept-ranges"), "bytes");
+  assert.match(preview.headers.get("cache-control"), /private, no-store/);
+  assert.deepEqual(Buffer.from(await preview.arrayBuffer()), mp4);
+  const range = await download(new globalThis.Request(previewUrl, { headers: { cookie, range: "bytes=8-31" } }), context(video.id));
+  assert.equal(range.status, 206);
+  assert.equal(range.headers.get("content-range"), `bytes 8-31/${mp4.length}`);
+  assert.equal(range.headers.get("content-length"), "24");
+  assert.deepEqual(Buffer.from(await range.arrayBuffer()), mp4.subarray(8, 32));
+  const suffix = await download(new globalThis.Request(previewUrl, { headers: { cookie, range: "bytes=-12" } }), context(video.id));
+  assert.equal(suffix.status, 206);
+  assert.deepEqual(Buffer.from(await suffix.arrayBuffer()), mp4.subarray(-12));
+  for (const invalid of ["bytes=", `bytes=${mp4.length}-`, "bytes=20-10", "bytes=0-2,4-6"]) {
+    const rejected = await download(new globalThis.Request(previewUrl, { headers: { cookie, range: invalid } }), context(video.id));
+    assert.equal(rejected.status, 416);
+    assert.equal(rejected.headers.get("content-range"), `bytes */${mp4.length}`);
+  }
   assert.equal((await remove(new globalThis.Request(`${base}/${video.id}`, { method: "DELETE", headers: { cookie, origin: "https://evil.example" } }), context(video.id))).status, 403);
   assert.equal((await remove(new globalThis.Request(`${base}/${video.id}`, { method: "DELETE", headers: { cookie, origin: "http://localhost" } }), context(video.id))).status, 200);
   assert.equal((await download(new globalThis.Request(`${base}/${video.id}`, { headers: { cookie } }), context(video.id))).status, 404);

@@ -9,7 +9,7 @@ import { validatePlatformText } from "@/lib/platform-validation";
 import { assistedState, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
-import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
+import { PrivateVideoPreview, VideoAttachmentPicker } from "@/components/video-attachment-picker";
 
 type Props = {
   items: AssistedPost[];
@@ -371,6 +371,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                   <button type="button" onClick={() => closeVideoEditor(item.id)} disabled={busy || videoBusy || videoSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                 </div>
               </div>}
+              {item.videoId && !videoEdit && <PrivateVideoPreview key={item.videoId} id={item.videoId} />}
               {item.videoId && <a href={`/api/videos/${encodeURIComponent(item.videoId)}`} download className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Download size={13} aria-hidden="true" /> Download saved video</a>}
               {Boolean(item.mediaIds?.length || item.videoId) && <a href={`/api/assisted/${encodeURIComponent(item.id)}/package`} download className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download caption and media (.zip)</a>}
               {item.status === "queued" && <div className="mt-3 max-w-xl">

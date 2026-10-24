@@ -9,6 +9,26 @@ const MAX_VIDEO_BYTES = 32 * 1024 * 1024;
 
 function fileSize(bytes: number): string { return `${(bytes / 1024 / 1024).toFixed(1)} MiB`; }
 
+export function PrivateVideoPreview({ id, name, preload = "none" }: { id: string; name?: string; preload?: "none" | "metadata" }) {
+  const [details, setDetails] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  return <div className="mt-3">
+    <video key={id} controls playsInline preload={preload} src={`/api/videos/${encodeURIComponent(id)}?preview=1`}
+      aria-label={`Preview ${name || "saved video"}`}
+      onLoadedMetadata={(event) => {
+        const player = event.currentTarget;
+        const dimensions = player.videoWidth && player.videoHeight ? `${player.videoWidth} × ${player.videoHeight}` : "";
+        const duration = Number.isFinite(player.duration) && player.duration > 0 ? `${player.duration.toFixed(1)} s` : "";
+        setDetails([dimensions, duration].filter(Boolean).join(" · ") || null);
+        setFailed(false);
+      }}
+      onError={() => { setDetails(null); setFailed(true); }}
+      className="max-h-72 w-full max-w-sm rounded-lg bg-black object-contain" />
+    {details && <p className="mt-1 text-[11px] text-[var(--text-muted)]">{details}</p>}
+    {failed && <p role="status" className="mt-1 text-[11px] text-[var(--warning)]">This browser cannot preview the clip. Download it to check before posting.</p>}
+  </div>;
+}
+
 export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disabled }: Props) {
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,7 +97,7 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
       <label htmlFor={selectId} className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Attach a saved clip</label>
       <select id={selectId} value={selectedId && selected ? selectedId : ""} disabled={disabled || busy} onChange={(event) => onChange(event.target.value || null)} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)]"><option value="">No video</option>{videos.map((item) => <option key={item.id} value={item.id}>{item.name} · {fileSize(item.sizeBytes)}</option>)}</select>
       {selectedId && !selected && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">The attached clip is unavailable. Choose another clip or select No video.</p>}
-      {selected && <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]"><a href={`/api/videos/${encodeURIComponent(selected.id)}`} download className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]"><Download size={12} aria-hidden="true" /> Download {selected.name}</a><button type="button" disabled={disabled || busy} onClick={() => void remove(selected.id)} className="inline-flex items-center gap-1 text-[var(--danger)] disabled:opacity-50"><Trash2 size={12} aria-hidden="true" /> Delete from library</button></div>}
+      {selected && <><PrivateVideoPreview key={selected.id} id={selected.id} name={selected.name} preload="metadata" /><div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]"><a href={`/api/videos/${encodeURIComponent(selected.id)}`} download className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]"><Download size={12} aria-hidden="true" /> Download {selected.name}</a><button type="button" disabled={disabled || busy} onClick={() => void remove(selected.id)} className="inline-flex items-center gap-1 text-[var(--danger)] disabled:opacity-50"><Trash2 size={12} aria-hidden="true" /> Delete from library</button></div></>}
     </> : <p className="mt-2 text-[11px] text-[var(--text-muted)]">No saved video clips yet.</p>}
     <p className="mt-2 text-[11px] text-[var(--text-soft)]">Library limit: 12 clips, 64 MiB total. Check the destination’s current format and size rules before posting.</p>
   </div>;
