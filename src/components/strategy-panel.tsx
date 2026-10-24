@@ -243,7 +243,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-5 py-5 sm:px-7">
       <div className="flex min-w-0 items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Sparkles size={18} aria-hidden="true" /></span>
-        <div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">AI planning</p><h2 id="strategy-heading" className="mt-0.5 text-[18px] font-bold tracking-[-0.025em] text-[var(--text)]">From goal to weekly ideas</h2><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Set your direction, review up to three ideas, then approve only the drafts you want.</p></div>
+        <div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Weekly ideas</p><h2 id="strategy-heading" className="mt-0.5 text-[18px] font-bold tracking-[-0.025em] text-[var(--text)]">Plan this week&apos;s posts</h2><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Save a brand brief, generate ideas, and choose which ones become drafts.</p></div>
       </div>
       {brief && !loading && <span className="rounded-full border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-[11px] font-bold text-[var(--accent-text)]">Profile saved</span>}
     </div>

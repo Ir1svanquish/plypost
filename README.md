@@ -1,73 +1,59 @@
 # Plypost
 
-Plypost is a local web app for drafting and planning social posts. It runs on your computer with one owner account; there is no hosted Plypost service.
+Plypost is a web app that runs on your computer. Write a post, edit versions for different platforms, save drafts, and plan when to publish. There is no hosted Plypost service.
 
-## What you can do
+## What works
 
-- Write one draft, then edit separate versions for Bluesky, Mastodon, LinkedIn and Threads. Preview the text and selected images before sharing. Optional AI adaptation uses a Nebius or NVIDIA key stored on the server.
-- Save drafts and up to four ordered images with optional descriptions in local SQLite. Export a full backup from **Drafts**.
-- Put posts on a calendar as simulations or manual reminders. A local worker processes due simulations and individually confirmed Mastodon posts while your computer is running.
-- Prepare manual publishing checklists for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit and the four draft platforms. Copy the text and image descriptions, download images, publish on the platform, then record the result yourself. You can correct a pending handoff's text or image descriptions without changing its source draft.
-- Download future manual reminders as an iCalendar file and import it into your calendar. The file contains platform and time, not draft text or images. Calendar alerts depend on your calendar settings; edits in Plypost do not sync to imported events.
-- Generate weekly ideas from a saved brand brief. Each idea needs your review before it becomes a draft. Clicking **Generate ideas** sends the brand brief to your selected AI provider; self-reported post results stay local.
+- Draft and preview posts for Bluesky, Mastodon, LinkedIn, and Threads, with up to four images.
+- Save drafts, set reminders, and export a local backup. The calendar can process simulated posts while the worker is running.
+- Prepare text and images for manual posting to X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit, and the four draft platforms. You publish on those sites yourself and record the result in Plypost.
+- Optionally use Nebius or NVIDIA Nemotron to rewrite drafts or suggest weekly ideas. AI requests are made only when you choose to generate them. Weekly idea generation sends your saved brand brief, not your recorded post results.
 
-| Publishing mode | What happens |
-| --- | --- |
-| Simulation | Creates a demo receipt. Nothing is sent to a social platform. |
-| Assisted | Gives you text, images and a link to the platform. You publish there yourself; Plypost cannot verify the post. |
-| Mastodon live | Sends a confirmed text-only post immediately, or at a confirmed time if the local worker is running. Requires an account and OAuth setup. |
-| Bluesky live | Sends a confirmed text-only post immediately. Requires an account and OAuth setup. |
+The separate Bluesky and Mastodon account features can send confirmed text posts; Mastodon also has a confirmed scheduling queue. **Neither account flow has been tested with a live account yet.** Images are for manual publishing, not these account features. Ordinary reminders and simulated posts never publish to a social platform.
 
-Images are available for assisted publishing, not live API posting. Real Mastodon and Bluesky account flows have **not** yet been tested against live accounts.
+## Run on your computer
 
-## Run locally
+Requires Node.js 24.14 or later and npm. In PowerShell:
 
-Requires Node.js 24.14 or later and npm. From the project directory:
-
-```bash
+```powershell
 npm install
-cp .env.example .env.local
+Copy-Item .env.example .env.local
 npm run hash-password
 ```
 
-On PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`. Add the printed `PLYPOST_OWNER_PASSWORD_HASH` line and your `PLYPOST_OWNER_EMAIL` to `.env.local`. Then start the app:
+Put your email and the printed password hash into `PLYPOST_OWNER_EMAIL` and `PLYPOST_OWNER_PASSWORD_HASH` in `.env.local`. Then run:
 
-```bash
+```powershell
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in. To process due items, start a second terminal in the same directory:
+Open [http://localhost:3000](http://localhost:3000). To process due simulations or confirmed Mastodon schedules, run `npm run worker` in a second terminal. The worker stops when your computer sleeps or the process closes.
 
-```bash
-npm run worker
-```
+The app keeps data in `data/plypost.sqlite` by default. Keep this file and exported backups private. `.env.local` and `data/` are excluded from Git.
 
-The worker uses the same local SQLite database. It stops when the process or computer stops; restart it after updating the app. Saved content is in `data/plypost.sqlite` by default. Keep the database and exported backups private. The `.env.local` file is ignored by Git.
+## Optional connections
 
-### Optional connections
+- **AI:** Add `NVIDIA_API_KEY` or `NEBIUS_API_KEY` to `.env.local`. Drafting and manual publishing work without either key.
+- **Bluesky:** Set the local origin and encryption key shown in [.env.example](.env.example), then connect in **Account**. The browser address must match the configured origin.
+- **Mastodon:** Skip this if you do not have an account. Otherwise use the instance, origin, and encryption settings in [.env.example](.env.example), then connect in **Account**. Confirmed scheduled posts need the worker. Set `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` and restart the app and worker to pause future dispatch.
 
-- **AI:** Set `NVIDIA_API_KEY` or `NEBIUS_API_KEY` in `.env.local`. Drafting, planning and simulation still work without an AI key; AI generation does not.
-- **Mastodon:** If you do not have an account, skip this. Otherwise set `PLYPOST_MASTODON_INSTANCE` to your server's HTTPS origin, `PLYPOST_PUBLIC_ORIGIN` to the app's exact browser origin, and `PLYPOST_MASTODON_SECRET` to 64 random hex characters. Restart the app and connect under **Account**. Real scheduled posts also need the worker. Set `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` and restart both processes to stop accepting and dispatching future real schedules.
-- **Bluesky:** Set `PLYPOST_BLUESKY_ORIGIN=http://127.0.0.1:3000` and a separate 64-character `PLYPOST_BLUESKY_SECRET`. Restart the app and open that exact `127.0.0.1` address before connecting under **Account**. This OAuth flow is local only.
+For either account connection, generate a separate encryption key with:
 
-Generate each encryption secret with:
-
-```bash
+```powershell
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 ```
 
-A full backup contains drafts, plans, assisted items, settings and images. It excludes login credentials and live publishing queues. Restoring a backup does not cancel real Mastodon posts already queued on this installation.
+Restoring a backup does not cancel real Mastodon posts already queued on this installation.
 
-## Checks and current limits
+## Check changes
 
-```bash
+```powershell
 npm run typecheck
 npm run lint
 npm test
 npm run build
-npm audit --omit=dev --audit-level=high
 ```
 
-The first four checks passed locally on 2026-10-24. The production dependency audit still reports 15 high entries tied to a [Zod advisory](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) in the official AT Protocol OAuth client. Plypost caps OAuth responses before parsing as a mitigation, but that does not fix the upstream dependency. Public deployment of Bluesky authorization should wait for a compatible fix and live account testing.
+These checks passed locally on 2026-10-24; a live deployment has not been set up. The current production dependency audit reports high-severity entries through the AT Protocol OAuth client's Zod dependency. OAuth response-size limits reduce exposure but do not fix the dependency. Check `npm audit --omit=dev --audit-level=high` before exposing Bluesky login publicly.
 
-LinkedIn and Threads are currently draft, simulation and assisted destinations; they do not have connected publishing. See [platform integration notes](PLATFORM_INTEGRATIONS.md) for access requirements and the [development plan](DEVELOPMENT_PLAN.md) for remaining work.
+See the [development plan](DEVELOPMENT_PLAN.md) and [platform notes](docs/platforms.md) for remaining work.

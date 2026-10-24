@@ -37,7 +37,7 @@ import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache"
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
-  "A good idea deserves more than a copy-paste post.\n\nShape one message for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
+  "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.";
 const legacySampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nSocialFlow helps you shape one draft for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
 const interimSampleDraft =
@@ -1190,7 +1190,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <a href="#account" onClick={(event) => { event.preventDefault(); openView("account"); }} aria-current={view === "account" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><UserRound size={18} /> Account</a>
         </nav>
         <div className="sidebar-footer mt-auto border-t px-3 pt-5">
-          <p className="sidebar-muted text-[12px] leading-5">Your space for drafts, plans and assisted posts.</p>
+          <p className="sidebar-muted text-[12px] leading-5">Drafts and reminders stay on this computer.</p>
         </div>
       </aside>
 
@@ -1215,8 +1215,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           {view === "compose" && <div id="compose" className="section-anchor">
           <div className="mb-6">
             <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Create</p>
-            <h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Shape your next post</h1>
-            <p className="mt-1 text-[14px] text-[var(--text-muted)]">Write once, choose channels, then review each version.</p>
+            <h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Write a post</h1>
+            <p className="mt-1 text-[14px] text-[var(--text-muted)]">Edit a version for each platform you select.</p>
           </div>
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(370px,.95fr)]">
             <div className="min-w-0 space-y-6">
