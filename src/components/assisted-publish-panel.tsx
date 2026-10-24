@@ -270,12 +270,6 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
     onDestinationChange(next);
   }
 
-  function choosePlatformType(videoFirst: boolean) {
-    setShowVideoDestinations(videoFirst);
-    const choices = videoFirst ? assistedVideoDisplayIds : assistedTextImageDisplayIds;
-    if (!choices.some((id) => id === destination)) chooseDestination(choices[0]);
-  }
-
   async function saveReminder(item: AssistedPost, scheduledFor: string | null) {
     if (busy || reminderSavingId) return;
     setReminderSavingId(item.id);
@@ -312,15 +306,15 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
 
       {composerOpen && <div id="assisted-compose-form" className="grid gap-4 p-6 sm:grid-cols-2 sm:p-7">
         <div className="sm:col-span-2">
-          <p id="assisted-destination-label" className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Destination</p>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p id="assisted-destination-label" className="text-[12px] font-bold text-[var(--text-secondary)]">Destination</p><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-text)]">Selected: {selected.name}</span></div>
           <div role="group" aria-label="Platform type" className="mb-3 inline-flex rounded-xl border border-[var(--line)] bg-[var(--field)] p-1">
-            <button type="button" aria-pressed={!showVideoDestinations} onClick={() => choosePlatformType(false)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${!showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Photo &amp; text-first</button>
-            <button type="button" aria-pressed={showVideoDestinations} onClick={() => choosePlatformType(true)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Video-first</button>
+            <button type="button" aria-pressed={!showVideoDestinations} onClick={() => setShowVideoDestinations(false)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${!showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Photo &amp; text-first</button>
+            <button type="button" aria-pressed={showVideoDestinations} onClick={() => setShowVideoDestinations(true)} className={`rounded-lg px-3 py-2 text-[12px] font-semibold ${showVideoDestinations ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]"}`}>Video-first</button>
           </div>
           <div role="group" aria-labelledby="assisted-destination-label" className="flex flex-wrap gap-2">
             {(showVideoDestinations ? assistedVideoDisplayIds : assistedTextImageDisplayIds).map((id) => <button key={id} type="button" aria-pressed={destination === id} onClick={() => chooseDestination(id)} className={`rounded-lg border px-3 py-2 text-[12px] font-semibold ${destination === id ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--accent-border)]"}`}>{assistedDestinations[id].name}</button>)}
           </div>
-          <p className="mt-2 text-[11px] text-[var(--text-muted)]">Selected: {selected.name}. Choose a platform above to change it. Some platforms support both formats.</p>
+          <p className="mt-2 text-[11px] text-[var(--text-muted)]">Browse a group, then choose a platform to change the destination. Some platforms support both formats.</p>
         </div>
         <LocalDateTimeField id="assisted-time" label="Reminder time" value={time} minTimestamp={now} optional onChange={onTimeChange} />
         <div className="sm:col-span-2">
