@@ -34,6 +34,11 @@ export const assistedDestinations: Record<AssistedDestinationId, AssistedDestina
   threads: { name: "Threads", url: "https://www.threads.com/", hint: "Create a post from your Threads account." },
 };
 
+export function missingHandoffMedia(destination: AssistedDestinationId, imageCount: number, hasVideo: boolean): "video" | "photo-or-video" | null {
+  if (destination === "youtube") return hasVideo ? null : "video";
+  return assistedDestinations[destination].needsMedia && imageCount === 0 && !hasVideo ? "photo-or-video" : null;
+}
+
 export function isAssistedDestinationId(value: unknown): value is AssistedDestinationId {
   return typeof value === "string" && assistedIds.includes(value as AssistedDestinationId);
 }

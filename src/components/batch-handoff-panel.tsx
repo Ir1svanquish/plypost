@@ -6,7 +6,7 @@ import { LocalDateTimeField, isValidLocalDateTime } from "@/components/local-dat
 import { MediaHandoff } from "@/components/media-handoff";
 import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
 import { adaptDraft, characterCount, isPlatformId, platformDisplayIds, platforms, type PlatformId } from "@/lib/platforms";
-import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
+import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, missingHandoffMedia, type AssistedDestinationId } from "@/lib/assisted";
 import { validatePlatformText } from "@/lib/platform-validation";
 import type { AssistedPost, SavedDraft } from "@/lib/workspace";
 
@@ -223,11 +223,12 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         const text = textFor(id);
         const check = isPlatformId(id) ? validatePlatformText(id, text) : null;
         const valid = check?.valid ?? Boolean(text.trim() && characterCount(text) <= 5000);
+        const missingMedia = missingHandoffMedia(id, draft.mediaIds?.length ?? 0, Boolean(videoId));
         return <div key={id} id="batch-active-editor" className="min-w-0 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4">
           <label htmlFor={`batch-text-${id}`} className="text-[13px] font-bold text-[var(--text)]">{assistedDestinations[id].name} text</label>
           <textarea id={`batch-text-${id}`} value={text} onChange={(event) => setTexts((current) => ({ ...current, [id]: event.target.value }))} disabled={attempted} className="mt-2 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-70" />
           <p className={`mt-1 text-[11px] ${valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}`}>{check ? `${check.count} / ${check.limit} ${id === "bluesky" ? "graphemes" : "characters"}` : `${characterCount(text)} / 5,000 characters`}{check?.byteCount !== undefined ? ` · ${check.byteCount} / ${check.byteLimit} UTF-8 bytes` : ""}{!valid ? " · Edit this text before confirming" : ""}</p>
-          {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{assistedDestinations[id].needsMedia && !draft.mediaIds?.length && !videoId ? " Bring your media when posting." : ""}</p>}
+          {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{missingMedia === "video" ? " No video is attached here; bring one when posting." : missingMedia ? " No photo or video is attached here; bring one when posting." : ""}</p>}
           <div className="mt-3">{slotApplied && isPlatformId(id) && slotTimes[id] ? <p className="rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)]">Reminder: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview?.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(slotTimes[id]))} · {slotPreview?.timeZone}</p> : <fieldset disabled={attempted} className={attempted ? "opacity-70" : ""}><LocalDateTimeField id={`batch-reminder-${id}`} label={`${assistedDestinations[id].name} reminder`} value={reminders[id] ?? ""} minTimestamp={currentTime} optional onChange={(value) => setReminders((current) => ({ ...current, [id]: value }))} /></fieldset>}</div>
         </div>;
       })}

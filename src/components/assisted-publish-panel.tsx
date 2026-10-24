@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Bell, CalendarClock, Check, Copy, Download, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
-import { assistedDestinations, assistedTextImageDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
+import { assistedDestinations, assistedTextImageDisplayIds, assistedVideoDisplayIds, missingHandoffMedia, type AssistedDestinationId } from "@/lib/assisted";
 import { characterCount, isPlatformId } from "@/lib/platforms";
 import { buildManualReminderCalendar, upcomingManualReminders } from "@/lib/calendar-export";
 import { validatePlatformText } from "@/lib/platform-validation";
@@ -46,7 +46,7 @@ type Props = {
 type OutcomeForm = { views: string; likes: string; replies: string; notes: string };
 const statusFilters = [
   { id: "to-post", label: "To post" },
-  { id: "ready", label: "Ready" },
+  { id: "due", label: "Due now" },
   { id: "upcoming", label: "Upcoming" },
   { id: "posted", label: "Posted" },
 ] as const;
@@ -100,15 +100,16 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
   const [outcomeSavingId, setOutcomeSavingId] = useState<string | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [composerInitialized, setComposerInitialized] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("to-post");
   const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
   const [videoId, setVideoId] = useState<string | null>(null);
   const [videoBusy, setVideoBusy] = useState(false);
-  const composerInitializedRef = useRef(false);
   const handledFocusRef = useRef<string | null>(null);
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
+  const missingComposerMedia = missingHandoffMedia(destination, imageCount, Boolean(videoId));
   const videoFirst = assistedVideoDisplayIds.some((id) => id === destination);
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
   const availableTextImageDestinations = assistedTextImageDisplayIds.filter((id) => items.some((item) => item.destination === id));
@@ -118,23 +119,23 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
   const destinationItems = activeDestinationFilter === "all" ? items : items.filter((item) => item.destination === activeDestinationFilter);
   const statusCounts: Record<StatusFilter, number> = {
     "to-post": destinationItems.filter((item) => item.status === "queued").length,
-    ready: destinationItems.filter((item) => assistedState(item, now) === "due").length,
+    due: destinationItems.filter((item) => assistedState(item, now) === "due").length,
     upcoming: destinationItems.filter((item) => assistedState(item, now) === "upcoming").length,
     posted: destinationItems.filter((item) => item.status === "posted").length,
   };
   const visibleItems = destinationItems.filter((item) => {
     if (statusFilter === "to-post") return item.status === "queued";
-    if (statusFilter === "ready") return assistedState(item, now) === "due";
+    if (statusFilter === "due") return assistedState(item, now) === "due";
     return assistedState(item, now) === statusFilter;
   });
   const hasFocusedItem = Boolean(focusItemId && visibleItems.some((item) => item.id === focusItemId));
   const mastodonOrigin = safeMastodonOrigin(mastodonInstance);
 
   useEffect(() => {
-    if (!workspaceReady || composerInitializedRef.current) return;
-    composerInitializedRef.current = true;
+    if (!workspaceReady || composerInitialized) return;
     setComposerOpen(items.length === 0 || Boolean(time));
-  }, [workspaceReady, items.length, time]);
+    setComposerInitialized(true);
+  }, [workspaceReady, composerInitialized, items.length, time]);
 
   useEffect(() => {
     if (!focusItemId) { handledFocusRef.current = null; return; }
@@ -253,8 +254,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {futureReminderCount > 0 && <button type="button" onClick={downloadCalendar} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download {futureReminderCount} calendar {futureReminderCount === 1 ? "reminder" : "reminders"}</button>}
-          <button type="button" onClick={() => { composerInitializedRef.current = true; setComposerOpen((current) => !current); }} aria-expanded={composerOpen} aria-controls="assisted-compose-form" className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]">{composerOpen ? "Hide new post" : "New manual post"}</button>
-          <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${dueCount ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-muted)]"}`}>{dueCount ? `${dueCount} ready now` : "Manual publishing"}</span>
+          <button type="button" onClick={() => setComposerOpen((current) => !current)} disabled={!composerInitialized} aria-expanded={composerOpen} aria-controls="assisted-compose-form" className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-50">{composerOpen ? "Hide new post" : "New manual post"}</button>
+          <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${dueCount ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-muted)]"}`}>{dueCount ? `${dueCount} due now` : "Manual publishing"}</span>
         </div>
       </div>
       {calendarError && <p role="alert" className="mx-6 mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)] sm:mx-7">{calendarError}</p>}
@@ -278,7 +279,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
           <p className="mt-2 text-[12px] text-[var(--text-secondary)]">{imageCount ? `${imageCount} ${imageCount === 1 ? "image" : "images"} from the current draft will be saved with this handoff.` : "No images selected in the current draft."} <button type="button" onClick={onEditImages} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit images in Create</button></p>
           <details key={destination} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
-          {selected.needsMedia && <p className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">{destination === "youtube" && !videoId ? "Attach a video here or bring one when you publish on YouTube." : imageCount === 0 && !videoId ? "Bring a photo or video when you publish. This handoff has no saved media." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
+          {selected.needsMedia && <p className={`mt-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${missingComposerMedia ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{missingComposerMedia === "video" ? "No video attached here. Attach one or bring a video when you publish on YouTube." : missingComposerMedia ? "No photo or video attached here. Bring one when you publish." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
             <p className={validation.valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}>{validation.count} / {validation.limit} {destination === "bluesky" ? "graphemes" : "characters"}{validation.byteCount !== undefined ? ` · ${validation.byteCount} / ${validation.byteLimit} UTF-8 bytes` : ""}</p>
             {validation.issues.map((issue) => <p key={issue.code} className={issue.severity === "error" ? "text-[var(--danger)]" : "text-[var(--warning)]"}>{issue.message}</p>)}
@@ -305,7 +306,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         </label>
       </div>}
       {items.length === 0 ? (
-        <div className="flex flex-col items-center border-t border-[var(--line)] px-6 py-9 text-center"><Bell size={22} className="text-[var(--accent-text)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No assisted posts yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Add one above to get a ready-to-publish checklist.</p></div>
+        <div className="flex flex-col items-center border-t border-[var(--line)] px-6 py-9 text-center"><Bell size={22} className="text-[var(--accent-text)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No assisted posts yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Add one above to start a manual publishing checklist.</p></div>
       ) : visibleItems.length === 0 ? (
         <div className="border-t border-[var(--line)] px-6 py-8 text-center sm:px-7"><p className="text-[13px] font-semibold text-[var(--text-secondary)]">No posts in this view</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">Choose another status or platform to see more.</p></div>
       ) : (
@@ -313,6 +314,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
           {visibleItems.map((item) => {
             const state = assistedState(item, now);
             const target = assistedDestinations[item.destination];
+            const missingMedia = missingHandoffMedia(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId));
             const enteredUrl = postUrls[item.id] ?? "";
             const normalizedUrl = enteredUrl ? normalizePublicPostUrl(enteredUrl) : undefined;
             const invalidUrl = normalizedUrl === null;
@@ -341,7 +343,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
             const canSaveVideo = Boolean(videoEdit && !videoEditStale && videoEdit.value !== videoEdit.expectedVideoId);
             return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && target.needsMedia && (item.destination === "youtube" ? !item.videoId : !item.mediaIds?.length && !item.videoId) && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{item.destination === "youtube" ? "Bring a video when posting." : "Add a photo or video when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Due now · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && missingMedia && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{missingMedia === "video" ? "No video attached here. Bring one when posting." : "No photo or video attached here. Bring one when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
                 <button type="button" aria-label={`Remove ${target.name} handoff: ${item.title}`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
               <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">

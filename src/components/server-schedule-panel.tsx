@@ -95,10 +95,10 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
     return state === "failed" || state === "due";
   }).sort((left, right) => attentionPriority(left) - attentionPriority(right) || Date.parse(left.scheduledFor) - Date.parse(right.scheduledFor));
   const visibleAttention = showAllAttention ? attentionItems : attentionItems.slice(0, 4);
-  const readyManualCount = attentionItems.filter((item) => item.kind === "manual").length;
+  const dueManualCount = attentionItems.filter((item) => item.kind === "manual").length;
   const failedSimulationCount = attentionItems.filter((item) => item.kind === "simulation" && item.post.status === "failed").length;
   const realAttentionCount = attentionItems.filter((item) => item.kind === "real-mastodon").length;
-  const waitingSimulationCount = attentionItems.length - readyManualCount - failedSimulationCount - realAttentionCount;
+  const waitingSimulationCount = attentionItems.length - dueManualCount - failedSimulationCount - realAttentionCount;
   const filtered = allItems.filter((item) => matchesPlanAgendaFilter(item, effectiveFilter));
   const monthItems = agendaForMonth(filtered, month.year, month.index);
   const agenda = showAllDates ? filtered : monthItems.filter((item) => !selectedDay || localAgendaDay(item.scheduledFor) === selectedDay);
@@ -199,7 +199,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
     </div>
     {attentionItems.length > 0 && <div className="border-t border-[var(--line)] bg-[var(--surface-muted)] px-6 py-5 sm:px-7" aria-labelledby="plan-attention-heading">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div><h3 id="plan-attention-heading" className="text-[15px] font-bold text-[var(--text)]">Needs attention</h3><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Across all dates · {hasRealMastodon && <>{realAttentionCount} real Mastodon, </>}{readyManualCount} manual ready, {failedSimulationCount} simulation failed{waitingSimulationCount ? `, ${waitingSimulationCount} simulation waiting for worker` : ""}.</p></div>
+        <div><h3 id="plan-attention-heading" className="text-[15px] font-bold text-[var(--text)]">Needs attention</h3><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Across all dates · {hasRealMastodon && <>{realAttentionCount} real Mastodon, </>}{dueManualCount} manual due, {failedSimulationCount} simulation failed{waitingSimulationCount ? `, ${waitingSimulationCount} simulation waiting for worker` : ""}.</p></div>
         <span className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--warning)]">{attentionItems.length} to review</span>
       </div>
       <div className="mt-4 divide-y divide-[var(--line)] overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
@@ -284,7 +284,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
         if (item.kind === "manual") {
           const manual = item.post;
           const state = assistedState(manual, now);
-          const label = state === "posted" ? "Marked posted by you · unverified" : state === "due" ? "Manual · ready to post" : "Manual · upcoming";
+          const label = state === "posted" ? "Marked posted by you · unverified" : state === "due" ? "Manual · due now" : "Manual · upcoming";
           return <article key={`manual-${manual.id}`} className="py-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 flex-1">
