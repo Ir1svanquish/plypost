@@ -125,7 +125,7 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
   return item;
 }
 
-type BatchHandoff = { destination: AssistedDestinationId; scheduledFor: string; text?: string; videoId?: string };
+type BatchHandoff = { destination: AssistedDestinationId; scheduledFor: string; reminderEnabled?: boolean; text?: string; videoId?: string };
 
 /** Snapshot reviewed manual-publishing handoffs from one saved draft. */
 export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: unknown, items: unknown,
@@ -134,11 +134,12 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
   if (expectedUpdatedAt !== undefined && !validUtcInstant(expectedUpdatedAt)) throw new Error("Invalid saved draft version.");
   if (!validUuid(draftId) || !validUuid(batchId) || !Array.isArray(items) ||
       items.length < 1 || items.length > assistedIds.length || items.some((entry) =>
-        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor" && key !== "text" && key !== "videoId") ||
+        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor" && key !== "reminderEnabled" && key !== "text" && key !== "videoId") ||
         !isAssistedDestinationId(entry.destination) || !validUtcInstant(entry.scheduledFor) ||
+        (entry.reminderEnabled !== undefined && typeof entry.reminderEnabled !== "boolean") ||
         (entry.text !== undefined && (typeof entry.text !== "string" || !entry.text.trim() || characterCount(entry.text) > 5000)) ||
         (entry.videoId !== undefined && !validUuid(entry.videoId)))) {
-    throw new Error("Choose a saved draft and one to eleven destinations with valid text and UTC reminder times.");
+    throw new Error("Choose a saved draft and one to eleven destinations with valid text and UTC timestamps.");
   }
   const requested = items as BatchHandoff[];
   if (new Set(requested.map((item) => item.destination)).size !== requested.length) {
@@ -148,7 +149,8 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     // Keep the original request in the local audit log so a retry cannot shrink a
     // batch after one or all handoffs were deleted. Imported backups may lack this log.
     const manifest = JSON.stringify({ draftId, ...(expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : {}), items: requested
-      .map(({ destination, scheduledFor, text, videoId }) => ({ destination, scheduledFor,
+      .map(({ destination, scheduledFor, reminderEnabled, text, videoId }) => ({ destination, scheduledFor,
+        ...(reminderEnabled !== undefined ? { reminderEnabled } : {}),
         ...(videoId !== undefined ? { videoId } : {}),
         ...(text !== undefined ? { textSha256: createHash("sha256").update(text).digest("hex") } : {}) }))
       .sort((a, b) => a.destination.localeCompare(b.destination)) });
@@ -164,7 +166,8 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
       const byDestination = new Map(existing.map((item) => [item.destination, item]));
       if (existing.length !== requested.length || byDestination.size !== requested.length ||
           existing.some((item) => item.sourceDraftId !== draftId) ||
-          requested.some((item) => byDestination.get(item.destination)?.scheduledFor !== item.scheduledFor)) {
+          requested.some((item) => byDestination.get(item.destination)?.scheduledFor !== item.scheduledFor ||
+            byDestination.get(item.destination)?.reminderEnabled !== item.reminderEnabled)) {
         throw new Error("This batch ID was already used for a different or partial handoff.");
       }
       return requested.map((item) => byDestination.get(item.destination)!);
@@ -179,7 +182,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
       throw new Error("Choose destinations selected in this saved draft.");
     }
     if (requireFreeSlots && requested.some((item) =>
-      isPlatformId(item.destination) && (Date.parse(item.scheduledFor) < Date.now() + 10_000 ||
+      isPlatformId(item.destination) && item.reminderEnabled !== false && (Date.parse(item.scheduledFor) < Date.now() + 10_000 ||
       !slotIsFree(db, userId, item.destination, item.scheduledFor)))) {
       throw new Error("A suggested slot is now occupied or too soon. Preview free slots again.");
     }
@@ -192,7 +195,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     }
 
     const now = new Date().toISOString();
-    const prepared = requested.map(({ destination, scheduledFor, text: reviewedText, videoId }): AssistedPost => {
+    const prepared = requested.map(({ destination, scheduledFor, reminderEnabled, text: reviewedText, videoId }): AssistedPost => {
       const text = reviewedText ?? (isPlatformId(destination)
         ? draft.variants[destination] ?? adaptDraft(draft.source, destination)
         : draft.source);
@@ -205,8 +208,10 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
         ...(draft.mediaIds !== undefined ? { mediaIds: [...draft.mediaIds] } : {}),
         ...(draft.mediaAlt !== undefined ? { mediaAlt: [...draft.mediaAlt] } : {}),
         ...(videoId !== undefined ? { videoId } : {}),
-        sourceDraftId: draft.id, batchId, scheduledFor, createdAt: now, status: "queued",
-        ...(Date.parse(scheduledFor) <= Date.parse(now) ? { notifiedAt: now } : {}),
+        sourceDraftId: draft.id, batchId, scheduledFor,
+        ...(reminderEnabled !== undefined ? { reminderEnabled } : {}),
+        createdAt: now, status: "queued",
+        ...(reminderEnabled !== false && Date.parse(scheduledFor) <= Date.parse(now) ? { notifiedAt: now } : {}),
       };
       if (!validAssisted(item)) throw new Error("Could not prepare a valid handoff.");
       return item;

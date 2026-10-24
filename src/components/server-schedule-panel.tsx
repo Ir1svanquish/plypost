@@ -17,6 +17,7 @@ type Props = {
   onRescheduleAssisted: (post: AssistedPost, scheduledForIso: string) => Promise<void>;
   onOpenAssisted: (item: AssistedPost) => void;
   onOpenDraft: (draft: SavedDraft) => void;
+  onPrepareDraft: (draft: SavedDraft) => void;
   onOpenRealMastodon: (item: RealMastodonSchedule) => void;
   onPrepareManual: (localTime: string) => void;
 };
@@ -71,7 +72,7 @@ function nextManualTimeOnDay(day: string, now: number): string | null {
   return localAgendaDay(nextQuarter) === day ? localDateTimeValue(nextQuarter) : null;
 }
 
-export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, showRealMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onRescheduleAssisted, onOpenAssisted, onOpenDraft, onOpenRealMastodon, onPrepareManual }: Props) {
+export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, showRealMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onRescheduleAssisted, onOpenAssisted, onOpenDraft, onPrepareDraft, onOpenRealMastodon, onPrepareManual }: Props) {
   const [month, setMonth] = useState<Month>(() => {
     const today = new Date(now || Date.now());
     return { year: today.getFullYear(), index: today.getMonth() };
@@ -202,7 +203,7 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
   return <section id="schedule" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="schedule-heading">
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
       <div><h2 id="schedule-heading" className="text-[17px] font-bold">Content calendar</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Draft target dates, manual reminders{hasRealMastodon ? ", real Mastodon posts" : ""} and simulations in one place.</p></div>
-      <div className="flex flex-wrap gap-2">{hasRealMastodon && <span className="rounded-full bg-[var(--positive-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--positive)]">{realQueuedCount} real Mastodon queued</span>}<button type="button" onClick={showDraftTargets} disabled={datedDraftCount === 0} className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:cursor-default">{datedDraftCount} dated drafts</button><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--accent-text)]">{queuedCount} simulated queued</span><span className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--warning)]">{manualReminderCount} manual reminders</span>{undatedChecklist.length > 0 && <button type="button" onClick={() => onOpenAssisted(undatedChecklist[0])} className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{undatedChecklist.length} undated checklist</button>}</div>
+      <div className="flex flex-wrap gap-2">{hasRealMastodon && <span className="rounded-full bg-[var(--positive-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--positive)]">{realQueuedCount} real Mastodon queued</span>}<button type="button" onClick={showDraftTargets} disabled={datedDraftCount === 0} className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:cursor-default">{datedDraftCount} dated drafts</button><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--accent-text)]">{queuedCount} simulated queued</span><span className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--warning)]">{manualReminderCount} manual reminders</span>{undatedChecklist.length > 0 && <button type="button" onClick={() => onOpenAssisted(undatedChecklist[0])} className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{undatedChecklist.length} undated {undatedChecklist.length === 1 ? "checklist item" : "checklist items"}</button>}</div>
     </div>
     <details className="border-t border-[var(--line)] px-6 py-4 sm:px-7">
       <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Demo simulation · optional</summary>
@@ -284,14 +285,17 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
       <div className="divide-y divide-[var(--line)]">{agenda.map((item) => {
         if (item.kind === "draft") {
           const draft = item.post;
+          const linkedHandoffs = assisted.filter((post) => post.sourceDraftId === draft.id);
+          const targetPassed = Boolean(draft.plannedDate && draft.plannedDate < todayKey);
           return <article key={`draft-${draft.id}`} className="py-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2"><h4 className="break-words text-[13px] font-bold text-[var(--text-secondary)]">{draft.title}</h4><span className="rounded-full bg-[var(--field)] px-2 py-0.5 text-[11px] font-bold text-[var(--text-secondary)]">Draft · target date only</span></div>
+                <div className="flex flex-wrap items-center gap-2"><h4 className="break-words text-[13px] font-bold text-[var(--text-secondary)]">{draft.title}</h4><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${targetPassed ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-secondary)]"}`}>{targetPassed ? "Draft · target day passed" : "Draft · target date only"}</span></div>
                 <p className="mt-1 text-[12px] text-[var(--text-muted)]">{new Date(`${draft.plannedDate}T12:00:00`).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })} · no reminder or automatic post</p>
                 {draft.source.trim() && <p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] text-[var(--text-secondary)]">{draft.source}</p>}
+                {linkedHandoffs.length > 0 && <p className="mt-2 text-[11px] text-[var(--text-muted)]">{linkedHandoffs.length} manual {linkedHandoffs.length === 1 ? "handoff" : "handoffs"} linked to this draft · {linkedHandoffs.filter((post) => post.status === "posted").length} marked posted by you</p>}
               </div>
-              <button type="button" onClick={() => onOpenDraft(draft)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Open draft</button>
+              <div className="flex flex-wrap gap-2 sm:justify-end"><button type="button" onClick={() => onOpenDraft(draft)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Open draft</button><button type="button" onClick={() => onPrepareDraft(draft)} className="self-start rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--surface-hover)]">Prepare handoffs</button></div>
             </div>
           </article>;
         }

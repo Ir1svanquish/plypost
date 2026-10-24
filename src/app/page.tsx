@@ -78,7 +78,7 @@ type EditorContent = {
   plannedDate: string;
 };
 type EditorOrigin = "starter" | "new" | "planned";
-type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft } | { kind: "planned"; post: ScheduledPost } | { kind: "assisted"; post: AssistedPost };
+type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft; prepareHandoffs?: boolean } | { kind: "planned"; post: ScheduledPost } | { kind: "assisted"; post: AssistedPost };
 
 function sameItems(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
@@ -184,6 +184,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [title, setTitle] = useState("");
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [currentDraftVersion, setCurrentDraftVersion] = useState<string | null>(null);
+  const [batchLaunch, setBatchLaunch] = useState<{ draftId: string; token: number } | null>(null);
+  const batchLaunchCounter = useRef(0);
   const [draftConflict, setDraftConflict] = useState(false);
   const [editorOrigin, setEditorOrigin] = useState<EditorOrigin>("starter");
   const [pendingEditorSwitch, setPendingEditorSwitch] = useState<EditorSwitch | null>(null);
@@ -221,6 +223,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const needsDraftRecovery = draftConflict || Boolean(currentDraftId && workspaceReady && currentSavedDraft?.updatedAt !== currentDraftVersion);
 
   useEffect(() => {
+    if (view !== "compose" || !batchLaunch || currentSavedDraft?.id !== batchLaunch.draftId) return;
+    const frame = window.requestAnimationFrame(() => document.getElementById("batch-handoff-heading")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [view, batchLaunch, currentSavedDraft?.id]);
+
+  useEffect(() => {
     const dialog = switchDialogRef.current;
     if (pendingEditorSwitch && dialog && !dialog.open) dialog.showModal();
   }, [pendingEditorSwitch]);
@@ -256,11 +264,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     };
   }, []);
 
-  function openView(next: WorkspaceView) {
+  function openView(next: WorkspaceView, scrollTop = true) {
     if (next !== "assisted") { setOpenAssistedComposer(false); setOpenAssistedVideoGroup(false); }
     setView(next);
     if (window.location.hash !== `#${next}`) window.history.pushState(null, "", `#${next}`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (scrollTop) window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function openManualComposer(videoFirst = false) {
@@ -720,6 +728,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     editorRevision.current += 1;
     resetMediaPicker();
     setAiUndo(null);
+    const prepareHandoffs = next.kind === "draft" && Boolean(next.prepareHandoffs);
+    if (prepareHandoffs && next.kind === "draft") {
+      batchLaunchCounter.current += 1;
+      setBatchLaunch({ draftId: next.draft.id, token: batchLaunchCounter.current });
+    } else {
+      setBatchLaunch(null);
+    }
     if (next.kind === "new") {
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
@@ -784,7 +799,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setActive(isPlatformId(post.destination) ? post.destination : platformDisplayIds[0]);
       setNotice({ kind: "success", text: "Started an unsaved draft from your posted text. Review and rewrite it before sharing; media was not copied." });
     }
-    openView("compose");
+    openView("compose", !prepareHandoffs);
   }
 
   function requestEditorSwitch(next: EditorSwitch) {
@@ -808,6 +823,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   function newDraft() { requestEditorSwitch({ kind: "new" }); }
 
   function loadDraft(draft: SavedDraft) { requestEditorSwitch({ kind: "draft", draft }); }
+
+  function prepareDraftHandoffs(draft: SavedDraft) { requestEditorSwitch({ kind: "draft", draft, prepareHandoffs: true }); }
 
   async function openLatestDraft() {
     if (!currentDraftId) return;
@@ -841,7 +858,17 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         return;
       }
       setPendingEditorSwitch(null);
-      applyEditorSwitch(target);
+      if (target.kind === "draft") {
+        const refreshed = await refreshWorkspace();
+        const latest = (refreshed.drafts as SavedDraft[]).find((draft) => draft.id === target.draft.id);
+        if (!latest) throw new Error("The target draft was deleted. Your current changes were saved; choose another draft.");
+        applyEditorSwitch({ ...target, draft: latest });
+      } else {
+        applyEditorSwitch(target);
+      }
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not open the target draft after saving." });
+      openView("compose");
     } finally {
       switchSavingRef.current = false;
       setSwitchSaving(false);
@@ -1442,7 +1469,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
               {showBlueskyLive && selected.includes("bluesky") && active === "bluesky" && <BlueskyLivePanel connection={blueskyConnection} connectionLoading={blueskyLoading} connectionError={blueskyError} selected active text={textFor("bluesky")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
               {showMastodonLive && selected.includes("mastodon") && active === "mastodon" && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[12px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
             </div>
-            {currentSavedDraft && <div className="xl:col-span-2"><BatchHandoffPanel key={`${currentSavedDraft.id}:${currentSavedDraft.updatedAt}`} draft={currentSavedDraft} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy || videoBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} /></div>}
+            {currentSavedDraft && <div className="xl:col-span-2"><BatchHandoffPanel key={`${currentSavedDraft.id}:${currentSavedDraft.updatedAt}:${batchLaunch?.draftId === currentSavedDraft.id ? batchLaunch.token : 0}`} startExpanded={batchLaunch?.draftId === currentSavedDraft.id} draft={currentSavedDraft} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy || videoBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} /></div>}
           </div>
           </div>}
 
@@ -1457,7 +1484,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <div hidden={view !== "schedule"}>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">{showMastodonQueue ? "See real Mastodon posts, simulations and manual handoffs together." : "Plan drafts, simulations and manual handoffs in one place."}</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{canSaveEditor ? draftTitle(title, source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "") : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
-            <ServerSchedulePanel drafts={drafts} schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenDraft={loadDraft} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
+            <ServerSchedulePanel drafts={drafts} schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenDraft={loadDraft} onPrepareDraft={prepareDraftHandoffs} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
             <PostingResultsPanel posts={assisted} onOpenRecord={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onReuseText={(item) => requestEditorSwitch({ kind: "assisted", post: item })} />
             <details className="mt-6"><summary className="cursor-pointer rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] font-bold text-[var(--text-secondary)]">Weekly posting slots · set recurring times for manual handoffs</summary><div className="mt-3"><WeeklySlotsPanel key={slotsRefreshEpoch} /></div></details>
             <div hidden={!showMastodonQueue}><MastodonSchedulePanel items={realMastodonSchedules} onItemsChange={setRealMastodonSchedules} onLoadErrorChange={setRealMastodonQueueError} connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected={selected.includes("mastodon")} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} now={now} visible={view === "schedule"} workerLastSeen={workerLastSeen} onOpenAccount={() => openView("account")} onOpenEditor={() => openView("compose")} /></div>

@@ -11,7 +11,8 @@ import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
 import { createVideo } from "../src/lib/server/video.ts";
 import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText } from "../src/lib/server/workspace.ts";
-import { parseWorkspace } from "../src/lib/workspace.ts";
+import { assistedState, hasManualReminder, parseWorkspace } from "../src/lib/workspace.ts";
+import { buildPlanAgenda } from "../src/lib/plan-agenda.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-batch-"));
@@ -248,6 +249,22 @@ test("ready-now batch handoffs suppress duplicate browser alerts while future re
   assert.equal(persisted.find((item) => item.destination === "linkedin").notifiedAt, undefined);
 });
 
+test("batch handoffs without reminders stay on the checklist and off the dated calendar", () => {
+  const saved = saveDraft(owner, draft());
+  const batchId = randomUUID();
+  const items = [{ destination: "bluesky", scheduledFor: new Date().toISOString(), reminderEnabled: false }];
+  const [prepared] = prepareAssistedBatch(owner, saved.id, batchId, items, true);
+  assert.equal(prepared.reminderEnabled, false);
+  assert.equal(prepared.notifiedAt, undefined);
+  assert.equal(hasManualReminder(prepared), false);
+  assert.equal(assistedState(prepared, Date.now() + 60_000), "unscheduled");
+  const persisted = listWorkspace(owner).assisted.filter((post) => post.batchId === batchId);
+  assert.deepEqual(buildPlanAgenda([], persisted), []);
+  assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, items), [prepared]);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId,
+    [{ ...items[0], reminderEnabled: true }]), /different or partial/);
+});
+
 test("invalid member, duplicates, missing media, and list-cap overflow roll back the entire batch", () => {
   const tooLong = saveDraft(other, draft("Normal source", ["bluesky", "linkedin"], { bluesky: "x".repeat(301) }));
   const items = handoffs();
@@ -255,7 +272,7 @@ test("invalid member, duplicates, missing media, and list-cap overflow roll back
   assert.deepEqual(listWorkspace(other).assisted, []);
   assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), [items[0], items[0]]), /only once/);
   assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), [{ destination: "threads", scheduledFor: items[0].scheduledFor }]), /selected in this saved draft/);
-  assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), [{ ...items[0], scheduledFor: "2026-02-30T12:00:00.000Z" }]), /UTC reminder times/);
+  assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), [{ ...items[0], scheduledFor: "2026-02-30T12:00:00.000Z" }]), /UTC timestamps/);
   const missingMedia = saveDraft(other, draft("Okay", ["bluesky"], {}, []));
   database().prepare("UPDATE drafts SET payload=? WHERE id=? AND user_id=?")
     .run(JSON.stringify({ ...missingMedia, mediaIds: [randomUUID()] }), missingMedia.id, other);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Copy, ShieldCheck } from "lucide-react";
 import { LocalDateTimeField, isValidLocalDateTime } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
@@ -10,7 +10,7 @@ import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisp
 import { validatePlatformText } from "@/lib/platform-validation";
 import type { AssistedPost, SavedDraft } from "@/lib/workspace";
 
-export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; videoId?: string };
+export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; reminderEnabled?: false; videoId?: string };
 export type BatchPrepareResult = "prepared" | "rejected" | "uncertain";
 
 type Props = {
@@ -20,12 +20,13 @@ type Props = {
   editorDirty: boolean;
   busy: boolean;
   mediaBusy: boolean;
+  startExpanded?: boolean;
   onPrepare: (draftId: string, expectedUpdatedAt: string, batchId: string, items: BatchHandoffItem[], requireFreeSlots: boolean) => Promise<BatchPrepareResult>;
   onOpenAssisted: () => void;
 };
 
-export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, mediaBusy, onPrepare, onOpenAssisted }: Props) {
-  const [open, setOpen] = useState(false);
+export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, mediaBusy, startExpanded = false, onPrepare, onOpenAssisted }: Props) {
+  const [open, setOpen] = useState(startExpanded);
   const [destinations, setDestinations] = useState<AssistedDestinationId[]>(() => platformDisplayIds.filter((id) =>
     draft.selected.includes(id) && !existing.some((item) => item.sourceDraftId === draft.id && item.destination === id)));
   const [focusedDestination, setFocusedDestination] = useState<AssistedDestinationId | null>(null);
@@ -47,6 +48,9 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const submittingRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const reviewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (startExpanded) reviewRef.current?.focus({ preventScroll: true });
+  }, [startExpanded]);
   const savedPlatforms = platformDisplayIds.filter((id) => draft.selected.includes(id));
   const availableDestinations: AssistedDestinationId[] = [
     ...savedPlatforms, ...assistedOnlyDisplayIds,
@@ -141,6 +145,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           destination,
           text: textFor(destination),
           scheduledFor: slotApplied && isPlatformId(destination) ? slotTimes[destination]! : reminder ? new Date(reminder).toISOString() : new Date(timestamp).toISOString(),
+          ...(!((slotApplied && isPlatformId(destination)) || reminder) ? { reminderEnabled: false as const } : {}),
           ...(videoId ? { videoId } : {}),
         };
       });
