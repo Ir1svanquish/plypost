@@ -1302,8 +1302,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(370px,.95fr)]">
             <div className="min-w-0 space-y-6">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
-                <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
-                  <div><h2 id="draft-heading" className="text-[17px] font-bold tracking-[-0.025em]">Draft editor</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Your message and its destinations, in one place.</p></div>
+                <div className="flex flex-col items-start gap-3 border-b border-[var(--line)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+                  <div className="min-w-0"><h2 id="draft-heading" className="text-[17px] font-bold tracking-[-0.025em]">Draft editor</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Your message and its destinations, in one place.</p></div>
                   <div className="flex shrink-0 items-center gap-3">{editorDirty && <span role="status" className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--warning)]">Unsaved changes</span>}<button type="button" onClick={newDraft} className="text-[12px] font-semibold text-[var(--accent-text)]">New draft</button></div>
                 </div>
                 <div className="p-6 sm:p-7">
