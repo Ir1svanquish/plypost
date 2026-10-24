@@ -20,6 +20,8 @@ type PendingRequest = {
 };
 
 type PendingMove = { post: ScheduledMastodonPost; scheduledFor: string };
+type PendingQueueAction = { kind: "cancel"; post: ScheduledMastodonPost } |
+  { kind: "resolve"; post: ScheduledMastodonPost; resolution: "found" | "absent" };
 
 type Props = {
   items: ScheduledMastodonPost[];
@@ -160,11 +162,17 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [moveUncertain, setMoveUncertain] = useState(false);
+  const [pendingQueueAction, setPendingQueueAction] = useState<PendingQueueAction | null>(null);
+  const [queueActionError, setQueueActionError] = useState<string | null>(null);
+  const [queueChecking, setQueueChecking] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
   const busyRef = useRef(false);
   const movingRef = useRef(false);
+  const queueActionBusyRef = useRef(false);
+  const queueCheckingRef = useRef(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const moveDialogRef = useRef<HTMLDialogElement>(null);
+  const queueActionDialogRef = useRef<HTMLDialogElement>(null);
   const validation = validatePlatformText("mastodon", text);
   const accountId = accountIdOf(connection);
   const queuedCount = items.filter((item) => item.status === "queued").length;
@@ -219,6 +227,12 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
     if (pendingMove && dialog && !dialog.open) dialog.showModal();
     if (!pendingMove && dialog?.open) dialog.close();
   }, [pendingMove]);
+
+  useEffect(() => {
+    const dialog = queueActionDialogRef.current;
+    if (pendingQueueAction && dialog && !dialog.open) dialog.showModal();
+    if (!pendingQueueAction && dialog?.open) dialog.close();
+  }, [pendingQueueAction]);
 
   useEffect(() => {
     if (!uncertain || !pending) return;
@@ -297,12 +311,19 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
     }
   }
 
+  function reviewCancel(post: ScheduledMastodonPost) {
+    if (post.status !== "queued" || cancelling || resolving || movingRef.current || queueActionBusyRef.current || queueCheckingRef.current || pendingQueueAction) return;
+    setQueueActionError(null);
+    setPendingQueueAction({ kind: "cancel", post });
+  }
+
   async function cancel(post: ScheduledMastodonPost) {
-    if (post.status !== "queued" || cancelling || movingRef.current) return;
-    if (!window.confirm(`Cancel the queued real Mastodon post for ${post.account.username} at ${formatLocalDateTime(post.scheduledFor)}?\n\n${post.text}`)) return;
+    if (queueActionBusyRef.current) return;
+    queueActionBusyRef.current = true;
     setCancelling(post.clientRequestId);
     setActionError(null);
     setNotice(null);
+    setQueueActionError(null);
     try {
       const response = await fetch("/api/mastodon/schedule", {
         method: "DELETE",
@@ -311,14 +332,16 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
       });
       const data = await readJson(response);
       if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Could not cancel this queued post.");
-      if (!isScheduledPost(data.item)) throw new Error("Cancellation result is uncertain. Refresh the queue before taking another action.");
+      if (!isScheduledPost(data.item) || data.item.status !== "cancelled") throw new Error("Cancellation result is uncertain. Refresh the queue before taking another action.");
       onItemsChange((current) => current.map((item) => item.clientRequestId === post.clientRequestId ? data.item as ScheduledMastodonPost : item));
+      setPendingQueueAction(null);
       setNotice("The queued Mastodon post was cancelled before publishing began.");
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : "Could not cancel this queued post.");
-      void refresh().catch(() => {});
+      setQueueActionError(cause instanceof Error ? cause.message : "Could not cancel this queued post.");
+      await checkQueueAction({ kind: "cancel", post });
     } finally {
       setCancelling(null);
+      queueActionBusyRef.current = false;
     }
   }
 
@@ -415,15 +438,47 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
     }
   }
 
+  function reviewResolve(post: ScheduledMastodonPost, resolution: "found" | "absent") {
+    if (post.status !== "unknown" || post.resolution || resolving || cancelling || movingRef.current || queueActionBusyRef.current || queueCheckingRef.current || pendingQueueAction) return;
+    setQueueActionError(null);
+    setPendingQueueAction({ kind: "resolve", post, resolution });
+  }
+
+  async function reconcileQueueAction(action: PendingQueueAction) {
+    try {
+      const latest = (await refresh()).find((item) => item.clientRequestId === action.post.clientRequestId);
+      const completed = action.kind === "cancel" ? latest?.status === "cancelled" :
+        latest?.status === "unknown" && latest.resolution === action.resolution;
+      if (completed) {
+        setPendingQueueAction(null);
+        setQueueActionError(null);
+        setNotice(action.kind === "cancel" ? "The queued Mastodon post is cancelled." :
+          "Your Mastodon check was recorded. This remains self-reported, not a platform receipt.");
+      } else if (!latest || latest.status !== action.post.status ||
+          (action.kind === "resolve" && latest.resolution)) {
+        setPendingQueueAction(null);
+        setActionError("The real post changed while you were reviewing it. Check its current status before taking another action.");
+      }
+    } catch {
+      setQueueActionError("Could not check the current queue. Refresh status before retrying this action.");
+    }
+  }
+
+  async function checkQueueAction(action: PendingQueueAction) {
+    if (queueCheckingRef.current) return;
+    queueCheckingRef.current = true;
+    setQueueChecking(true);
+    try { await reconcileQueueAction(action); }
+    finally { queueCheckingRef.current = false; setQueueChecking(false); }
+  }
+
   async function resolve(post: ScheduledMastodonPost, resolution: "found" | "absent") {
-    if (post.status !== "unknown" || post.resolution || resolving) return;
-    const prompt = resolution === "found"
-      ? `After checking ${post.account.username} on Mastodon, did you find this post? This records your own check, not a verified platform receipt.\n\n${post.text}`
-      : `After checking ${post.account.username} on Mastodon, are you sure this post is absent? A new attempt with the same text could create a duplicate if it exists.\n\n${post.text}`;
-    if (!window.confirm(prompt)) return;
+    if (queueActionBusyRef.current) return;
+    queueActionBusyRef.current = true;
     setResolving(post.clientRequestId);
     setActionError(null);
     setNotice(null);
+    setQueueActionError(null);
     try {
       const response = await fetch("/api/mastodon/schedule/resolve", {
         method: "POST",
@@ -432,14 +487,16 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
       });
       const data = await readJson(response);
       if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Could not record your Mastodon check.");
-      if (!isScheduledPost(data.item)) throw new Error("The result of your check is uncertain. Refresh the queue before retrying.");
+      if (!isScheduledPost(data.item) || data.item.resolution !== resolution) throw new Error("The result of your check is uncertain. Refresh the queue before retrying.");
       onItemsChange((current) => current.map((item) => item.clientRequestId === post.clientRequestId ? data.item as ScheduledMastodonPost : item));
+      setPendingQueueAction(null);
       setNotice(resolution === "found" ? "Recorded that you found the post. This is your report, not platform confirmation." : "Recorded that you could not find the post. Check again before making another attempt.");
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : "Could not record your Mastodon check.");
-      void refresh().catch(() => {});
+      setQueueActionError(cause instanceof Error ? cause.message : "Could not record your Mastodon check.");
+      await checkQueueAction({ kind: "resolve", post, resolution });
     } finally {
       setResolving(null);
+      queueActionBusyRef.current = false;
     }
   }
 
@@ -478,13 +535,16 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
         {!loading && !loadError && items.length === 0 && <p className="mt-4 rounded-xl border border-dashed border-[var(--line)] p-5 text-[12px] text-[var(--text-muted)]">No real Mastodon posts queued yet. Simulated and manual items appear in the calendar below.</p>}
         <ul className="mt-4 max-h-[480px] space-y-3 overflow-y-auto">{items.map((item) =>
           <MastodonQueueItem key={item.clientRequestId} item={item} now={now} moving={moving} cancelling={cancelling}
-            resolving={resolving} onMove={reviewMove} onCancel={(post) => void cancel(post)}
-            onResolve={(post, result) => void resolve(post, result)} />
+            resolving={resolving} onMove={reviewMove} onCancel={reviewCancel}
+            onResolve={reviewResolve} />
         )}</ul>
       </div>
     </div>}
     <dialog ref={moveDialogRef} onCancel={(event) => { if (moving || moveUncertain) { event.preventDefault(); return; } setPendingMove(null); }} aria-labelledby="mastodon-move-review-heading" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       {pendingMove && <><h3 id="mastodon-move-review-heading" className="text-[18px] font-bold">Confirm new publishing time</h3><p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">This changes the time of one queued real Mastodon post. The connected account and exact text stay the same.</p><dl className="mt-4 grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 text-[12px]"><div><dt className="font-bold text-[var(--text-secondary)]">Account</dt><dd className="mt-1 break-words">{pendingMove.post.account.username} · {pendingMove.post.instance}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Original local time</dt><dd className="mt-1">{formatLocalDateTime(pendingMove.post.scheduledFor)}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">New local time</dt><dd className="mt-1 font-bold text-[var(--accent-text)]">{formatLocalDateTime(pendingMove.scheduledFor)}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Exact text</dt><dd className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words">{pendingMove.post.text}</dd></div></dl>{moveError && <p role="alert" className="mt-4 text-[12px] leading-5 text-[var(--danger)]">{moveError}</p>}{!executionEnabled && <p role="alert" className="mt-4 text-[12px] text-[var(--warning)]">Real scheduling is paused. This time change cannot be saved.</p>}<div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { setPendingMove(null); setMoveError(null); }} disabled={Boolean(moving || moveUncertain)} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Back</button>{moveUncertain && <button type="button" onClick={() => { void reconcileMove(pendingMove.post, pendingMove.scheduledFor); }} disabled={Boolean(moving)} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">Refresh queue</button>}<button type="button" onClick={() => void submitMove()} disabled={Boolean(moving || moveUncertain || !executionEnabled)} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{moving && <LoaderCircle size={13} className="animate-spin" />}Confirm changed time</button></div></>}
+    </dialog>
+    <dialog ref={queueActionDialogRef} onCancel={(event) => { if (cancelling || resolving || queueChecking) { event.preventDefault(); return; } setPendingQueueAction(null); }} aria-labelledby="mastodon-queue-action-heading" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
+      {pendingQueueAction && <><h3 id="mastodon-queue-action-heading" className="text-[18px] font-bold">{pendingQueueAction.kind === "cancel" ? "Cancel real Mastodon post?" : "Record your Mastodon check?"}</h3><p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{pendingQueueAction.kind === "cancel" ? "This stops a queued post only if the worker has not started publishing it." : pendingQueueAction.resolution === "found" ? "You found this post on Mastodon. This is your own report, not a verified platform receipt." : "You could not find this post on Mastodon. Check carefully: a later new post with the same text could create a duplicate if the original exists."}</p><dl className="mt-4 grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 text-[12px]"><div><dt className="font-bold text-[var(--text-secondary)]">Account</dt><dd className="mt-1 break-words">{pendingQueueAction.post.account.username} · {pendingQueueAction.post.instance}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Local time</dt><dd className="mt-1">{formatLocalDateTime(pendingQueueAction.post.scheduledFor)}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Exact text</dt><dd className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words">{pendingQueueAction.post.text}</dd></div></dl>{queueActionError && <p role="alert" className="mt-4 text-[12px] leading-5 text-[var(--danger)]">{queueActionError}</p>}<div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { setPendingQueueAction(null); setQueueActionError(null); }} disabled={Boolean(cancelling || resolving || queueChecking)} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Back</button>{queueActionError && <button type="button" onClick={() => { void checkQueueAction(pendingQueueAction); }} disabled={Boolean(cancelling || resolving || queueChecking)} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">Refresh queue</button>}<button type="button" onClick={() => pendingQueueAction.kind === "cancel" ? void cancel(pendingQueueAction.post) : void resolve(pendingQueueAction.post, pendingQueueAction.resolution)} disabled={Boolean(cancelling || resolving || queueChecking)} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-50 ${pendingQueueAction.kind === "cancel" ? "bg-[var(--danger)]" : "gradient-button"}`}>{(cancelling || resolving) && <LoaderCircle size={13} className="animate-spin" />}{pendingQueueAction.kind === "cancel" ? "Confirm cancellation" : pendingQueueAction.resolution === "found" ? "Record found post" : "Record no post found"}</button></div></>}
     </dialog>
     <dialog ref={dialogRef} onCancel={(event) => { if (busy || uncertain) { event.preventDefault(); return; } setPending(null); }} aria-labelledby="mastodon-schedule-review-heading" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       {pending && <><h3 id="mastodon-schedule-review-heading" className="text-[18px] font-bold">Confirm real Mastodon schedule</h3><p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">Once you confirm, Plypost will send this post automatically from the account below if the background worker is running. You can cancel only while it is still queued.</p><dl className="mt-4 grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 text-[12px]"><div><dt className="font-bold text-[var(--text-secondary)]">Account</dt><dd className="mt-1 break-words">{pending.accountLabel} · {pending.instance}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Local time</dt><dd className="mt-1">{formatLocalDateTime(pending.scheduledFor)}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Exact text</dt><dd className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words">{pending.text}</dd></div></dl>{!executionEnabled && <p role="alert" className="mt-4 text-[12px] text-[var(--warning)]">Real scheduling is unavailable. Close this review; nothing has been queued.</p>}{actionError && <p role="alert" className="mt-4 text-[12px] text-[var(--danger)]">{actionError}</p>}{uncertain && <p className="mt-2 text-[12px] text-[var(--warning)]">Refresh the queue first. Retrying below uses the same request ID to avoid adding a second copy.</p>}<div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { setPending(null); setUncertain(false); setActionError(null); }} disabled={busy || uncertain} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Back</button>{uncertain && <button type="button" onClick={() => { void refresh().catch((cause) => setLoadError(cause instanceof Error ? cause.message : "Could not check the queue.")); }} disabled={busy} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--accent-text)]">Check queue</button>}<button type="button" onClick={() => void submit()} disabled={busy || !executionEnabled} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{busy && <LoaderCircle size={13} className="animate-spin" />}{uncertain ? "Retry same request" : "Confirm real schedule"}</button></div></>}
