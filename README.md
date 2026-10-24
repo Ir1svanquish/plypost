@@ -1,19 +1,19 @@
 # Plypost
 
-Plypost is a web app that runs on your computer. Write a post, edit versions for different platforms, save drafts, and plan when to publish. There is no hosted Plypost service.
+Plypost 是一个本机运行的多平台发帖工作台。写一份草稿，再按平台改文案、存图片、设提醒。它目前没有云端服务。
 
-## What works
+## 现在能做什么
 
-- Draft and preview posts for Bluesky, Mastodon, LinkedIn, and Threads, with up to four images.
-- Save drafts, set reminders, and export a local backup. The calendar can process simulated posts while the worker is running.
-- Review separate handoffs from a saved draft for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit, and the four draft platforms. Edit each handoff, then publish on those sites yourself and record the result in Plypost.
-- Optionally use Nebius or NVIDIA Nemotron to rewrite drafts or suggest weekly ideas. AI requests are made only when you choose to generate them. Weekly idea generation sends your saved brand brief, not your recorded post results.
+- 为 Bluesky、Mastodon、LinkedIn、Threads 保存不同版本的文案和预览，草稿最多附四张图片。
+- 为上述平台以及 X、Facebook Pages、Instagram、TikTok、YouTube、Pinterest、Reddit 建立人工发布清单。文案可以逐平台修改；发帖由你在各平台完成。
+- 保存草稿、安排提醒、导出备份。日历里的模拟发布不会向平台发帖。
+- 配置 Nebius 或 NVIDIA 后，手动生成文案改写或一周选题。不配置也能使用草稿和人工发布功能。
 
-The separate Bluesky and Mastodon account features can send confirmed text posts; Mastodon also has a confirmed scheduling queue. **Neither account flow has been tested with a live account yet.** Images are for manual publishing, not these account features. Ordinary reminders and simulated posts never publish to a social platform.
+另有 Bluesky 和 Mastodon 的纯文字发帖入口，以及 Mastodon 的本机定时队列。这些入口**尚未经过真实账号验收**。定时队列依赖本机 worker；电脑休眠或进程关闭时不会准时执行。图片目前只用于人工发布。
 
-## Run on your computer
+## 本机运行
 
-Requires Node.js 24.14 or later and npm. In PowerShell:
+需要 Node.js 24.14+ 和 npm。在 PowerShell 中：
 
 ```powershell
 npm install
@@ -21,31 +21,21 @@ Copy-Item .env.example .env.local
 npm run hash-password
 ```
 
-Put your email and the printed password hash into `PLYPOST_OWNER_EMAIL` and `PLYPOST_OWNER_PASSWORD_HASH` in `.env.local`. Then run:
+把邮箱和命令输出的密码哈希填入 `.env.local` 的 `PLYPOST_OWNER_EMAIL`、`PLYPOST_OWNER_PASSWORD_HASH`，然后运行 `npm run dev`，打开 [http://localhost:3000](http://localhost:3000)。
 
-```powershell
-npm run dev
-```
+需要处理到期的模拟任务或已确认的 Mastodon 定时任务时，另开一个终端运行 `npm run worker`。数据默认存于 `data/plypost.sqlite`；请保管好数据库和导出的备份。`.env.local` 与 `data/` 不会提交到 Git。
 
-Open [http://localhost:3000](http://localhost:3000). To process due simulations or confirmed Mastodon schedules, run `npm run worker` in a second terminal. The worker stops when your computer sleeps or the process closes.
+## 可选配置
 
-The app keeps data in `data/plypost.sqlite` by default. Keep this file and exported backups private. `.env.local` and `data/` are excluded from Git.
+| 功能 | 配置 |
+| --- | --- |
+| AI 文案与选题 | 在 `.env.local` 中填写 `NVIDIA_API_KEY` 或 `NEBIUS_API_KEY`。只有点击生成时才会请求服务；周计划只发送品牌资料，不发送发帖结果。 |
+| Bluesky 账号 | 填写 `PLYPOST_BLUESKY_ORIGIN` 和 `PLYPOST_BLUESKY_SECRET`，然后在 **Account** 中连接。浏览器地址须与配置一致。 |
+| Mastodon 账号 | 有账号时再填写 `PLYPOST_MASTODON_INSTANCE`、`PLYPOST_PUBLIC_ORIGIN` 和 `PLYPOST_MASTODON_SECRET`。可用 `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` 暂停新的定时任务和后续派发，改动后须重启应用与 worker。 |
 
-## Optional connections
+两个 `*_SECRET` 应分别使用独立的 32 字节随机密钥。具体格式见 [.env.example](.env.example)。恢复备份不会取消本机已经排入真实发布队列的 Mastodon 帖子。
 
-- **AI:** Add `NVIDIA_API_KEY` or `NEBIUS_API_KEY` to `.env.local`. Drafting and manual publishing work without either key.
-- **Bluesky:** Set the local origin and encryption key shown in [.env.example](.env.example), then connect in **Account**. The browser address must match the configured origin.
-- **Mastodon:** Skip this if you do not have an account. Otherwise use the instance, origin, and encryption settings in [.env.example](.env.example), then connect in **Account**. Confirmed scheduled posts need the worker. Set `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` and restart the app and worker to pause future dispatch.
-
-For either account connection, generate a separate encryption key with:
-
-```powershell
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-```
-
-Restoring a backup does not cancel real Mastodon posts already queued on this installation.
-
-## Check changes
+## 检查
 
 ```powershell
 npm run typecheck
@@ -54,6 +44,4 @@ npm test
 npm run build
 ```
 
-These checks passed locally on 2026-10-24; a live deployment has not been set up. The current production dependency audit reports high-severity entries through the AT Protocol OAuth client's Zod dependency. OAuth response-size limits reduce exposure but do not fix the dependency. Check `npm audit --omit=dev --audit-level=high` before exposing Bluesky login publicly.
-
-See the [development plan](DEVELOPMENT_PLAN.md) and [platform notes](docs/platforms.md) for remaining work.
+当前只有本机构建，没有线上部署。Bluesky OAuth 依赖链仍有高危审计项；公开提供登录前，请运行 `npm audit --omit=dev --audit-level=high` 并处理结果。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
