@@ -24,6 +24,7 @@ type Props = {
   busy: boolean;
   mediaBusy: boolean;
   imageCount: number;
+  initialVideoId?: string | null;
   notificationPermission: NotificationPermission | "unsupported";
   onDestinationChange: (destination: AssistedDestinationId) => void;
   onTextChange: (text: string) => void;
@@ -47,6 +48,7 @@ type Props = {
   mastodonInstance?: string;
   focusItemId?: string;
   startExpanded?: boolean;
+  startWithVideoGroup?: boolean;
 };
 
 type OutcomeForm = { views: string; likes: string; replies: string; notes: string };
@@ -94,7 +96,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, imageCount, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, startWithVideoGroup = false }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -115,8 +117,9 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
   const [reminderEdit, setReminderEdit] = useState<{ itemId: string; value: string; error: string } | null>(null);
   const [reminderSavingId, setReminderSavingId] = useState<string | null>(null);
-  const [showVideoDestinations, setShowVideoDestinations] = useState(() => assistedVideoDisplayIds.some((id) => id === destination));
-  const [videoId, setVideoId] = useState<string | null>(null);
+  const [showVideoDestinations, setShowVideoDestinations] = useState(() => startWithVideoGroup || assistedVideoDisplayIds.some((id) => id === destination));
+  const previousDestination = useRef(destination);
+  const [videoId, setVideoId] = useState<string | null>(initialVideoId);
   const [videoBusy, setVideoBusy] = useState(false);
   const handledFocusRef = useRef<string | null>(null);
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
@@ -151,6 +154,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   }, [workspaceReady, composerInitialized, items.length, time, startExpanded]);
 
   useEffect(() => {
+    if (previousDestination.current === destination) return;
+    previousDestination.current = destination;
     setShowVideoDestinations(assistedVideoDisplayIds.some((id) => id === destination));
   }, [destination]);
 
@@ -287,7 +292,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   async function addPost() {
     setStatusFilter("to-post");
     setDestinationFilter("all");
-    if (await onAdd(videoId ?? undefined)) setVideoId(null);
+    await onAdd(videoId ?? undefined);
   }
 
   return (

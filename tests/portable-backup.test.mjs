@@ -207,25 +207,35 @@ test("backup import rejects an image whose bytes do not match its declared check
   await assert.rejects(importPortableBackup(owner, archive), /undecodable image/);
 });
 
-test("full backup restores video bytes and remaps the saved handoff", async () => {
+test("full backup restores video bytes and remaps draft and handoff references", async () => {
   const sourceOwner = "video-source@example.test";
   const destinationOwner = "video-restored@example.test";
   const bytes = readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4"));
   const video = createVideo(sourceOwner, { name: "launch.mp4", type: "video/mp4", bytes }).video;
   const createdAt = stamp();
+  const saved = saveDraft(sourceOwner, { id: randomUUID(), title: "Video idea", source: "Watch this", selected: [], variants: {},
+    videoId: video.id, createdAt, updatedAt: createdAt });
   const handoff = addAssisted(sourceOwner, { id: randomUUID(), title: "Video launch", destination: "youtube",
     text: "Watch this", videoId: video.id, scheduledFor: createdAt, createdAt, status: "queued" });
   const archive = JSON.parse(exportPortableBackup(sourceOwner));
   assert.equal(archive.videos.length, 1);
+  assert.equal(archive.drafts[0].videoId, video.id);
   assert.equal(archive.assisted[0].videoId, video.id);
   const corrupt = globalThis.structuredClone(archive);
   corrupt.videos[0].base64 = Buffer.from("not-video-bytes").toString("base64");
   await assert.rejects(importPortableBackup(destinationOwner, corrupt), /video format, size or checksum/);
   assert.deepEqual(listWorkspace(destinationOwner).assisted, []);
   assert.deepEqual(listVideos(destinationOwner), []);
+  const missing = globalThis.structuredClone(archive);
+  missing.videos = [];
+  await assert.rejects(importPortableBackup(destinationOwner, missing), /video that is missing from the archive/);
+  assert.deepEqual(listWorkspace(destinationOwner).drafts, []);
   const result = await importPortableBackup(destinationOwner, archive);
   assert.equal(result.videos, 1);
   const restored = listWorkspace(destinationOwner).assisted[0];
+  const restoredDraft = listWorkspace(destinationOwner).drafts[0];
+  assert.notEqual(restoredDraft.id, saved.id);
+  assert.equal(restoredDraft.videoId, restored.videoId);
   assert.notEqual(restored.id, handoff.id);
   assert.notEqual(restored.videoId, video.id);
   assert.deepEqual(getVideo(destinationOwner, restored.videoId).bytes, bytes);

@@ -77,7 +77,7 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
   }
 
   async function remove(id: string) {
-    if (busy || disabled || !window.confirm("Delete this saved video from your library? Detach it from saved handoffs first.")) return;
+    if (busy || disabled || !window.confirm("Delete this saved video from your library? Detach it from saved drafts and handoffs first.")) return;
     setError(null); setBusy(true); onBusyChange(true);
     try {
       const response = await fetch(`/api/videos/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "same-origin" });

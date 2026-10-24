@@ -41,7 +41,7 @@ test("an unfinished idea can be saved, completed later, and cannot be empty", ()
   assert.equal(platformOnly.title, "Behind the scenes at the workshop");
   assert.equal(platformOnly.variants.linkedin, "Behind the scenes at the workshop");
 
-  assert.throws(() => saveDraft(owner, initial("")), /Add a title, caption, platform text or image/);
+  assert.throws(() => saveDraft(owner, initial("")), /Add a title, caption, platform text, image or video/);
 });
 
 test("a deleted draft cannot be silently recreated by an old window", () => {

@@ -1,8 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assistedState, draftTitle, emptyWorkspace, localDateTimeValue, normalizePublicPostUrl, parseWorkspace, scheduleState } from "../src/lib/workspace.ts";
+import { assistedState, draftTitle, emptyWorkspace, hasDraftContent, localDateTimeValue, normalizePublicPostUrl, parseWorkspace, scheduleState } from "../src/lib/workspace.ts";
 
 const stamp = "2026-10-22T12:00:00.000Z";
+
+test("a video-only idea is a valid draft, while malformed video references are rejected", () => {
+  const draft = { id: "video-draft", title: "", source: "", selected: [], variants: {},
+    videoId: "5be12631-17ee-4ec5-98f3-9756a0b3f57b", createdAt: stamp, updatedAt: stamp };
+  const backup = { version: 3, drafts: [draft], schedule: [], assisted: [] };
+  assert.equal(hasDraftContent(draft), true);
+  assert.deepEqual(parseWorkspace(backup)?.drafts, [draft]);
+  assert.deepEqual(parseWorkspace({ ...backup, drafts: [{ ...draft, videoId: "not-a-uuid" }] })?.drafts, []);
+});
 
 test("existing v2 backups migrate without losing drafts or scheduled posts", () => {
   const backup = {

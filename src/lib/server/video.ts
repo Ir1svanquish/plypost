@@ -116,9 +116,10 @@ export function deleteVideo(userId: string, id: string): boolean {
   videoDatabase();
   return transaction((db) => {
     if (!db.prepare("SELECT id FROM videos WHERE id=? AND user_id=?").get(id, userId)) return false;
-    const referenced = (db.prepare("SELECT payload FROM assisted WHERE user_id=?").all(userId) as { payload: string }[])
-      .some((row) => (JSON.parse(row.payload) as { videoId?: unknown }).videoId === id);
-    if (referenced) throw new VideoError("Detach this video from saved handoffs before deleting it.", 409);
+    const referenced = ["drafts", "assisted"].some((table) =>
+      (db.prepare(`SELECT payload FROM ${table} WHERE user_id=?`).all(userId) as { payload: string }[])
+        .some((row) => (JSON.parse(row.payload) as { videoId?: unknown }).videoId === id));
+    if (referenced) throw new VideoError("Detach this video from saved drafts and handoffs before deleting it.", 409);
     db.prepare("DELETE FROM videos WHERE id=? AND user_id=?").run(id, userId);
     audit(userId, "video.deleted", id);
     return true;

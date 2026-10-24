@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { unzipSync } from "fflate";
 import { closeDatabase } from "../src/lib/server/db.ts";
 import { buildHandoffPackage } from "../src/lib/server/handoff-package.ts";
-import { addAssisted, deleteAssisted, listWorkspace, setAssistedStatus, updateAssistedVideo } from "../src/lib/server/workspace.ts";
+import { addAssisted, deleteAssisted, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedVideo } from "../src/lib/server/workspace.ts";
 import { assertOwnedVideo, createVideo, deleteVideo, getVideo, listVideos, MAX_VIDEO_BYTES } from "../src/lib/server/video.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-video-"));
@@ -36,7 +36,7 @@ test("private video library deduplicates, checks ownership, and protects referen
     videoId: stored.video.id, scheduledFor: now, createdAt: now, status: "queued" };
   assert.throws(() => addAssisted(other, { ...handoff, id: randomUUID() }), /missing from your private library/);
   assert.equal(addAssisted(owner, handoff).videoId, stored.video.id);
-  assert.throws(() => deleteVideo(owner, stored.video.id), /Detach this video from saved handoffs/);
+  assert.throws(() => deleteVideo(owner, stored.video.id), /Detach this video from saved drafts and handoffs/);
   assert.equal(deleteAssisted(owner, handoff.id), true);
   assert.equal(deleteVideo(owner, stored.video.id), true);
   assert.equal(getVideo(owner, stored.video.id), null);
@@ -66,7 +66,7 @@ test("queued handoff can replace and detach its clip without losing text or anot
   assert.deepEqual(Buffer.from(replacedPackage["video/clip.mp4"]), getVideo(owner, second.id).bytes);
   assert.throws(() => updateAssistedVideo(owner, handoff.id, first.id, null), /video changed/);
   assert.equal(deleteVideo(owner, first.id), true);
-  assert.throws(() => deleteVideo(owner, second.id), /saved handoffs/);
+  assert.throws(() => deleteVideo(owner, second.id), /saved drafts and handoffs/);
   assert.equal(updateAssistedVideo(owner, handoff.id, second.id, null), true);
   assert.equal(listWorkspace(owner).assisted.find((item) => item.id === handoff.id).videoId, undefined);
   assert.equal(unzipSync(buildHandoffPackage(owner, handoff.id).bytes)["video/clip.mp4"], undefined);
@@ -74,4 +74,25 @@ test("queued handoff can replace and detach its clip without losing text or anot
   assert.equal(setAssistedStatus(owner, handoff.id, "posted"), true);
   assert.throws(() => updateAssistedVideo(owner, handoff.id, null, foreign.id), /marked posted/);
   assert.throws(() => updateAssistedVideo(owner, handoff.id, null, "not-an-id"), /Choose a saved video/);
+});
+
+test("a saved video draft retains its clip through batch handoff and blocks premature deletion", () => {
+  const video = createVideo(owner, { name: "draft.mp4", type: "video/mp4", bytes: mp4 }).video;
+  const foreign = createVideo(other, { name: "foreign-draft.mp4", type: "video/mp4", bytes: Buffer.concat([mp4, Buffer.from([3])]) }).video;
+  const now = new Date().toISOString();
+  const idea = { id: randomUUID(), title: "", source: "", selected: [], variants: {},
+    videoId: video.id, createdAt: now, updatedAt: now };
+  assert.throws(() => saveDraft(owner, { ...idea, id: randomUUID(), videoId: foreign.id }), /missing from your private library/);
+  const saved = saveDraft(owner, idea);
+  assert.equal(saved.videoId, video.id);
+  assert.equal(listWorkspace(owner).drafts.find((item) => item.id === saved.id).videoId, video.id);
+  assert.throws(() => deleteVideo(owner, video.id), /saved drafts and handoffs/);
+  const [handoff] = prepareAssistedBatch(owner, saved.id, randomUUID(), [
+    { destination: "youtube", text: "Watch this clip", videoId: video.id, scheduledFor: now },
+  ], false, saved.updatedAt);
+  assert.equal(handoff.videoId, video.id);
+  assert.equal(deleteDraft(owner, saved.id, saved.updatedAt), true);
+  assert.throws(() => deleteVideo(owner, video.id), /saved drafts and handoffs/);
+  assert.equal(deleteAssisted(owner, handoff.id), true);
+  assert.equal(deleteVideo(owner, video.id), true);
 });

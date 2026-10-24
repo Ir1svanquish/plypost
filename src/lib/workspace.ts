@@ -13,6 +13,8 @@ export type SavedDraft = {
   mediaIds?: string[];
   /** Optional image descriptions, in the same order as mediaIds. */
   mediaAlt?: string[];
+  /** A private clip for manual handoffs; simulated and live text publishers ignore it. */
+  videoId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -88,8 +90,9 @@ export function hasDraftContent(value: {
   source: string;
   variants: Partial<Record<PlatformId, string>>;
   mediaIds?: readonly string[];
+  videoId?: string | null;
 }): boolean {
-  return Boolean(value.title.trim() || value.source.trim() || value.mediaIds?.length ||
+  return Boolean(value.title.trim() || value.source.trim() || value.mediaIds?.length || value.videoId ||
     platformIds.some((id) => value.variants[id]?.trim()));
 }
 
@@ -205,6 +208,7 @@ function parseDraft(value: unknown): SavedDraft | null {
       !validDate(value.createdAt) || !validDate(value.updatedAt)) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
+  if (value.videoId !== undefined && !validUuid(value.videoId)) return null;
   return {
     id: value.id,
     title: value.title,
@@ -213,6 +217,7 @@ function parseDraft(value: unknown): SavedDraft | null {
     variants: validVariants(value.variants),
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
+    ...(value.videoId !== undefined ? { videoId: value.videoId as string } : {}),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   };

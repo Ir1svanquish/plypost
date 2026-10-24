@@ -138,7 +138,7 @@ function validateCollection<T extends { id: string }>(raw: unknown, parsed: T[],
     if (label === "drafts") {
       if (!Array.isArray(item.selected) || item.selected.length !== (normalized.selected as unknown[]).length ||
           item.selected.some((id) => !(normalized.selected as unknown[]).includes(id)) ||
-          !sameVariants(item.variants, normalized.variants)) {
+          !sameVariants(item.variants, normalized.variants) || item.videoId !== normalized.videoId) {
         invalid("Backup contains invalid draft destinations or platform versions.");
       }
     }
@@ -471,7 +471,7 @@ export function exportPortableBackup(userId: string): string {
       if (!mediaIds.has(id)) invalid("Stored work references an image that is missing from the library.");
     }
   }
-  for (const item of validated.assisted) {
+  for (const item of [...validated.drafts, ...validated.assisted]) {
     if (item.videoId && !videoIds.has(item.videoId)) invalid("Stored work references a video that is missing from the library.");
   }
   const serialized = JSON.stringify(archive);
@@ -485,7 +485,7 @@ export async function importPortableBackup(userId: string, raw: unknown) {
   if (!isRecord(raw) || raw.format !== "plypost-portable" || (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4) ||
       !validInstant(raw.exportedAt)) invalid("This is not a supported Plypost portable backup.");
   const workspace = validateWorkspace(raw);
-  if (raw.version !== 4 && workspace.assisted.some((item) => item.videoId)) invalid("Backup references videos without including their files.");
+  if (raw.version !== 4 && [...workspace.drafts, ...workspace.assisted].some((item) => item.videoId)) invalid("Backup references videos without including their files.");
   const strategy = validateStrategy(raw);
   const slotSettings = validateSlots(raw);
   listMedia(userId);
@@ -502,7 +502,12 @@ export async function importPortableBackup(userId: string, raw: unknown) {
   if (new Set(allIds).size !== allIds.length) invalid("Backup contains duplicate IDs.");
   const mediaMap = new Map(media.map((item) => [item.oldId, item.newId]));
   const videoMap = new Map(videos.map((item) => [item.oldId, item.newId]));
-  const drafts = workspace.drafts.map((item) => remapMediaIds(item, mediaMap));
+  const drafts = workspace.drafts.map((item) => {
+    const restored = remapMediaIds(item, mediaMap);
+    const videoId = item.videoId ? videoMap.get(item.videoId) : undefined;
+    if (item.videoId && !videoId) invalid("Backup references a video that is missing from the archive.");
+    return { ...restored, ...(videoId ? { videoId } : {}) };
+  });
   const draftIdMap = new Map(workspace.drafts.map((item, index) => [item.id, drafts[index].id]));
   const jobs = workspace.jobs.map((item) => ({ ...item, post: remapMediaIds(item.post, mediaMap) }));
   const assisted = workspace.assisted.map((item) => {

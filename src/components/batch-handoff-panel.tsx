@@ -39,7 +39,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const [attempted, setAttempted] = useState(false);
   const [prepared, setPrepared] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [videoId, setVideoId] = useState<string | null>(null);
+  const [videoId, setVideoId] = useState<string | null>(draft.videoId ?? null);
   const [videoBusy, setVideoBusy] = useState(false);
   const batchIdRef = useRef<string | null>(null);
   const attemptedItemsRef = useRef<BatchHandoffItem[] | null>(null);
@@ -107,7 +107,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     setFocusedDestination(null);
     setReminders({});
     setTexts({});
-    setVideoId(null);
+    setVideoId(draft.videoId ?? null);
     setSlotPreview(null); setSlotTimes({}); setSlotApplied(false); setSlotError(null);
     openReview();
   }

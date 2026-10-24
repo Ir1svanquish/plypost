@@ -186,6 +186,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
     if (count.count + requested.length > 100) throw new Error("Assisted publishing list is full.");
     assertOwnedMedia(userId, draft.mediaIds ?? []);
+    assertOwnedVideo(userId, draft.videoId);
     for (const videoId of new Set(requested.map((item) => item.videoId).filter((id): id is string => id !== undefined))) {
       assertOwnedVideo(userId, videoId);
     }
@@ -469,10 +470,11 @@ export class DraftConflictError extends Error {
 export function saveDraft(userId: string, value: unknown, expectedUpdatedAt: unknown = null): SavedDraft {
   const draft = validDraft(value);
   if (!draft || !/^[a-f0-9-]{36}$/i.test(draft.id)) throw new Error("Invalid draft.");
-  if (!hasDraftContent(draft)) throw new Error("Add a title, caption, platform text or image before saving.");
+  if (!hasDraftContent(draft)) throw new Error("Add a title, caption, platform text, image or video before saving.");
   const titleSource = draft.source.trim() || platformIds.map((id) => draft.variants[id]?.trim()).find(Boolean) || "";
   transaction((db) => {
     assertOwnedMedia(userId, draft.mediaIds ?? []);
+    assertOwnedVideo(userId, draft.videoId);
     const existing = db.prepare("SELECT user_id, payload FROM drafts WHERE id=?").get(draft.id) as { user_id: string; payload: string } | undefined;
     if (existing && existing.user_id !== userId) throw new Error("Draft not found.");
     const previous = existing ? JSON.parse(existing.payload) as SavedDraft : null;
@@ -597,6 +599,7 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
       if (running.count) throw new Error("Wait for running jobs before importing.");
       for (const draft of workspace.drafts) {
         assertOwnedMedia(userId, draft.mediaIds ?? []);
+        assertOwnedVideo(userId, draft.videoId);
         const previousVersion = existingDraftVersions.get(draft.id);
         const updatedAt = new Date(Math.max(Date.now(), Date.parse(draft.updatedAt) + 1,
           previousVersion ? Date.parse(previousVersion) + 1 : 0)).toISOString();

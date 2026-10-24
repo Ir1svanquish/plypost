@@ -29,6 +29,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
 import { PlatformPreview } from "@/components/platform-preview";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
+import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
 import { MastodonLivePanel, isMastodonConnection, type MastodonConnection } from "@/components/mastodon-live-panel";
 import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@/components/bluesky-live-panel";
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
@@ -72,6 +73,7 @@ type EditorContent = {
   variants: Partial<Record<PlatformId, string>>;
   mediaIds: readonly string[];
   mediaAlt: readonly string[];
+  videoId: string | null;
 };
 type EditorOrigin = "starter" | "new" | "planned";
 type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft } | { kind: "planned"; post: ScheduledPost } | { kind: "assisted"; post: AssistedPost };
@@ -87,6 +89,7 @@ function samePlatforms(left: readonly PlatformId[], right: readonly PlatformId[]
 function sameEditorContent(left: EditorContent, right: EditorContent | SavedDraft): boolean {
   return left.title === right.title && left.source === right.source &&
     samePlatforms(left.selected, right.selected) && sameItems(left.mediaIds, right.mediaIds ?? []) &&
+    left.videoId === (right.videoId ?? null) &&
     sameItems(left.mediaAlt.map((value) => value.trim()), (right.mediaAlt ?? (right.mediaIds ?? []).map(() => "")).map((value) => value.trim())) &&
     platformIds.every((id) => left.variants[id] === right.variants[id]);
 }
@@ -99,7 +102,7 @@ function hasUnsavedEditorChanges(editor: EditorContent, currentDraftId: string |
   if (origin === "planned") return true;
   return !sameEditorContent(editor, {
     title: "", source: origin === "starter" ? sampleDraft : "",
-    selected: platformIds, variants: {}, mediaIds: [], mediaAlt: [],
+    selected: platformIds, variants: {}, mediaIds: [], mediaAlt: [], videoId: null,
   });
 }
 
@@ -135,6 +138,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [variants, setVariants] = useState<Partial<Record<PlatformId, string>>>({});
   const [mediaIds, setMediaIds] = useState<string[]>([]);
   const [mediaAltById, setMediaAltById] = useState<Record<string, string>>({});
+  const [videoId, setVideoId] = useState<string | null>(null);
+  const videoBusyRef = useRef(false);
+  const [videoBusy, setVideoBusy] = useState(false);
   const [mediaPickerEpoch, setMediaPickerEpoch] = useState(0);
   const mediaPickerEpochRef = useRef(0);
   const mediaBusyRef = useRef(false);
@@ -169,6 +175,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [assistOverrides, setAssistOverrides] = useState<Partial<Record<AssistedDestinationId, string>>>({});
   const [assistTime, setAssistTime] = useState("");
   const [openAssistedComposer, setOpenAssistedComposer] = useState(false);
+  const [openAssistedVideoGroup, setOpenAssistedVideoGroup] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [title, setTitle] = useState("");
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
@@ -201,7 +208,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [blueskyLoading, setBlueskyLoading] = useState(true);
   const [blueskyError, setBlueskyError] = useState<string | null>(null);
   const mediaAlt = mediaIds.map((id) => mediaAltById[id] ?? "");
-  const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt };
+  const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt, videoId };
   const editorContentRef = useRef(editorContent);
   editorContentRef.current = editorContent;
   const canSaveEditor = hasDraftContent(editorContent);
@@ -233,7 +240,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     const syncView = () => {
       const next = viewFromHash();
-      if (next !== "assisted") setOpenAssistedComposer(false);
+      if (next !== "assisted") { setOpenAssistedComposer(false); setOpenAssistedVideoGroup(false); }
       setView(next);
     };
     syncView();
@@ -246,15 +253,18 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }, []);
 
   function openView(next: WorkspaceView) {
-    if (next !== "assisted") setOpenAssistedComposer(false);
+    if (next !== "assisted") { setOpenAssistedComposer(false); setOpenAssistedVideoGroup(false); }
     setView(next);
     if (window.location.hash !== `#${next}`) window.history.pushState(null, "", `#${next}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function openManualComposer() {
+  function openManualComposer(videoFirst = false) {
+    if (videoBusyRef.current) { setNotice({ kind: "error", text: "Wait for the video upload before preparing a post." }); return; }
     setFocusedAssistedId(null);
     setOpenAssistedComposer(true);
+    setOpenAssistedVideoGroup(videoFirst);
+    if (videoFirst) setAssistDestination("youtube");
     openView("assisted");
   }
 
@@ -386,6 +396,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           currentDraftVersion?: unknown;
           mediaIds?: unknown;
           mediaAlt?: unknown;
+          videoId?: unknown;
           editorOrigin?: unknown;
         };
         if (typeof data.source === "string") {
@@ -422,6 +433,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             setMediaAltById(Object.fromEntries(data.mediaIds.map((id, index) => [id, cachedAlt[index]])));
           }
         }
+        if (typeof data.videoId === "string" && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(data.videoId)) setVideoId(data.videoId);
         if (data.editorOrigin === "starter" || data.editorOrigin === "new" || data.editorOrigin === "planned") setEditorOrigin(data.editorOrigin);
       }
     } catch {
@@ -460,12 +472,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     if (!hydrated) return;
     try {
-      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
+      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, mediaAltById, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
+  }, [source, selected, variants, mediaIds, mediaAltById, videoId, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -628,8 +640,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Wait for the image operation to finish before saving this draft." });
       return false;
     }
+    if (videoBusyRef.current) {
+      setNotice({ kind: "error", text: "Wait for the video operation to finish before saving this draft." });
+      return false;
+    }
     if (!hasDraftContent(editorContentRef.current)) {
-      setNotice({ kind: "error", text: "Add a title, caption, platform text or image before saving." });
+      setNotice({ kind: "error", text: "Add a title, caption, platform text, image or video before saving." });
       return false;
     }
     if ((!currentDraftId || asCopy) && drafts.length >= 100) {
@@ -648,6 +664,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       variants: { ...variants },
       mediaIds: [...mediaIds],
       mediaAlt: mediaAlt.map((value) => value.trim()),
+      ...(videoId ? { videoId } : {}),
       createdAt: !asCopy && existing ? existing.createdAt : stamp,
       updatedAt: stamp,
     };
@@ -702,6 +719,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setVariants({});
       setMediaIds([]);
       setMediaAltById({});
+      setVideoId(null);
       setSelected([...platformIds]);
       setActive(platformDisplayIds[0]);
       setNotice(null);
@@ -717,6 +735,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setVariants({ ...draft.variants });
       setMediaIds([...(draft.mediaIds ?? [])]);
       setMediaAltById(Object.fromEntries((draft.mediaIds ?? []).map((id, index) => [id, draft.mediaAlt?.[index] ?? ""])));
+      setVideoId(draft.videoId ?? null);
       setActive(platformDisplayIds.find((id) => draft.selected.includes(id)) ?? platformDisplayIds[0]);
       setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
     } else if (next.kind === "planned") {
@@ -731,6 +750,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setVariants({ ...post.posts });
       setMediaIds([...(post.mediaIds ?? [])]);
       setMediaAltById(Object.fromEntries((post.mediaIds ?? []).map((id, index) => [id, post.mediaAlt?.[index] ?? ""])));
+      setVideoId(null);
       setActive(platformDisplayIds.find((id) => post.posts[id] !== undefined) ?? platformDisplayIds[0]);
       setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
     } else {
@@ -745,6 +765,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setVariants(isPlatformId(post.destination) ? { [post.destination]: post.text } : {});
       setMediaIds([]);
       setMediaAltById({});
+      setVideoId(null);
       setActive(isPlatformId(post.destination) ? post.destination : platformDisplayIds[0]);
       setNotice({ kind: "success", text: "Started an unsaved draft from your posted text. Review and rewrite it before sharing; media was not copied." });
     }
@@ -753,10 +774,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   function requestEditorSwitch(next: EditorSwitch) {
     if (switchSavingRef.current) return;
-    if (draftSaveBusyRef.current || mediaBusyRef.current || generating || restoringBackupRef.current) {
+    if (draftSaveBusyRef.current || mediaBusyRef.current || videoBusyRef.current || generating || restoringBackupRef.current) {
       setNotice({ kind: "error", text: draftSaveBusyRef.current
         ? "Wait for the current draft save to finish before changing drafts."
         : mediaBusyRef.current ? "Wait for the image operation to finish before changing drafts."
+        : videoBusyRef.current ? "Wait for the video operation to finish before changing drafts."
         : generating ? "Wait for AI adaptation to finish before changing drafts."
         : "Wait for backup restoration to finish before changing drafts." });
       return;
@@ -974,6 +996,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Wait for the current image operation before restoring a backup." });
       return;
     }
+    if (videoBusyRef.current) {
+      setNotice({ kind: "error", text: "Wait for the current video operation before restoring a backup." });
+      return;
+    }
     if (!file.size || file.size > 192 * 1024 * 1024) {
       setNotice({ kind: "error", text: "Choose a full backup no larger than 192 MiB." });
       return;
@@ -1001,6 +1027,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setCurrentDraftVersion(null);
       setDraftConflict(false);
       setMediaIds([]);
+      setVideoId(null);
       resetMediaPicker();
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
@@ -1143,7 +1170,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function prepareAssistedBatch(draftId: string, expectedUpdatedAt: string, batchId: string, items: BatchHandoffItem[], requireFreeSlots: boolean): Promise<BatchPrepareResult> {
-    if (editorDirty || currentDraftId !== draftId || mediaBusyRef.current || draftSaveBusyRef.current) {
+    if (editorDirty || currentDraftId !== draftId || mediaBusyRef.current || videoBusyRef.current || draftSaveBusyRef.current) {
       setNotice({ kind: "error", text: "Save your latest draft changes before preparing handoffs." });
       return "rejected";
     }
@@ -1352,6 +1379,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                       setMediaBusy(busy);
                     }}
                   />
+                  <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3" open={videoId ? true : undefined}>
+                    <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Video for manual posts · {videoId ? "attached" : "optional"}</summary>
+                    <div className="mt-3"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { editorRevision.current += 1; setVideoId(id); }} onBusyChange={(busy) => { videoBusyRef.current = busy; setVideoBusy(busy); }} disabled={restoringBackup} /></div>
+                  </details>
                   <div className="mt-6 border-t border-[var(--line)] pt-5">
                     <div className="mb-3 flex items-center justify-between"><h3 className="text-[13px] font-bold text-[var(--text)]">Photo &amp; text-first</h3><span className="text-[12px] text-[var(--text-muted)]">{selected.length} previews selected</span></div>
                     <div role="group" aria-label="Destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
@@ -1360,15 +1391,15 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                         return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition sm:gap-2 sm:px-3 ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" /><span className="min-w-0 truncate">{platforms[id].name}</span><span className={`ml-auto hidden h-4 w-4 shrink-0 items-center justify-center rounded border sm:flex ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
                       })}
                     </div>
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] pt-4 text-[12px]"><span className="font-bold text-[var(--text-secondary)]">Video-first · TikTok, YouTube</span><button type="button" onClick={openManualComposer} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Choose in Assisted →</button></div>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] pt-4 text-[12px]"><span className="font-bold text-[var(--text-secondary)]">Video-first · TikTok, YouTube</span><button type="button" onClick={() => openManualComposer(true)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Choose in Assisted →</button></div>
                   </div>
                   <details className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
                     <summary className="cursor-pointer text-[13px] font-bold text-[var(--text-secondary)]">Adapt with AI <span className="ml-1 text-[11px] font-normal text-[var(--text-soft)]">Optional · Nemotron</span></summary>
                     <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nvidia">NVIDIA Nemotron</option><option value="nebius">Nebius Token Factory</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
                     {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   </details>
-                  {needsDraftRecovery && currentDraftId && <div role="alert" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">This draft changed in another window or was deleted.</p><p className="mt-1">Your current editor text is still here. Save it as a new draft, or open the latest saved version after reviewing any unsaved changes.</p><div className="mt-3 flex flex-wrap gap-3"><button type="button" onClick={() => { void saveDraft(false, true); }} disabled={!canSaveEditor || mediaBusy || draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Save as new draft</button><button type="button" onClick={() => { void openLatestDraft(); }} disabled={draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Open latest saved version</button></div></div>}
-                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || draftSaveBusy || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
+                  {needsDraftRecovery && currentDraftId && <div role="alert" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">This draft changed in another window or was deleted.</p><p className="mt-1">Your current editor text is still here. Save it as a new draft, or open the latest saved version after reviewing any unsaved changes.</p><div className="mt-3 flex flex-wrap gap-3"><button type="button" onClick={() => { void saveDraft(false, true); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Save as new draft</button><button type="button" onClick={() => { void openLatestDraft(); }} disabled={draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Open latest saved version</button></div></div>}
+                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : videoBusy ? "Working with video…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
                 </div>
               </section>
             </div>
@@ -1387,11 +1418,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                 <div className="px-6 pb-6 pt-5 sm:px-7 sm:pb-7"><div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">Edit {platforms[active].name} draft</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div><textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" /><div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${!currentValidation.valid ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{!currentValidation.valid ? "Needs attention" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${!currentValidation.valid ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div><button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button></div>
               </section>
 
-              <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Prepare a handoff, then publish from your own account.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No previews selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={openManualComposer} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> Prepare a manual post <ArrowRight size={15} className="ml-1" /></button><button type="button" onClick={simulatePublish} disabled={!canPublish} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-45">{publishing ? "Simulating..." : "Run a demo simulation"}</button><p className="mt-2 text-center text-[12px] text-[var(--text-soft)]">Demo only; no post is sent to a social platform.</p></section>
+              <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Prepare a handoff, then publish from your own account.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No previews selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={() => openManualComposer()} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> Prepare a manual post <ArrowRight size={15} className="ml-1" /></button><button type="button" onClick={simulatePublish} disabled={!canPublish} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-45">{publishing ? "Simulating..." : "Run a demo simulation"}</button><p className="mt-2 text-center text-[12px] text-[var(--text-soft)]">Demo only; no post is sent to a social platform.</p></section>
               {showBlueskyLive && selected.includes("bluesky") && active === "bluesky" && <BlueskyLivePanel connection={blueskyConnection} connectionLoading={blueskyLoading} connectionError={blueskyError} selected active text={textFor("bluesky")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
               {showMastodonLive && selected.includes("mastodon") && active === "mastodon" && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[12px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
             </div>
-            {currentSavedDraft && <div className="xl:col-span-2"><BatchHandoffPanel key={`${currentSavedDraft.id}:${currentSavedDraft.updatedAt}`} draft={currentSavedDraft} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} /></div>}
+            {currentSavedDraft && <div className="xl:col-span-2"><BatchHandoffPanel key={`${currentSavedDraft.id}:${currentSavedDraft.updatedAt}`} draft={currentSavedDraft} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy || videoBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} /></div>}
           </div>
           </div>}
 
@@ -1414,7 +1445,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           </div>
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
+            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} startWithVideoGroup={openAssistedVideoGroup} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} initialVideoId={videoId} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} />}
         </main>
