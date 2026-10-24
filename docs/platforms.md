@@ -2,6 +2,8 @@
 
 核对于 2026-10-24。这里只记录下一步开发需要的门槛；平台政策和接口会变，动手接入前要重新核对官方文档和开发者后台。**文档允许发帖，不代表 Plypost 已拿到权限。**
 
+辅助发布按常见发帖流程分为“Text & images”和“Video-first”，方便找平台，不限制平台支持的格式。[TikTok](https://support.tiktok.com/en/using-tiktok/creating-videos/tiktok-studio) 也能发图片，[Instagram](https://www.facebook.com/help/instagram/439971288310029) 同时有图片帖和 Reels；这一分类不代表 Plypost 能自动发布。
+
 | 平台 | 当前实现 | 继续接入前要确认 |
 | --- | --- | --- |
 | [Bluesky](https://atproto.com/specs/oauth) | 本地账号连接、逐条确认的纯文字发帖；未用真实账号验收。 | 本地 OAuth 回调、发帖回执与撤销；公网使用还需 HTTPS 客户端元数据。图片另需上传及权限。 |

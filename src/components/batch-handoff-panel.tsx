@@ -5,7 +5,7 @@ import { ArrowRight, Check, Copy, ShieldCheck } from "lucide-react";
 import { LocalDateTimeField, isValidLocalDateTime } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 import { adaptDraft, characterCount, isPlatformId, platformDisplayIds, platforms, type PlatformId } from "@/lib/platforms";
-import { assistedDestinations, assistedOnlyDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
+import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { validatePlatformText } from "@/lib/platform-validation";
 import type { AssistedPost, SavedDraft } from "@/lib/workspace";
 
@@ -188,7 +188,10 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           {savedPlatforms.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{savedPlatforms.map(destinationOption)}</div>}
           <details className="mt-2">
             <summary className="cursor-pointer py-2 text-[12px] font-semibold text-[var(--accent-text)]">More platforms</summary>
-            <div className="grid gap-2 pt-1 sm:grid-cols-2">{assistedOnlyDisplayIds.map(destinationOption)}</div>
+            <p className="mb-2 text-[11px] font-bold text-[var(--text-muted)]">Text &amp; images</p>
+            <div className="grid gap-2 sm:grid-cols-2">{assistedTextImageOnlyDisplayIds.map(destinationOption)}</div>
+            <p className="mb-2 mt-4 text-[11px] font-bold text-[var(--text-muted)]">Video-first</p>
+            <div className="grid gap-2 sm:grid-cols-2">{assistedVideoDisplayIds.map(destinationOption)}</div>
           </details>
         </div>
       </details>

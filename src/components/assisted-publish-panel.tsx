@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Bell, CalendarClock, Check, Copy, Download, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
-import { assistedDestinations, assistedOnlyDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
-import { characterCount, isPlatformId, platformDisplayIds, platforms } from "@/lib/platforms";
+import { assistedDestinations, assistedTextImageDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
+import { characterCount, isPlatformId } from "@/lib/platforms";
 import { buildManualReminderCalendar, upcomingManualReminders } from "@/lib/calendar-export";
 import { validatePlatformText } from "@/lib/platform-validation";
 import { assistedState, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
@@ -187,8 +187,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         <div>
           <label htmlFor="assisted-destination" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Destination</label>
           <select id="assisted-destination" value={destination} onChange={(event) => onDestinationChange(event.target.value as AssistedDestinationId)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]">
-            <optgroup label="More platforms">{assistedOnlyDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
-            <optgroup label="Current destinations">{platformDisplayIds.map((id) => <option key={id} value={id}>{platforms[id].name}</option>)}</optgroup>
+            <optgroup label="Text &amp; images">{assistedTextImageDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
+            <optgroup label="Video-first">{assistedVideoDisplayIds.map((id) => <option key={id} value={id}>{assistedDestinations[id].name}</option>)}</optgroup>
           </select>
         </div>
         <LocalDateTimeField id="assisted-time" label="Reminder time" value={time} minTimestamp={now} optional onChange={onTimeChange} />
@@ -243,10 +243,12 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
               textEdit.value.trim() !== item.text && textEditCount <= 5000 && textEditValidation?.valid !== false);
             return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[13px] font-bold text-[var(--text-secondary)]">{item.title}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{target.name} · {formatLocalDateTime(item.scheduledFor)}</p>{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
-                <button type="button" aria-label={`Remove ${item.title} from assisted publishing`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && target.needsMedia && !item.mediaIds?.length && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{item.destination === "youtube" ? "Bring a video when posting." : "Add a photo or video when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
+                <button type="button" aria-label={`Remove ${target.name} handoff: ${item.title}`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
-              <details className="mt-2 text-[12px] text-[var(--text-muted)]"><summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Review saved text</summary><p className="mt-2 whitespace-pre-wrap break-words rounded-xl bg-[var(--accent-soft)] p-3 leading-5">{item.text}</p></details>
+              <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
+                <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Post details{item.mediaIds?.length ? ` · ${item.mediaIds.length} ${item.mediaIds.length === 1 ? "image" : "images"}` : item.status === "queued" ? " · optional link" : ""}</summary>
+                <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-[var(--surface)] p-3 leading-5 text-[var(--text-secondary)]">{item.text}</p>
               {item.status === "queued" && !textEdit && <button type="button" onClick={() => setTextEdits((current) => ({ ...current, [item.id]: { expectedText: item.text, value: item.text } }))} disabled={busy} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">Edit saved text</button>}
               {item.status === "queued" && textEdit && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
                 <label htmlFor={`assisted-edit-text-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Saved handoff text · {target.name}</label>
@@ -266,12 +268,16 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                 <input id={`assisted-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={enteredUrl} placeholder="https://social.example/your-post" aria-invalid={invalidUrl} aria-describedby={`assisted-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
                 <p id={`assisted-post-url-hint-${item.id}`} className={`mt-1 text-[11px] leading-4 ${invalidUrl ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{invalidUrl ? "Use a public HTTPS post link with no embedded username or password." : "After posting, paste its link here if you have one. Plypost checks the link format, not the post or account."}</p>
               </div>}
+              </details>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
                 {item.status === "queued" ? <button type="button" onClick={() => onMarkPosted(item.id, normalizedUrl ?? undefined)} disabled={busy || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { closeOutcomeEditor(item.id); onUndo(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
-              {item.status === "posted" && <div className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">
+              {item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
+              {item.status === "posted" && <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
+                <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Posted record{savedUrl ? " · link saved" : ""}{item.outcome ? " · results recorded" : ""}</summary>
+              <div className="mt-3 text-[11px] leading-5 text-[var(--text-muted)]">
                 <p>Marked posted by you{item.postedAt ? ` · ${formatLocalDateTime(item.postedAt)}` : ""} · not verified by Plypost.</p>
                 <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
                   {savedUrl && <a href={savedUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)] underline underline-offset-2"><ExternalLink size={11} /> Link you recorded · not verified</a>}
@@ -287,8 +293,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                     <button type="button" onClick={() => closeLinkEditor(item.id)} disabled={busy || linkSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                   </div>
                 </div>}
-              </div>}
-              {item.status === "posted" && <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-[12px]">
+              </div>
+              <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 text-[12px]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-semibold text-[var(--text-secondary)]">Results you entered <span className="font-normal text-[var(--text-muted)]">· self-reported, not verified</span></p>
                   {!editingOutcome && <button type="button" onClick={() => { setOutcomeDrafts((current) => ({ ...current, [item.id]: outcomeForm(item) })); setEditingOutcomes((current) => ({ ...current, [item.id]: true })); }} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.outcome ? "Edit results" : "Record results"}</button>}
@@ -315,7 +321,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                     <button type="button" onClick={() => closeOutcomeEditor(item.id)} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                   </div>
                 </div>}
-              </div>}
+              </div>
+              </details>}
             </article>;
           })}
         </div>

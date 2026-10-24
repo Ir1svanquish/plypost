@@ -4,8 +4,13 @@ export const assistedIds = [
 ] as const;
 
 export type AssistedDestinationId = (typeof assistedIds)[number];
+export const assistedTextImageOnlyDisplayIds = ["facebook", "instagram", "x", "reddit", "pinterest"] as const satisfies readonly AssistedDestinationId[];
+export const assistedVideoDisplayIds = ["youtube", "tiktok"] as const satisfies readonly AssistedDestinationId[];
+export const assistedTextImageDisplayIds = [
+  "facebook", "instagram", "linkedin", "threads", "x", "reddit", "pinterest", "bluesky", "mastodon",
+] as const satisfies readonly AssistedDestinationId[];
 export const assistedOnlyDisplayIds = [
-  "facebook", "instagram", "youtube", "tiktok", "reddit", "x", "pinterest",
+  ...assistedTextImageOnlyDisplayIds, ...assistedVideoDisplayIds,
 ] as const satisfies readonly AssistedDestinationId[];
 
 export type AssistedDestination = {
