@@ -81,6 +81,16 @@ test("video-first handoff keeps text export honest when no video is stored", asy
   assert.match(strFromU8(files["handoff.txt"]), /No video is attached to this handoff/);
 });
 
+test("checklist package says no reminder instead of exporting its storage timestamp", () => {
+  const stamp = new Date().toISOString();
+  const saved = addAssisted(owner, { id: randomUUID(), title: "No date", destination: "facebook", text: "Post when ready",
+    scheduledFor: stamp, reminderEnabled: false, createdAt: stamp, status: "queued" });
+  const files = unzipSync(buildHandoffPackage(owner, saved.id).bytes);
+  const notes = strFromU8(files["handoff.txt"]);
+  assert.match(notes, /Reminder: none/);
+  assert.doesNotMatch(notes, /Reminder \(UTC\)/);
+});
+
 test("video handoff ZIP contains exact saved clip and caption", async () => {
   const bytes = readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4"));
   const video = createVideo(owner, { name: "launch.mp4", type: "video/mp4", bytes }).video;

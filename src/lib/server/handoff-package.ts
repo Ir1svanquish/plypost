@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 import { assistedDestinations } from "../assisted";
-import { parseWorkspace } from "../workspace";
+import { hasManualReminder, parseWorkspace } from "../workspace";
 import { database } from "./db";
 import { getMedia, MAX_IMAGE_BYTES } from "./media";
 import { getVideo, MAX_VIDEO_BYTES } from "./video";
@@ -29,7 +29,7 @@ export function buildHandoffPackage(userId: string, id: string): { bytes: Uint8A
   const notes = [
     `Platform: ${assistedDestinations[item.destination].name}`,
     `Title: ${item.title}`,
-    `Reminder (UTC): ${item.scheduledFor}`,
+    hasManualReminder(item) ? `Reminder (UTC): ${item.scheduledFor}` : "Reminder: none",
     "",
     "Copy caption.txt into the destination platform. Publish from your own account.",
   ];

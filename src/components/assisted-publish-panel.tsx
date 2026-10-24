@@ -6,7 +6,7 @@ import { assistedDestinations, assistedTextImageDisplayIds, assistedVideoDisplay
 import { characterCount, isPlatformId } from "@/lib/platforms";
 import { buildManualReminderCalendar, upcomingManualReminders } from "@/lib/calendar-export";
 import { validatePlatformText } from "@/lib/platform-validation";
-import { assistedState, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
+import { assistedState, hasManualReminder, localDateTimeValue, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
@@ -28,6 +28,7 @@ type Props = {
   onTextChange: (text: string) => void;
   onTimeChange: (time: string) => void;
   onAdd: (videoId?: string) => Promise<boolean>;
+  onSetReminder: (post: AssistedPost, scheduledFor: string | null) => Promise<void>;
   onCopy: (text: string, destination: AssistedDestinationId) => void;
   onMarkPosted: (id: string, postUrl?: string) => void;
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
@@ -90,7 +91,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -109,6 +110,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
   const [composerInitialized, setComposerInitialized] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("to-post");
   const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
+  const [reminderEdit, setReminderEdit] = useState<{ itemId: string; value: string; error: string } | null>(null);
+  const [reminderSavingId, setReminderSavingId] = useState<string | null>(null);
   const [showVideoDestinations, setShowVideoDestinations] = useState(() => assistedVideoDisplayIds.some((id) => id === destination));
   const [videoId, setVideoId] = useState<string | null>(null);
   const [videoBusy, setVideoBusy] = useState(false);
@@ -265,6 +268,19 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
     onDestinationChange(next);
   }
 
+  async function saveReminder(item: AssistedPost, scheduledFor: string | null) {
+    if (busy || reminderSavingId) return;
+    setReminderSavingId(item.id);
+    try {
+      await onSetReminder(item, scheduledFor);
+      setReminderEdit(null);
+    } catch (cause) {
+      setReminderEdit((current) => current?.itemId === item.id ? { ...current, error: cause instanceof Error ? cause.message : "Could not update this reminder." } : current);
+    } finally {
+      setReminderSavingId(null);
+    }
+  }
+
   async function addPost() {
     setStatusFilter("to-post");
     setDestinationFilter("all");
@@ -339,6 +355,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
         <div className="divide-y divide-[var(--line)] border-t border-[var(--line)]">
           {visibleItems.map((item) => {
             const state = assistedState(item, now);
+            const reminder = hasManualReminder(item);
+            const editingReminder = reminderEdit?.itemId === item.id ? reminderEdit : null;
             const target = assistedDestinations[item.destination];
             const missingMedia = missingHandoffMedia(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId));
             const enteredUrl = postUrls[item.id] ?? "";
@@ -377,9 +395,14 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                 (editingImages.descriptions[id] ?? "").trim() !== editingImages.expectedAlt[index])));
             return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Due now · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && missingMedia && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{missingMedia === "video" ? "No video attached here. Bring one when posting." : "No photo or video attached here. Bring one when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Due now · publish manually" : state === "posted" ? "Marked posted by you" : state === "unscheduled" ? "No reminder" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{reminder ? formatLocalDateTime(item.scheduledFor) : "Publish when you are ready"}{item.status === "queued" && <> · <button type="button" onClick={() => setReminderEdit({ itemId: item.id, value: reminder ? localDateTimeValue(new Date(item.scheduledFor)) : "", error: "" })} disabled={busy || reminderSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{reminder ? "Change reminder" : "Add reminder"}</button></>}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && missingMedia && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{missingMedia === "video" ? "No video attached here. Bring one when posting." : "No photo or video attached here. Bring one when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
                 <button type="button" aria-label={`Remove ${target.name} handoff: ${item.title}`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
+              {item.status === "queued" && editingReminder && <form onSubmit={(event) => { event.preventDefault(); if (!isValidLocalDateTime(editingReminder.value, Date.now() + 10_000)) { setReminderEdit({ ...editingReminder, error: "Choose a future local date and time." }); return; } void saveReminder(item, new Date(editingReminder.value).toISOString()); }} className="mt-3 max-w-xl rounded-xl border border-[var(--accent-border)] bg-[var(--surface-muted)] p-3">
+                <LocalDateTimeField id={`assisted-reminder-${item.id}`} label="Reminder time" value={editingReminder.value} minTimestamp={now + 10_000} onChange={(value) => setReminderEdit((current) => current?.itemId === item.id ? { ...current, value, error: "" } : current)} />
+                {editingReminder.error && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{editingReminder.error}</p>}
+                <div className="mt-3 flex flex-wrap items-center gap-3"><button type="submit" disabled={busy || reminderSavingId !== null || !isValidLocalDateTime(editingReminder.value, now + 10_000)} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{reminderSavingId === item.id ? "Saving…" : "Save reminder"}</button>{reminder && <button type="button" onClick={() => void saveReminder(item, null)} disabled={busy || reminderSavingId !== null} className="text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Remove reminder</button>}<button type="button" onClick={() => setReminderEdit(null)} disabled={reminderSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button></div>
+              </form>}
               <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
                 <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Post details{item.mediaIds?.length ? ` · ${item.mediaIds.length} ${item.mediaIds.length === 1 ? "image" : "images"}` : ""}{item.videoId ? " · video" : ""}</summary>
                 <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-[var(--surface)] p-3 leading-5 text-[var(--text-secondary)]">{item.text}</p>

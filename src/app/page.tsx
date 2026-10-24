@@ -34,7 +34,7 @@ import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
-import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, hasManualReminder, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
   "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.";
@@ -473,7 +473,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   useEffect(() => {
     if (!hydrated || !workspaceReady || !now || notificationPermission !== "granted") return;
-    const due = assisted.filter((item) => item.status === "queued" && !item.notifiedAt && !pendingNotificationIds.current.has(item.id) && Date.parse(item.scheduledFor) <= now);
+    const due = assisted.filter((item) => item.status === "queued" && hasManualReminder(item) && !item.notifiedAt && !pendingNotificationIds.current.has(item.id) && Date.parse(item.scheduledFor) <= now);
     if (!due.length) return;
     try {
       new Notification("Plypost publishing reminder", {
@@ -492,7 +492,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     for (const id of pendingNotificationIds.current) {
       const item = assisted.find((entry) => entry.id === id);
-      if (!item || item.status !== "queued" || Date.parse(item.scheduledFor) > now) {
+      if (!item || item.status !== "queued" || !hasManualReminder(item) || Date.parse(item.scheduledFor) > now) {
         pendingNotificationIds.current.delete(id);
       }
     }
@@ -856,7 +856,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function rescheduleAssistedPost(post: AssistedPost, scheduledForIso: string): Promise<void> {
+  async function rescheduleAssistedPost(post: AssistedPost, scheduledForIso: string | null): Promise<void> {
     if (assistedMutation.current) throw new Error("Another handoff update is in progress.");
     assistedMutation.current = true;
     setAssistedBusy(true);
@@ -864,7 +864,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       await changeWorkspace("reschedule-assisted", {
         id: post.id, expectedScheduledFor: post.scheduledFor, scheduledFor: scheduledForIso,
       });
-      setNotice({ kind: "success", text: "Manual reminder moved. Its text, media and source draft were kept." });
+      setNotice({ kind: "success", text: scheduledForIso === null ? "Reminder removed. This handoff stays on your checklist." : hasManualReminder(post) ? "Manual reminder moved. Its text and media were kept." : "Reminder added to this handoff." });
     } catch (error) {
       if ((error as { code?: string }).code === "ASSISTED_CONFLICT") {
         await refreshWorkspace().catch(() => {});
@@ -1085,9 +1085,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       mediaAlt: mediaAlt.map((value) => value.trim()),
       ...(videoId ? { videoId } : {}),
       scheduledFor: scheduledFor.toISOString(),
+      ...(!assistTime ? { reminderEnabled: false } : {}),
       createdAt: new Date().toISOString(),
       status: "queued",
-      ...(!assistTime ? { notifiedAt: new Date().toISOString() } : {}),
     };
     if (await runAssistedAction("add-assisted", { item }, `Added ${assistedDestinations[assistDestination].name} to your assisted publishing list. You will publish it yourself.`)) {
       setNow(Date.now());
@@ -1367,7 +1367,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           </div>
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
+            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} />}
         </main>
@@ -1390,7 +1390,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       <div className="mt-5 max-h-[40vh] space-y-5 overflow-y-auto pr-1">
         {legacyWorkspace.drafts.length > 0 && <section aria-label="Older drafts"><h3 className="text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Drafts · {legacyWorkspace.drafts.length}</h3><ul className="mt-2 space-y-2">{legacyWorkspace.drafts.map((draft) => <li key={draft.id} className="rounded-lg border border-[var(--line)] px-3 py-2"><p className="truncate text-[13px] font-semibold">{draftTitle(draft.title, draft.source)}</p><p className="mt-1 line-clamp-2 text-[12px] text-[var(--text-muted)]">{draft.source}</p></li>)}</ul></section>}
         {legacyWorkspace.schedule.length > 0 && <section aria-label="Older planned posts"><h3 className="text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Publishing plan · {legacyWorkspace.schedule.length}</h3><ul className="mt-2 space-y-2">{legacyWorkspace.schedule.map((post) => <li key={post.id} className="rounded-lg border border-[var(--line)] px-3 py-2"><p className="truncate text-[13px] font-semibold">{draftTitle(post.title, post.source)}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{new Date(post.scheduledFor).toLocaleString("en-US")} · {Object.keys(post.posts).join(", ")}</p></li>)}</ul></section>}
-        {legacyWorkspace.assisted.length > 0 && <section aria-label="Older assisted items"><h3 className="text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Assisted items · {legacyWorkspace.assisted.length}</h3><ul className="mt-2 space-y-2">{legacyWorkspace.assisted.map((item) => <li key={item.id} className="rounded-lg border border-[var(--line)] px-3 py-2"><p className="truncate text-[13px] font-semibold">{item.title || item.text}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{assistedDestinations[item.destination].name} · {new Date(item.scheduledFor).toLocaleString("en-US")}</p><p className="mt-1 line-clamp-2 text-[12px] text-[var(--text-muted)]">{item.text}</p></li>)}</ul></section>}
+        {legacyWorkspace.assisted.length > 0 && <section aria-label="Older assisted items"><h3 className="text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Assisted items · {legacyWorkspace.assisted.length}</h3><ul className="mt-2 space-y-2">{legacyWorkspace.assisted.map((item) => <li key={item.id} className="rounded-lg border border-[var(--line)] px-3 py-2"><p className="truncate text-[13px] font-semibold">{item.title || item.text}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{assistedDestinations[item.destination].name} · {hasManualReminder(item) ? new Date(item.scheduledFor).toLocaleString("en-US") : "No reminder"}</p><p className="mt-1 line-clamp-2 text-[12px] text-[var(--text-muted)]">{item.text}</p></li>)}</ul></section>}
       </div>
       {legacyImportError && <p role="alert" className="mt-4 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{legacyImportError} The browser copy was kept.</p>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">

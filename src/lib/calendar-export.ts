@@ -1,5 +1,5 @@
 import { assistedDestinations } from "./assisted";
-import type { AssistedPost } from "./workspace";
+import { hasManualReminder, type AssistedPost } from "./workspace";
 
 function calendarDate(value: string | Date): string {
   const date = new Date(value);
@@ -32,7 +32,7 @@ function foldLine(line: string): string[] {
 }
 
 export function upcomingManualReminders(items: readonly AssistedPost[], now: number): AssistedPost[] {
-  return items.filter((item) => item.status === "queued" && Date.parse(item.scheduledFor) > now)
+  return items.filter((item) => item.status === "queued" && hasManualReminder(item) && Date.parse(item.scheduledFor) > now)
     .sort((left, right) => Date.parse(left.scheduledFor) - Date.parse(right.scheduledFor) || left.id.localeCompare(right.id));
 }
 

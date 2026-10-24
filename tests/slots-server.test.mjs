@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
-import { getSlotSettings, saveSlotSettings, suggestWeeklySlots } from "../src/lib/server/slots.ts";
+import { getSlotSettings, saveSlotSettings, slotIsFree, suggestWeeklySlots } from "../src/lib/server/slots.ts";
 import { prepareAssistedBatch, saveDraft } from "../src/lib/server/workspace.ts";
 import { GET, POST } from "../src/app/api/slots/route.ts";
 
@@ -62,6 +62,17 @@ test("batch confirmation rejects a newly occupied suggested slot without creatin
   // A deliberately chosen custom time keeps the existing manual workflow.
   const created = prepareAssistedBatch(owner, draft.id, randomUUID(), [{ destination: "bluesky", scheduledFor }], false);
   assert.equal(created.length, 1);
+});
+
+test("an undated checklist item does not block a future posting slot", () => {
+  const instant = new Date(Date.now() + 4 * 86_400_000);
+  instant.setUTCHours(14, 0, 0, 0);
+  const item = { id: randomUUID(), title: "Checklist", destination: "bluesky", text: "Later",
+    scheduledFor: new Date(instant.getTime() + 20_000).toISOString(), reminderEnabled: false,
+    createdAt: new Date().toISOString(), status: "queued" };
+  database().prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
+    .run(item.id, owner, JSON.stringify(item), item.scheduledFor, item.createdAt);
+  assert.equal(slotIsFree(database(), owner, "bluesky", instant.toISOString()), true);
 });
 
 test("slots API requires the owner and same-origin writes", async () => {

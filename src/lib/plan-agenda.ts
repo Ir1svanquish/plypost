@@ -1,4 +1,4 @@
-import type { AssistedPost, ScheduledPost } from "./workspace.ts";
+import { hasManualReminder, type AssistedPost, type ScheduledPost } from "./workspace.ts";
 
 export type RealMastodonSchedule = {
   clientRequestId: string;
@@ -39,7 +39,7 @@ export type PlanAgendaFilter =
 export function buildPlanAgenda(schedule: readonly ScheduledPost[], assisted: readonly AssistedPost[], realMastodon: readonly RealMastodonSchedule[] = []): PlanAgendaItem[] {
   return [
     ...schedule.map((post): PlanAgendaItem => ({ kind: "simulation", post, scheduledFor: post.scheduledFor })),
-    ...assisted.map((post): PlanAgendaItem => ({ kind: "manual", post, scheduledFor: post.scheduledFor })),
+    ...assisted.filter(hasManualReminder).map((post): PlanAgendaItem => ({ kind: "manual", post, scheduledFor: post.scheduledFor })),
     ...realMastodon.map((post): PlanAgendaItem => ({ kind: "real-mastodon", post, scheduledFor: post.scheduledFor })),
   ].sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor));
 }

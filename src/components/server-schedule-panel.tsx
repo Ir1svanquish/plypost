@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { CalendarClock, ChevronLeft, ChevronRight, RotateCcw, Trash2 } from "lucide-react";
-import { assistedState, localDateTimeValue, scheduleState, type AssistedPost, type ScheduledPost } from "@/lib/workspace";
+import { assistedState, hasManualReminder, localDateTimeValue, scheduleState, type AssistedPost, type ScheduledPost } from "@/lib/workspace";
 import { platformDisplayIds, platforms } from "@/lib/platforms";
 import { agendaForMonth, buildPlanAgenda, localAgendaDay, matchesPlanAgendaFilter, realMastodonNeedsAttention, type PlanAgendaFilter, type PlanAgendaItem, type RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations } from "@/lib/assisted";
@@ -82,7 +82,8 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
   const [editError, setEditError] = useState("");
   const [saving, setSaving] = useState(false);
   const queuedCount = schedule.filter((post) => post.status === "queued").length;
-  const manualPendingCount = assisted.filter((post) => post.status === "queued").length;
+  const manualReminderCount = assisted.filter((post) => post.status === "queued" && hasManualReminder(post)).length;
+  const undatedChecklist = assisted.filter((post) => post.status === "queued" && !hasManualReminder(post));
   const realQueuedCount = realMastodon.filter((post) => post.status === "queued").length;
   const hasRealMastodon = showRealMastodon || realMastodon.length > 0;
   const visibleFilters = hasRealMastodon ? filters : filters.filter((option) => !option.value.startsWith("real-"));
@@ -187,7 +188,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
   return <section id="schedule" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="schedule-heading">
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
       <div><h2 id="schedule-heading" className="text-[17px] font-bold">Publishing plan</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">{hasRealMastodon ? "See real Mastodon posts, simulated jobs and manual reminders in one calendar." : "See simulated jobs and manual reminders in one calendar."}</p></div>
-      <div className="flex flex-wrap gap-2">{hasRealMastodon && <span className="rounded-full bg-[var(--positive-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--positive)]">{realQueuedCount} real Mastodon queued</span>}<span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--accent-text)]">{queuedCount} simulated queued</span><span className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--warning)]">{manualPendingCount} manual pending</span></div>
+      <div className="flex flex-wrap gap-2">{hasRealMastodon && <span className="rounded-full bg-[var(--positive-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--positive)]">{realQueuedCount} real Mastodon queued</span>}<span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--accent-text)]">{queuedCount} simulated queued</span><span className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--warning)]">{manualReminderCount} manual reminders</span>{undatedChecklist.length > 0 && <button type="button" onClick={() => onOpenAssisted(undatedChecklist[0])} className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{undatedChecklist.length} undated checklist</button>}</div>
     </div>
     <div className="p-6 sm:p-7">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -263,7 +264,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
         <div><h3 className="text-[15px] font-bold text-[var(--text)]">{showAllDates ? "All dates" : selectedDay ? new Date(`${selectedDay}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : monthLabel(month)} agenda</h3><p className="mt-0.5 text-[12px] text-[var(--text-muted)]">{agenda.length} {agenda.length === 1 ? "item" : "items"} shown · {hasRealMastodon ? "real, simulated and manual" : "simulated and manual"}</p></div>
         <div className="flex flex-wrap items-center gap-2">{selectedManualTime && <button type="button" onClick={() => onPrepareManual(selectedManualTime)} className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--surface-hover)]">Prepare manual post for this day</button>}{selectedDay && !showAllDates && <button type="button" onClick={() => setSelectedDay(null)} className="rounded-lg px-2 py-1.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Show month</button>}<button type="button" onClick={() => { setShowAllDates((current) => !current); setSelectedDay(null); }} aria-pressed={showAllDates} className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold ${showAllDates ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`}>{showAllDates ? "This month" : "All dates"}</button></div>
       </div>
-      {agenda.length === 0 ? <div className="py-10 text-center text-[13px] text-[var(--text-muted)]">{allItems.length === 0 ? hasRealMastodon ? "Nothing on your plan yet. Add a simulation, manual handoff or reviewed real Mastodon schedule to get started." : "Nothing on your plan yet. Add a simulation or manual handoff to get started." : "No items match this date and status. Choose another day, month, or filter."}</div> :
+      {agenda.length === 0 ? <div className="py-10 text-center text-[13px] text-[var(--text-muted)]">{allItems.length === 0 ? hasRealMastodon ? "Nothing dated on your plan yet. Add a simulation, set a manual reminder or review the real Mastodon queue." : "Nothing dated on your plan yet. Add a simulation or set a reminder on an Assisted post." : "No items match this date and status. Choose another day, month, or filter."}</div> :
       <div className="divide-y divide-[var(--line)]">{agenda.map((item) => {
         if (item.kind === "real-mastodon") {
           const real = item.post;

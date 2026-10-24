@@ -1,7 +1,7 @@
 import { audit, database, transaction } from "./db";
 import { isPlatformId, type PlatformId } from "../platforms";
 import { parseSlotSettings, slotCandidates, slotMinute, type SlotSettings } from "../slot-settings";
-import type { AssistedPost, ScheduledPost } from "../workspace";
+import { hasManualReminder, type AssistedPost, type ScheduledPost } from "../workspace";
 
 type Db = ReturnType<typeof database>;
 type ScheduledRow = { payload: string; scheduled_for: string };
@@ -33,7 +33,7 @@ function occupiedMinutes(db: Db, userId: string, start: string, end: string): Se
     .all(userId, start, end) as ScheduledRow[];
   for (const row of manual) {
     const item = JSON.parse(row.payload) as AssistedPost;
-    if (item.status === "queued" && isPlatformId(item.destination))
+    if (item.status === "queued" && hasManualReminder(item) && isPlatformId(item.destination))
       occupied.add(`${item.destination}:${slotMinute(row.scheduled_for)}`);
   }
   const simulated = db.prepare(`SELECT payload,scheduled_for FROM jobs WHERE user_id=? AND scheduled_for>=? AND scheduled_for<?

@@ -47,6 +47,8 @@ export type AssistedPost = {
   sourceDraftId?: string;
   batchId?: string;
   scheduledFor: string;
+  /** Older handoffs have a reminder. False means this is only a publishing checklist item. */
+  reminderEnabled?: boolean;
   createdAt: string;
   status: "queued" | "posted";
   postedAt?: string;
@@ -266,6 +268,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
   if (value.videoId !== undefined && !validUuid(value.videoId)) return null;
+  if (value.reminderEnabled !== undefined && typeof value.reminderEnabled !== "boolean") return null;
   if (value.contentEditedAt !== undefined && !validUtcInstant(value.contentEditedAt)) return null;
   if (value.postUrl !== undefined && (value.status !== "posted" ||
       normalizePublicPostUrl(value.postUrl) !== value.postUrl)) return null;
@@ -282,6 +285,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
     ...(value.videoId !== undefined ? { videoId: value.videoId as string } : {}),
     ...(value.sourceDraftId !== undefined ? { sourceDraftId: value.sourceDraftId as string, batchId: value.batchId as string } : {}),
     scheduledFor: value.scheduledFor,
+    ...(value.reminderEnabled !== undefined ? { reminderEnabled: value.reminderEnabled as boolean } : {}),
     createdAt: value.createdAt,
     status: value.status,
     ...(value.status === "posted" && validDate(value.postedAt) ? { postedAt: value.postedAt } : {}),
@@ -318,8 +322,13 @@ export function scheduleState(post: ScheduledPost, now: number): "upcoming" | "d
   return Date.parse(next) <= now ? "due" : "upcoming";
 }
 
-export function assistedState(post: AssistedPost, now: number): "upcoming" | "due" | "posted" {
+export function hasManualReminder(post: AssistedPost): boolean {
+  return post.reminderEnabled !== false;
+}
+
+export function assistedState(post: AssistedPost, now: number): "unscheduled" | "upcoming" | "due" | "posted" {
   if (post.status === "posted") return "posted";
+  if (!hasManualReminder(post)) return "unscheduled";
   return Date.parse(post.scheduledFor) <= now ? "due" : "upcoming";
 }
 

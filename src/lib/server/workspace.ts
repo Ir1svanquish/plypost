@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { draftTitle, hasDraftContent, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validMediaAlt, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validMediaAlt, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
 import { validatePlatformText } from "../platform-validation";
@@ -362,7 +362,7 @@ export function updateAssistedMediaAlt(userId: string, id: string, expectedMedia
 
 /** Move only a pending handoff; retain its reviewed text, media and source draft. */
 export function rescheduleAssisted(userId: string, id: string, expectedScheduledFor: unknown, scheduledFor: unknown): boolean {
-  if (!validId(id) || !validUtcInstant(expectedScheduledFor) || !validFutureUtc(scheduledFor)) {
+  if (!validId(id) || !validUtcInstant(expectedScheduledFor) || (scheduledFor !== null && !validFutureUtc(scheduledFor))) {
     throw new Error("Choose a valid future UTC reminder time and refresh the item before moving it.");
   }
   return transaction((db) => {
@@ -370,13 +370,14 @@ export function rescheduleAssisted(userId: string, id: string, expectedScheduled
     if (!row) throw new AssistedConflictError();
     const current = JSON.parse(row.payload) as AssistedPost;
     if (current.status !== "queued" || current.scheduledFor !== expectedScheduledFor) throw new AssistedConflictError();
-    if (scheduledFor === current.scheduledFor) return true;
-    const updated: AssistedPost = { ...current, scheduledFor };
-    delete updated.notifiedAt;
+    if ((scheduledFor === null && !hasManualReminder(current)) ||
+        (scheduledFor === current.scheduledFor && hasManualReminder(current))) return true;
     const stamp = new Date().toISOString();
+    const updated: AssistedPost = { ...current, scheduledFor: scheduledFor ?? stamp, reminderEnabled: scheduledFor !== null };
+    delete updated.notifiedAt;
     db.prepare("UPDATE assisted SET payload=?,scheduled_for=?,updated_at=? WHERE id=? AND user_id=?")
-      .run(JSON.stringify(updated), scheduledFor, stamp, id, userId);
-    audit(userId, "assisted.rescheduled", id, scheduledFor);
+      .run(JSON.stringify(updated), updated.scheduledFor, stamp, id, userId);
+    audit(userId, scheduledFor === null ? "assisted.reminder_removed" : "assisted.rescheduled", id, scheduledFor ?? undefined);
     return true;
   });
 }
@@ -418,7 +419,7 @@ export function markAssistedNotified(userId: string, ids: unknown): void {
       const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
       if (!row) continue;
       const item = JSON.parse(row.payload) as AssistedPost;
-      if (item.status !== "queued" || item.notifiedAt || Date.parse(item.scheduledFor) > Date.parse(stamp)) continue;
+      if (item.status !== "queued" || !hasManualReminder(item) || item.notifiedAt || Date.parse(item.scheduledFor) > Date.parse(stamp)) continue;
       db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
         .run(JSON.stringify({ ...item, notifiedAt: stamp }), stamp, id, userId);
     }

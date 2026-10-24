@@ -14,7 +14,8 @@ test("calendar export includes only future manual reminders, without post conten
   const second = post("22222222-2222-4222-8222-222222222222", "youtube", "2026-10-26T12:00:00.000Z");
   const past = post("33333333-3333-4333-8333-333333333333", "reddit", "2026-10-24T09:00:00.000Z");
   const posted = post("44444444-4444-4444-8444-444444444444", "pinterest", "2026-10-27T09:00:00.000Z", "posted");
-  const input = [second, posted, past, first];
+  const checklist = { ...post("66666666-6666-4666-8666-666666666666", "facebook", "2026-10-27T09:00:00.000Z"), reminderEnabled: false };
+  const input = [second, posted, past, checklist, first];
   assert.deepEqual(upcomingManualReminders(input, generatedAt.getTime()).map((item) => item.id), [first.id, second.id]);
   const calendar = buildManualReminderCalendar(input, generatedAt);
   const unfolded = calendar.replace(/\r\n[ \t]/g, "");
@@ -24,12 +25,18 @@ test("calendar export includes only future manual reminders, without post conten
   assert.match(unfolded, /DTEND:20261025T094500Z/);
   assert.match(unfolded, /TRIGGER:-PT5M/);
   assert.match(unfolded, /CLASS:PRIVATE/);
-  for (const privateValue of ["Secret draft text", "Private launch name", "Private image description", past.id, posted.id]) {
+  for (const privateValue of ["Secret draft text", "Private launch name", "Private image description", past.id, posted.id, checklist.id]) {
     assert.ok(!calendar.includes(privateValue), privateValue);
   }
   assert.ok(calendar.endsWith("\r\n"));
   assert.ok(!calendar.replaceAll("\r\n", "").includes("\n"));
   assert.ok(calendar.split("\r\n").every((line) => Buffer.byteLength(line, "utf8") <= 75));
+});
+
+test("a checklist item alone cannot create a calendar reminder", () => {
+  const checklist = { ...post("77777777-7777-4777-8777-777777777777", "instagram", "2026-10-25T09:30:00.000Z"), reminderEnabled: false };
+  assert.deepEqual(upcomingManualReminders([checklist], generatedAt.getTime()), []);
+  assert.throws(() => buildManualReminderCalendar([checklist], generatedAt), /No future manual reminders/);
 });
 
 test("a changed reminder keeps its event ID but exports the new time", () => {

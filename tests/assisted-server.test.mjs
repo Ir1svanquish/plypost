@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, rescheduleAssisted, saveDraft, setAssistedStatus, updateAssistedText } from "../src/lib/server/workspace.ts";
+import { assistedState, parseWorkspace } from "../src/lib/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-assisted-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "assisted.sqlite");
@@ -98,6 +99,34 @@ test("moving a pending manual reminder keeps its content, resets notification, a
   assert.equal(setAssistedStatus(owner, post.id, "posted"), true);
   assert.throws(() => rescheduleAssisted(owner, post.id, moved, new Date(Date.now() + 172_800_000).toISOString()), /changed or is no longer queued/);
   assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).scheduledFor, moved);
+});
+
+test("a checklist handoff has no due reminder until one is set, and removing it keeps the handoff", () => {
+  const checklist = { ...item("Post when ready"), scheduledFor: new Date().toISOString(), reminderEnabled: false };
+  addAssisted(owner, checklist);
+  const now = Date.now();
+  assert.equal(assistedState(checklist, now), "unscheduled");
+  markAssistedNotified(owner, [checklist.id]);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === checklist.id).notifiedAt, undefined);
+  assert.equal(parseWorkspace({ version: 3, drafts: [], schedule: [], assisted: [checklist] }).assisted[0].reminderEnabled, false);
+  assert.equal(parseWorkspace({ version: 3, drafts: [], schedule: [], assisted: [{ ...checklist, reminderEnabled: "no" }] }).assisted.length, 0);
+
+  const reminder = new Date(Date.now() + 86_400_000).toISOString();
+  assert.equal(rescheduleAssisted(owner, checklist.id, checklist.scheduledFor, reminder), true);
+  let saved = listWorkspace(owner).assisted.find((entry) => entry.id === checklist.id);
+  assert.equal(saved.reminderEnabled, true);
+  assert.equal(assistedState(saved, now), "upcoming");
+  assert.equal(saved.text, checklist.text);
+  assert.throws(() => rescheduleAssisted(owner, checklist.id, checklist.scheduledFor, null), /changed or is no longer queued/);
+
+  assert.equal(rescheduleAssisted(owner, checklist.id, reminder, null), true);
+  saved = listWorkspace(owner).assisted.find((entry) => entry.id === checklist.id);
+  assert.equal(saved.reminderEnabled, false);
+  assert.equal(assistedState(saved, Date.now() + 90_000_000), "unscheduled");
+  markAssistedNotified(owner, [checklist.id]);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === checklist.id).notifiedAt, undefined);
+  assert.equal(saved.text, checklist.text);
+  assert.equal(saved.destination, checklist.destination);
 });
 
 test("editing queued handoff text preserves its reminder and rejects stale or posted edits", () => {

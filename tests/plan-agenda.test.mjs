@@ -46,6 +46,13 @@ test("manual self-reported completion never appears as a simulated receipt", () 
   assert.equal(names("all").length, 5);
 });
 
+test("unscheduled checklist handoffs stay off the dated publishing calendar", () => {
+  const dated = manual("with-reminder", 22, 13, "queued");
+  const checklist = { ...manual("no-reminder", 22, 14, "queued"), reminderEnabled: false };
+  const items = buildPlanAgenda([], [dated, checklist]);
+  assert.deepEqual(items.map((item) => item.post.id), ["with-reminder"]);
+});
+
 test("real Mastodon statuses interleave by date and stay separate from simulated and manual filters", () => {
   const statuses = ["queued", "inflight", "posted", "unknown", "rejected", "cancelled"];
   const realPosts = statuses.map((status, index) => real(status, 21, 9 + index, status));
