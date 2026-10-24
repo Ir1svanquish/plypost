@@ -189,15 +189,20 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
       <div className="flex items-start gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text-muted)]"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-[var(--accent-text)]" aria-hidden="true" /><span>Edit each platform's text here without changing the saved draft. Reminder times are optional. Confirming adds checklist items; you publish the posts yourself.</span></div>
       <details className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3" open={destinations.length === 0 ? true : undefined}>
         <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Choose destinations · {destinations.length} selected</summary>
-        <div className="mt-3">
-          {savedPlatforms.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{savedPlatforms.map(destinationOption)}</div>}
-          <details className="mt-2">
-            <summary className="cursor-pointer py-2 text-[12px] font-semibold text-[var(--accent-text)]">More platforms</summary>
-            <p className="mb-2 text-[11px] font-bold text-[var(--text-muted)]">Text &amp; images</p>
-            <div className="grid gap-2 sm:grid-cols-2">{assistedTextImageOnlyDisplayIds.map(destinationOption)}</div>
-            <p className="mb-2 mt-4 text-[11px] font-bold text-[var(--text-muted)]">Video-first</p>
-            <div className="grid gap-2 sm:grid-cols-2">{assistedVideoDisplayIds.map(destinationOption)}</div>
-          </details>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
+            <p className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Photo &amp; text-first</p>
+            {savedPlatforms.length > 0 && <div className="grid gap-2">{savedPlatforms.map(destinationOption)}</div>}
+            <details className={savedPlatforms.length ? "mt-2" : ""} open={savedPlatforms.length === 0 ? true : undefined}>
+              <summary className="cursor-pointer py-1 text-[12px] font-semibold text-[var(--accent-text)]">{savedPlatforms.length ? "More photo & text platforms" : "Choose a platform"}</summary>
+              <div className="mt-2 grid gap-2">{assistedTextImageOnlyDisplayIds.map(destinationOption)}</div>
+            </details>
+          </div>
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
+            <p className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Video-first</p>
+            <div className="grid gap-2">{assistedVideoDisplayIds.map(destinationOption)}</div>
+            <p className="mt-2 text-[11px] leading-4 text-[var(--text-muted)]">YouTube needs a video. TikTok can use photos too.</p>
+          </div>
         </div>
       </details>
       {!attempted && <details className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Weekly posting slots · optional{slotApplied ? " · applied" : ""}</summary><div className="mt-3 border-t border-[var(--line)] pt-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Slots apply to the four draft platforms. Other platforms can use custom reminder times.</p>
