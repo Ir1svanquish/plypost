@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase } from "../src/lib/server/db.ts";
-import { addAssisted, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, setAssistedStatus } from "../src/lib/server/workspace.ts";
+import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-assisted-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "assisted.sqlite");
@@ -115,6 +115,45 @@ test("legacy browser import replaces drafts and plans without replacing account 
   assert.throws(() => importLegacyLibrary(owner, { version: 3, drafts: [{ ...draft, id: "invalid" }], schedule: [], assisted: [] }), /Backup has invalid IDs/);
   assert.deepEqual(listWorkspace(owner).assisted, [accountItem]);
   assert.equal(listWorkspace(owner).schedule[0].id, schedule.id);
+});
+
+test("reviewed browser migration preserves account work for assisted-only data and rolls back failures", () => {
+  const migrationOwner = "migration@example.test";
+  const stamp = new Date().toISOString();
+  const accountDraft = saveDraft(migrationOwner, { id: randomUUID(), title: "Account draft", source: "Keep me", selected: ["bluesky"], variants: {}, createdAt: stamp, updatedAt: stamp });
+  const accountPlan = addSchedule(migrationOwner, { id: randomUUID(), title: "Account plan", source: "Keep me", posts: { bluesky: "Keep me" }, scheduledFor: new Date(Date.now() + 120_000).toISOString(), createdAt: stamp, status: "queued" }, "UTC");
+  const accountHandoff = addAssisted(migrationOwner, item("Existing handoff"));
+  const oldHandoff = item("Older browser handoff");
+
+  migrateLegacyBrowserWorkspace(migrationOwner, { version: 3, drafts: [], schedule: [], assisted: [oldHandoff] });
+  let saved = listWorkspace(migrationOwner);
+  assert.equal(saved.drafts[0].id, accountDraft.id);
+  assert.equal(saved.schedule[0].id, accountPlan.id);
+  assert.deepEqual(new Set(saved.assisted.map((post) => post.id)), new Set([accountHandoff.id, oldHandoff.id]));
+  migrateLegacyBrowserWorkspace(migrationOwner, { version: 3, drafts: [], schedule: [], assisted: [oldHandoff] });
+  assert.equal(listWorkspace(migrationOwner).assisted.length, 2);
+
+  const oldDraft = { ...accountDraft, id: randomUUID(), title: "Older browser draft" };
+  const oldPlan = { ...accountPlan, id: randomUUID(), title: "Older browser plan" };
+  const nextHandoff = item("Another older handoff");
+  migrateLegacyBrowserWorkspace(migrationOwner, { version: 3, drafts: [oldDraft], schedule: [oldPlan], assisted: [oldHandoff, nextHandoff] });
+  saved = listWorkspace(migrationOwner);
+  assert.deepEqual(saved.drafts.map((draft) => draft.id), [oldDraft.id]);
+  assert.deepEqual(saved.schedule.map((post) => post.id), [oldPlan.id]);
+  assert.deepEqual(new Set(saved.assisted.map((post) => post.id)), new Set([accountHandoff.id, oldHandoff.id, nextHandoff.id]));
+
+  const invalid = { version: 3, drafts: [accountDraft], schedule: [], assisted: [{ ...item("Broken"), destination: "bad" }] };
+  assert.throws(() => migrateLegacyBrowserWorkspace(migrationOwner, invalid), /Invalid workspace backup/);
+  assert.throws(() => migrateLegacyBrowserWorkspace(migrationOwner, { version: 3, drafts: [accountDraft], schedule: [] }), /Invalid workspace backup/);
+  assert.deepEqual(listWorkspace(migrationOwner).drafts.map((draft) => draft.id), [oldDraft.id]);
+  assert.deepEqual(listWorkspace(migrationOwner).schedule.map((post) => post.id), [oldPlan.id]);
+  assert.equal(listWorkspace(migrationOwner).assisted.length, 3);
+
+  const fullOwner = "full-migration@example.test";
+  migrateAssisted(fullOwner, Array.from({ length: 100 }, (_, index) => item(`Full ${index}`)));
+  assert.throws(() => migrateLegacyBrowserWorkspace(fullOwner, { version: 3, drafts: [oldDraft], schedule: [], assisted: [item("Overflow")] }), /list is full/);
+  assert.equal(listWorkspace(fullOwner).drafts.length, 0);
+  assert.equal(listWorkspace(fullOwner).assisted.length, 100);
 });
 
 test("assisted publishing enforces known platform limits without restricting other destinations", () => {

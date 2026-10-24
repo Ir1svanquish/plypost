@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, prepareAssistedBatch, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus } from "@/lib/server/workspace";
+import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 
@@ -34,6 +34,7 @@ export async function POST(request: Request) {
       case "retry-schedule": if (typeof input.id !== "string" || !retrySchedule(user, input.id)) throw new Error("Failed item not found."); break;
       case "import": importLibrary(user, input.backup); break;
       case "import-legacy": importLegacyLibrary(user, input.backup); break;
+      case "migrate-browser-workspace": migrateLegacyBrowserWorkspace(user, input.backup); break;
       default: throw new Error("Unknown action.");
     }
   } catch (error) {

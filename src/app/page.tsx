@@ -168,12 +168,17 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [draftSaveBusy, setDraftSaveBusy] = useState(false);
   const draftSaveBusyRef = useRef(false);
   const switchDialogRef = useRef<HTMLDialogElement>(null);
+  const legacyReviewRef = useRef<HTMLDialogElement>(null);
   const [scheduleTime, setScheduleTime] = useState("");
   const [runningId, setRunningId] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState(false);
   const [now, setNow] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [legacyWorkspace, setLegacyWorkspace] = useState<ReturnType<typeof emptyWorkspace> | null>(null);
+  const [legacyStorageError, setLegacyStorageError] = useState(false);
+  const [legacyReviewOpen, setLegacyReviewOpen] = useState(false);
+  const [legacyImportBusy, setLegacyImportBusy] = useState(false);
+  const [legacyImportError, setLegacyImportError] = useState<string | null>(null);
   const [auditLog, setAuditLog] = useState<{ action: string; subject_id: string | null; detail: string | null; created_at: string }[]>([]);
   const [workerLastSeen, setWorkerLastSeen] = useState<string | null>(null);
   const [mastodonConnection, setMastodonConnection] = useState<MastodonConnection | null>(null);
@@ -192,6 +197,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     const dialog = switchDialogRef.current;
     if (pendingEditorSwitch && dialog && !dialog.open) dialog.showModal();
   }, [pendingEditorSwitch]);
+
+  useEffect(() => {
+    const dialog = legacyReviewRef.current;
+    if (legacyReviewOpen && dialog && !dialog.open) dialog.showModal();
+    if (!legacyReviewOpen && dialog?.open) dialog.close();
+  }, [legacyReviewOpen]);
 
   useEffect(() => {
     if (!hydrated || !editorDirty) return;
@@ -329,7 +340,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   useEffect(() => {
-    let browserAssisted: AssistedPost[] = [];
     try {
       const saved = readOwnerEditorCache(localStorage, email);
       if (saved) {
@@ -372,22 +382,26 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       // A malformed local draft should never prevent the editor from opening.
     }
     try {
-      const workspace = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
-      if (workspace.drafts.length || workspace.schedule.length) setLegacyWorkspace({ ...workspace, assisted: [] });
-      browserAssisted = workspace.assisted;
+      const saved = localStorage.getItem(WORKSPACE_KEY);
+      if (saved) {
+        const raw = JSON.parse(saved) as Record<string, unknown>;
+        const workspace = parseWorkspace(raw);
+        if (!workspace || !Array.isArray(raw?.drafts) || !Array.isArray(raw?.schedule) ||
+            workspace.drafts.length !== raw.drafts.length || workspace.schedule.length !== raw.schedule.length ||
+            (raw.version === 3 && (!Array.isArray(raw.assisted) || workspace.assisted.length !== raw.assisted.length))) {
+          setLegacyStorageError(true);
+        } else if (workspace.drafts.length || workspace.schedule.length || workspace.assisted.length) {
+          setLegacyWorkspace(workspace);
+        }
+      }
     } catch {
-      // Keep the editor usable if the browser holds an invalid workspace backup.
+      setLegacyStorageError(true);
     }
     setHydrated(true);
     if ("Notification" in window) setNotificationPermission(Notification.permission);
     void (async () => {
       try {
         await refreshWorkspace();
-        if (browserAssisted.length) {
-          await changeWorkspace("migrate-assisted", { items: browserAssisted });
-          const previous = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
-          localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ ...previous, assisted: [] }));
-        }
         setWorkspaceReady(true);
       } catch {
         setNotice({ kind: "error", text: "Could not load or move browser items into your account. Your browser copy was kept." });
@@ -878,17 +892,25 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function importLegacyWorkspace() {
-    if (!legacyWorkspace) return;
-    if (!window.confirm(`Move the browser's saved drafts and plan into your account? This replaces the account's drafts and publishing plan; assisted posts and your saved brand profile remain, while AI weekly plans are cleared. Overdue queued items may be simulated by the worker.${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`)) return;
+    if (!legacyWorkspace || legacyImportBusy) return;
+    const replaceSaved = legacyWorkspace.drafts.length > 0 || legacyWorkspace.schedule.length > 0;
+    setLegacyImportBusy(true);
+    setLegacyImportError(null);
     try {
-      await changeWorkspace("import-legacy", { backup: legacyWorkspace });
-      const previous = parseWorkspace(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null")) ?? emptyWorkspace();
-      localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ ...emptyWorkspace(), assisted: previous.assisted }));
+      await changeWorkspace("migrate-browser-workspace", { backup: legacyWorkspace });
       setLegacyWorkspace(null);
-      setStrategyRefreshEpoch((epoch) => epoch + 1);
-      setNotice({ kind: "success", text: "Browser drafts and publishing plan moved into your account. AI weekly plans were cleared; your saved brand profile and assisted posts remain." });
+      setLegacyReviewOpen(false);
+      if (replaceSaved) {
+        setCurrentDraftId(null);
+        setStrategyRefreshEpoch((epoch) => epoch + 1);
+      }
+      try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); }
+      catch { setStorageWarning(true); }
+      setNotice({ kind: "success", text: replaceSaved ? "Older browser drafts and plans replaced the account copies. Hand-offs were merged." : "Older browser hand-offs were added. Existing account data was kept." });
     } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import browser data." });
+      setLegacyImportError(error instanceof Error ? error.message : "Could not import browser data.");
+    } finally {
+      setLegacyImportBusy(false);
     }
   }
 
@@ -1050,7 +1072,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
         <main className="app-main mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
           {view === "schedule" && schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Start <code>npm run worker</code> on this computer to process scheduled items.</div>}
-          {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} browser drafts and {legacyWorkspace.schedule.length} planned items from the earlier version.</span><button type="button" onClick={importLegacyWorkspace} className="font-bold text-[var(--accent-text)]">Move into account →</button></div>}
+          {legacyStorageError && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Older browser data could not be validated. It was left unchanged; check it before clearing this browser's storage.</div>}
+          {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} drafts, {legacyWorkspace.schedule.length} planned items and {legacyWorkspace.assisted.length} assisted items in older browser storage. Review before moving them into this account.</span><button type="button" onClick={() => { setLegacyImportError(null); setLegacyReviewOpen(true); }} className="font-bold text-[var(--accent-text)]">Review migration →</button></div>}
           {view === "compose" && <div id="compose" className="section-anchor">
           <div className="mb-6">
             <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Create</p>
@@ -1124,7 +1147,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
           {notice && <div role="status" className={`fixed bottom-4 left-4 right-4 z-50 flex items-start gap-2 rounded-xl border px-4 py-3 text-[13px] leading-5 shadow-xl sm:left-auto sm:max-w-md ${notice.kind === "success" ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]" : "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"}`}>{notice.kind === "success" ? <CheckCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}{notice.text}</div>}
 
-          {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable. Unsaved editor text and assisted checklists may not survive a reload.</div>}
+          {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable. Unsaved editor text may not survive a reload. Items already saved to your account remain in the database.</div>}
 
           {view === "drafts" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Drafts</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Saved ideas</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Pick up a post you started earlier, or keep a backup.</p></div>
@@ -1152,6 +1175,25 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         <p className="mt-2 text-[13px] leading-6 text-[var(--text-muted)]">Please wait while drafts, plans and images are checked and restored.</p>
       </div>
     </div>}
+    {legacyWorkspace && <dialog ref={legacyReviewRef} onCancel={(event) => { event.preventDefault(); if (!legacyImportBusy) setLegacyReviewOpen(false); }} aria-labelledby="legacy-review-title" aria-describedby="legacy-review-description" className="fixed inset-0 m-auto max-h-[85vh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
+      <h2 id="legacy-review-title" className="text-[19px] font-bold tracking-[-0.025em]">Review older browser data</h2>
+      <p id="legacy-review-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">This browser copy has no account label. Check the items below before moving them into <strong className="text-[var(--text)]">{email}</strong>.</p>
+      <p className="mt-3 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">
+        {legacyWorkspace.drafts.length || legacyWorkspace.schedule.length
+          ? `Importing replaces this account’s drafts and publishing plan, and clears its AI weekly plans. Existing assisted items stay; missing browser items are added. Due queued plans may be simulated by the worker.${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`
+          : "Importing adds missing assisted items. This account’s drafts, publishing plan, AI weekly plans and assisted items stay in place."}
+      </p>
+      <div className="mt-5 max-h-[40vh] space-y-5 overflow-y-auto pr-1">
+        {legacyWorkspace.drafts.length > 0 && <section aria-label="Older drafts"><h3 className="text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Drafts · {legacyWorkspace.drafts.length}</h3><ul className="mt-2 space-y-2">{legacyWorkspace.drafts.map((draft) => <li key={draft.id} className="rounded-lg border border-[var(--line)] px-3 py-2"><p className="truncate text-[13px] font-semibold">{draftTitle(draft.title, draft.source)}</p><p className="mt-1 line-clamp-2 text-[12px] text-[var(--text-muted)]">{draft.source}</p></li>)}</ul></section>}
+        {legacyWorkspace.schedule.length > 0 && <section aria-label="Older planned posts"><h3 className="text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Publishing plan · {legacyWorkspace.schedule.length}</h3><ul className="mt-2 space-y-2">{legacyWorkspace.schedule.map((post) => <li key={post.id} className="rounded-lg border border-[var(--line)] px-3 py-2"><p className="truncate text-[13px] font-semibold">{draftTitle(post.title, post.source)}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{new Date(post.scheduledFor).toLocaleString("en-US")} · {Object.keys(post.posts).join(", ")}</p></li>)}</ul></section>}
+        {legacyWorkspace.assisted.length > 0 && <section aria-label="Older assisted items"><h3 className="text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Assisted items · {legacyWorkspace.assisted.length}</h3><ul className="mt-2 space-y-2">{legacyWorkspace.assisted.map((item) => <li key={item.id} className="rounded-lg border border-[var(--line)] px-3 py-2"><p className="truncate text-[13px] font-semibold">{item.title || item.text}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{assistedDestinations[item.destination].name} · {new Date(item.scheduledFor).toLocaleString("en-US")}</p><p className="mt-1 line-clamp-2 text-[12px] text-[var(--text-muted)]">{item.text}</p></li>)}</ul></section>}
+      </div>
+      {legacyImportError && <p role="alert" className="mt-4 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{legacyImportError} The browser copy was kept.</p>}
+      <div className="mt-6 flex flex-wrap justify-end gap-2">
+        <button type="button" onClick={() => setLegacyReviewOpen(false)} disabled={legacyImportBusy} className="rounded-lg px-3 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Keep in browser</button>
+        <button type="button" onClick={() => { void importLegacyWorkspace(); }} disabled={legacyImportBusy} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{legacyImportBusy ? "Moving…" : "Move into this account"}</button>
+      </div>
+    </dialog>}
     {pendingEditorSwitch && <dialog ref={switchDialogRef} onCancel={(event) => { event.preventDefault(); if (!switchSaving) setPendingEditorSwitch(null); }} aria-labelledby="unsaved-editor-title" aria-describedby="unsaved-editor-description" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">Unsaved changes</h2>
       <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">Your current text, platform versions, and image choices have changed. Save them before {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : "opening a copy of this planned post"}, or discard these edits.</p>

@@ -176,8 +176,13 @@ test("stores assisted checklist actions behind the owner session", async () => {
   const legacyImport = await post("/api/workspace", { action: "import-legacy", backup: { version: 3, drafts: [], schedule: [], assisted: [] } });
   assert.equal(legacyImport.status, 200);
   assert.equal((await legacyImport.json()).assisted.length, 2);
+  const reviewedItem = { ...assisted, id: randomUUID() };
+  const reviewedMigration = await post("/api/workspace", { action: "migrate-browser-workspace", backup: { version: 3, drafts: [], schedule: [], assisted: [reviewedItem] } });
+  assert.equal(reviewedMigration.status, 200);
+  assert.equal((await reviewedMigration.json()).assisted.length, 3);
   assert.equal((await post("/api/workspace", { action: "delete-assisted", id: assisted.id })).status, 200);
   assert.equal((await post("/api/workspace", { action: "delete-assisted", id: migratedItem.id })).status, 200);
+  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: reviewedItem.id })).status, 200);
   assert.deepEqual((await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json()).assisted, []);
 });
 

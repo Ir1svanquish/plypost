@@ -390,44 +390,65 @@ export function rescheduleSchedule(userId: string, id: string, scheduledFor: unk
   });
 }
 
-type ImportMode = "replace-all" | "preserve-assisted";
+type ImportMode = "replace-all" | "preserve-assisted" | "merge-legacy";
 
 function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
   const workspace = parseWorkspace(raw);
   if (!workspace || !raw || typeof raw !== "object" || !Array.isArray((raw as { drafts?: unknown }).drafts) || !Array.isArray((raw as { schedule?: unknown }).schedule) ||
       workspace.drafts.length !== (raw as { drafts: unknown[] }).drafts.length ||
       workspace.schedule.length !== (raw as { schedule: unknown[] }).schedule.length ||
+      ((raw as { version?: unknown }).version === 3 && !Array.isArray((raw as { assisted?: unknown }).assisted)) ||
       (Array.isArray((raw as { assisted?: unknown }).assisted) && workspace.assisted.length !== (raw as { assisted: unknown[] }).assisted.length)) throw new Error("Invalid workspace backup.");
   const ids = [...workspace.drafts, ...workspace.schedule, ...workspace.assisted].map((item) => item.id);
   if (new Set(ids).size !== ids.length || ids.some((id) => !/^[a-f0-9-]{36}$/i.test(id))) throw new Error("Backup has invalid IDs.");
+  const replaceSaved = mode !== "merge-legacy" || workspace.drafts.length > 0 || workspace.schedule.length > 0;
   transaction((db) => {
-    // A text workspace backup has no weekly plans; replacing its drafts invalidates approved idea links.
-    db.prepare("DELETE FROM weekly_plans WHERE user_id=?").run(userId);
-    db.prepare("DELETE FROM drafts WHERE user_id=?").run(userId);
-    db.prepare("DELETE FROM jobs WHERE user_id=? AND status != 'running'").run(userId);
-    const running = db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE user_id=?").get(userId) as { count: number };
-    if (running.count) throw new Error("Wait for running jobs before importing.");
-    if (mode === "replace-all") db.prepare("DELETE FROM assisted WHERE user_id=?").run(userId);
-    for (const draft of workspace.drafts) {
-      assertOwnedMedia(userId, draft.mediaIds ?? []);
-      db.prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?)")
-        .run(draft.id, userId, JSON.stringify(draft), draft.updatedAt);
+    let missingAssisted: AssistedPost[] = [];
+    if (mode === "merge-legacy") {
+      for (const item of workspace.assisted) assertOwnedMedia(userId, item.mediaIds ?? []);
+      const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
+      missingAssisted = workspace.assisted.filter((item) => {
+        const existing = db.prepare("SELECT user_id FROM assisted WHERE id=?").get(item.id) as { user_id: string } | undefined;
+        if (existing && existing.user_id !== userId) throw new Error("A browser handoff belongs to another account.");
+        return !existing;
+      });
+      if (count.count + missingAssisted.length > 100) throw new Error("Assisted publishing list is full.");
     }
-    for (const post of workspace.schedule) {
-      assertOwnedMedia(userId, post.mediaIds ?? []);
-      const status = post.status === "simulated" ? "simulated" : "queued";
-      db.prepare("INSERT INTO jobs(id,user_id,payload,scheduled_for,timezone,status,next_attempt_at,completed_at,receipts) VALUES (?,?,?,?,?,?,?,?,?)")
-        .run(post.id, userId, JSON.stringify(post), post.scheduledFor, "UTC", status, post.scheduledFor, post.simulatedAt ?? null, JSON.stringify(post.receipts ?? []));
+    if (replaceSaved) {
+      // A text workspace backup has no weekly plans; replacing its drafts invalidates approved idea links.
+      db.prepare("DELETE FROM weekly_plans WHERE user_id=?").run(userId);
+      db.prepare("DELETE FROM drafts WHERE user_id=?").run(userId);
+      db.prepare("DELETE FROM jobs WHERE user_id=? AND status != 'running'").run(userId);
+      const running = db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE user_id=?").get(userId) as { count: number };
+      if (running.count) throw new Error("Wait for running jobs before importing.");
+      for (const draft of workspace.drafts) {
+        assertOwnedMedia(userId, draft.mediaIds ?? []);
+        db.prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?)")
+          .run(draft.id, userId, JSON.stringify(draft), draft.updatedAt);
+      }
+      for (const post of workspace.schedule) {
+        assertOwnedMedia(userId, post.mediaIds ?? []);
+        const status = post.status === "simulated" ? "simulated" : "queued";
+        db.prepare("INSERT INTO jobs(id,user_id,payload,scheduled_for,timezone,status,next_attempt_at,completed_at,receipts) VALUES (?,?,?,?,?,?,?,?,?)")
+          .run(post.id, userId, JSON.stringify(post), post.scheduledFor, "UTC", status, post.scheduledFor, post.simulatedAt ?? null, JSON.stringify(post.receipts ?? []));
+      }
     }
     if (mode === "replace-all") {
+      db.prepare("DELETE FROM assisted WHERE user_id=?").run(userId);
       for (const item of workspace.assisted) {
         assertOwnedMedia(userId, item.mediaIds ?? []);
         db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
           .run(item.id, userId, JSON.stringify(item), item.scheduledFor, new Date().toISOString());
       }
+    } else if (mode === "merge-legacy") {
+      const stamp = new Date().toISOString();
+      for (const item of missingAssisted) {
+        db.prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
+          .run(item.id, userId, JSON.stringify(item), item.scheduledFor, stamp);
+      }
     }
     audit(userId, mode === "replace-all" ? "workspace.imported" : "workspace.legacy_imported", randomUUID(),
-      `${workspace.drafts.length} drafts; ${workspace.schedule.length} jobs; ${mode === "replace-all" ? workspace.assisted.length : "preserved"} assisted`);
+      `${replaceSaved ? workspace.drafts.length : "preserved"} drafts; ${replaceSaved ? workspace.schedule.length : "preserved"} jobs; ${mode === "replace-all" ? workspace.assisted.length : mode === "merge-legacy" ? missingAssisted.length + " merged" : "preserved"} assisted`);
   });
   return workspace;
 }
@@ -438,6 +459,11 @@ export function importLibrary(userId: string, raw: unknown) {
 
 export function importLegacyLibrary(userId: string, raw: unknown) {
   return importWorkspace(userId, raw, "preserve-assisted");
+}
+
+/** Explicitly merge the old browser handoffs with an optional draft/plan replacement. */
+export function migrateLegacyBrowserWorkspace(userId: string, raw: unknown) {
+  return importWorkspace(userId, raw, "merge-legacy");
 }
 
 export function aiRateAllowed(userId: string): boolean {
