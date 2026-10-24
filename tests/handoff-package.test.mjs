@@ -2,7 +2,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strFromU8, unzipSync } from "fflate";
@@ -82,7 +82,7 @@ test("video-first handoff keeps text export honest when no video is stored", asy
 });
 
 test("video handoff ZIP contains exact saved clip and caption", async () => {
-  const bytes = Buffer.from([0, 0, 0, 16, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 0, 0]);
+  const bytes = readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4"));
   const video = createVideo(owner, { name: "launch.mp4", type: "video/mp4", bytes }).video;
   const now = new Date().toISOString();
   const saved = addAssisted(owner, { id: randomUUID(), title: "Clip", destination: "youtube", text: "Watch this clip",

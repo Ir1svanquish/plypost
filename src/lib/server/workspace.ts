@@ -276,6 +276,31 @@ export function updateAssistedText(userId: string, id: string, expectedText: unk
   });
 }
 
+/** Replace or detach the clip on a queued handoff without changing its text or reminder. */
+export function updateAssistedVideo(userId: string, id: string, expectedVideoId: unknown, videoId: unknown): boolean {
+  if (!validId(id) || (expectedVideoId !== null && !validUuid(expectedVideoId)) ||
+      (videoId !== null && !validUuid(videoId))) {
+    throw new Error("Choose a saved video or remove the clip, then refresh the handoff before editing.");
+  }
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
+    if (!row) throw new AssistedConflictError("This handoff is no longer available. Refresh the list before editing.");
+    const current = JSON.parse(row.payload) as AssistedPost;
+    if (current.status !== "queued" || (current.videoId ?? null) !== expectedVideoId) {
+      throw new AssistedConflictError("This handoff video changed or was marked posted. Refresh the list before editing.");
+    }
+    if (videoId === expectedVideoId) return true;
+    if (videoId !== null) assertOwnedVideo(userId, videoId);
+    const updated: AssistedPost = { ...current };
+    if (videoId === null) delete updated.videoId;
+    else updated.videoId = videoId as string;
+    db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(JSON.stringify(updated), new Date().toISOString(), id, userId);
+    audit(userId, "assisted.video_changed", id);
+    return true;
+  });
+}
+
 /** Correct descriptions on a queued manual handoff without changing its images or source draft. */
 export function updateAssistedMediaAlt(userId: string, id: string, expectedMediaAlt: unknown, mediaAlt: unknown): boolean {
   if (!validId(id)) throw new Error("Invalid handoff ID.");

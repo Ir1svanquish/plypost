@@ -30,6 +30,7 @@ type Props = {
   onCopy: (text: string, destination: AssistedDestinationId) => void;
   onMarkPosted: (id: string, postUrl?: string) => void;
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
+  onUpdateVideo: (id: string, expectedVideoId: string | null, videoId: string | null) => Promise<boolean>;
   onUpdateDescriptions: (id: string, expectedMediaAlt: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdatePostUrl: (id: string, postUrl: string | null) => Promise<boolean>;
   onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null) => Promise<boolean>;
@@ -86,10 +87,12 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
+  const [videoEdits, setVideoEdits] = useState<Record<string, { expectedVideoId: string | null; value: string | null }>>({});
+  const [videoSavingId, setVideoSavingId] = useState<string | null>(null);
   const [editingLinks, setEditingLinks] = useState<Record<string, boolean>>({});
   const [linkSavingId, setLinkSavingId] = useState<string | null>(null);
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, OutcomeForm>>({});
@@ -159,6 +162,10 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
     setTextEdits((current) => { const next = { ...current }; delete next[id]; return next; });
   }
 
+  function closeVideoEditor(id: string) {
+    setVideoEdits((current) => { const next = { ...current }; delete next[id]; return next; });
+  }
+
   async function updateSavedText(id: string, expectedText: string, value: string) {
     if (busy || textSavingId) return;
     setTextSavingId(id);
@@ -167,6 +174,14 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
     } finally {
       setTextSavingId(null);
     }
+  }
+
+  async function updateSavedVideo(id: string, expectedVideoId: string | null, videoId: string | null) {
+    if (busy || videoBusy || videoSavingId) return;
+    setVideoSavingId(id);
+    try {
+      if (await onUpdateVideo(id, expectedVideoId, videoId)) closeVideoEditor(id);
+    } finally { setVideoSavingId(null); }
   }
 
   async function updateLink(id: string, postUrl: string | null) {
@@ -322,9 +337,12 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
               ? validatePlatformText(item.destination, textEdit.value.trim()) : null;
             const canSaveText = Boolean(textEdit && !textEditStale && textEdit.value.trim() &&
               textEdit.value.trim() !== item.text && textEditCount <= 5000 && textEditValidation?.valid !== false);
+            const videoEdit = videoEdits[item.id];
+            const videoEditStale = Boolean(videoEdit && videoEdit.expectedVideoId !== (item.videoId ?? null));
+            const canSaveVideo = Boolean(videoEdit && !videoEditStale && videoEdit.value !== videoEdit.expectedVideoId);
             return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && target.needsMedia && !item.mediaIds?.length && !item.videoId && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{item.destination === "youtube" ? "Bring a video when posting." : "Add a photo or video when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Ready · publish manually" : state === "posted" ? "Marked posted by you" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && target.needsMedia && (item.destination === "youtube" ? !item.videoId : !item.mediaIds?.length && !item.videoId) && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{item.destination === "youtube" ? "Bring a video when posting." : "Add a photo or video when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
                 <button type="button" aria-label={`Remove ${target.name} handoff: ${item.title}`} onClick={() => onRemove(item.id)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
               <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
@@ -344,6 +362,16 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                 </div>
               </div>}
               <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expected, next) => onUpdateDescriptions(item.id, expected, next) : undefined} />
+              {item.status === "queued" && !videoEdit && <button type="button" onClick={() => setVideoEdits({ [item.id]: { expectedVideoId: item.videoId ?? null, value: item.videoId ?? null } })} disabled={busy || videoBusy} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.videoId ? "Change attached video" : "Attach a video"}</button>}
+              {item.status === "queued" && videoEdit && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+                <VideoAttachmentPicker selectedId={videoEdit.value} onChange={(value) => setVideoEdits((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? videoEdit), value } }))} onBusyChange={setVideoBusy} disabled={busy || mediaBusy || videoBusy} />
+                {videoEditStale && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">The saved clip changed elsewhere. Cancel and reopen the latest handoff.</p>}
+                <p className="mt-2 text-[11px] text-[var(--text-muted)]">This changes only this handoff. Its text, reminder and images stay saved.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button type="button" onClick={() => void updateSavedVideo(item.id, videoEdit.expectedVideoId, videoEdit.value)} disabled={busy || videoBusy || videoSavingId !== null || !canSaveVideo} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{videoSavingId === item.id ? "Saving…" : "Save video"}</button>
+                  <button type="button" onClick={() => closeVideoEditor(item.id)} disabled={busy || videoBusy || videoSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
+                </div>
+              </div>}
               {item.videoId && <a href={`/api/videos/${encodeURIComponent(item.videoId)}`} download className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Download size={13} aria-hidden="true" /> Download saved video</a>}
               {Boolean(item.mediaIds?.length || item.videoId) && <a href={`/api/assisted/${encodeURIComponent(item.id)}/package`} download className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download caption and media (.zip)</a>}
               {item.status === "queued" && <div className="mt-3 max-w-xl">
@@ -355,7 +383,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
-                {item.status === "queued" ? <button type="button" onClick={() => onMarkPosted(item.id, normalizedUrl ?? undefined)} disabled={busy || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { closeOutcomeEditor(item.id); onUndo(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+                {item.status === "queued" ? <button type="button" onClick={() => { closeVideoEditor(item.id); onMarkPosted(item.id, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { closeOutcomeEditor(item.id); onUndo(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
               {item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
               {item.status === "posted" && <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">

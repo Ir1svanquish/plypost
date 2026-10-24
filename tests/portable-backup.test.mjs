@@ -2,7 +2,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -210,8 +210,7 @@ test("backup import rejects an image whose bytes do not match its declared check
 test("full backup restores video bytes and remaps the saved handoff", async () => {
   const sourceOwner = "video-source@example.test";
   const destinationOwner = "video-restored@example.test";
-  // This ftyp fixture checks exact backup bytes, not media playback.
-  const bytes = Buffer.from([0, 0, 0, 16, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 0, 0]);
+  const bytes = readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4"));
   const video = createVideo(sourceOwner, { name: "launch.mp4", type: "video/mp4", bytes }).video;
   const createdAt = stamp();
   const handoff = addAssisted(sourceOwner, { id: randomUUID(), title: "Video launch", destination: "youtube",

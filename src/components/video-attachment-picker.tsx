@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Download, Trash2, Upload } from "lucide-react";
 
 type VideoItem = { id: string; name: string; mimeType: string; sizeBytes: number; createdAt: string };
@@ -15,6 +15,7 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectId = useId();
 
   useEffect(() => {
     let active = true;
@@ -52,7 +53,7 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
   }
 
   async function remove(id: string) {
-    if (busy || disabled || !window.confirm("Delete this saved video from your library? Saved handoffs must be removed first.")) return;
+    if (busy || disabled || !window.confirm("Delete this saved video from your library? Detach it from saved handoffs first.")) return;
     setError(null); setBusy(true); onBusyChange(true);
     try {
       const response = await fetch(`/api/videos/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "same-origin" });
@@ -73,8 +74,9 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
     </div>
     {error && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">{error}</p>}
     {loading ? <p className="mt-2 text-[11px] text-[var(--text-muted)]">Loading saved videos…</p> : videos.length > 0 ? <>
-      <label htmlFor="assisted-video" className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Attach a saved clip</label>
-      <select id="assisted-video" value={selectedId && selected ? selectedId : ""} disabled={disabled || busy} onChange={(event) => onChange(event.target.value || null)} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)]"><option value="">No video</option>{videos.map((item) => <option key={item.id} value={item.id}>{item.name} · {fileSize(item.sizeBytes)}</option>)}</select>
+      <label htmlFor={selectId} className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Attach a saved clip</label>
+      <select id={selectId} value={selectedId && selected ? selectedId : ""} disabled={disabled || busy} onChange={(event) => onChange(event.target.value || null)} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)]"><option value="">No video</option>{videos.map((item) => <option key={item.id} value={item.id}>{item.name} · {fileSize(item.sizeBytes)}</option>)}</select>
+      {selectedId && !selected && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">The attached clip is unavailable. Choose another clip or select No video.</p>}
       {selected && <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]"><a href={`/api/videos/${encodeURIComponent(selected.id)}`} download className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]"><Download size={12} aria-hidden="true" /> Download {selected.name}</a><button type="button" disabled={disabled || busy} onClick={() => void remove(selected.id)} className="inline-flex items-center gap-1 text-[var(--danger)] disabled:opacity-50"><Trash2 size={12} aria-hidden="true" /> Delete from library</button></div>}
     </> : <p className="mt-2 text-[11px] text-[var(--text-muted)]">No saved video clips yet.</p>}
     <p className="mt-2 text-[11px] text-[var(--text-soft)]">Library limit: 12 clips, 64 MiB total. Check the destination’s current format and size rules before posting.</p>
