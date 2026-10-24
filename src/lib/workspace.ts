@@ -142,7 +142,7 @@ function validMediaIds(value: unknown): value is string[] {
     value.every((id) => typeof id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id));
 }
 
-function validMediaAlt(value: unknown, mediaIds: unknown): value is string[] {
+export function validMediaAlt(value: unknown, mediaIds: unknown): value is string[] {
   return validMediaIds(mediaIds) && Array.isArray(value) && value.length === mediaIds.length &&
     value.every((description) => typeof description === "string" &&
       description === description.trim() && description.length <= MAX_IMAGE_ALT_CHARS &&

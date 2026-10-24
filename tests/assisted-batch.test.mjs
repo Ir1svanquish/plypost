@@ -8,7 +8,7 @@ import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
-import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, updateAssistedText } from "../src/lib/server/workspace.ts";
+import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedMediaAlt, updateAssistedText } from "../src/lib/server/workspace.ts";
 import { parseWorkspace } from "../src/lib/workspace.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
 
@@ -72,6 +72,43 @@ test("unmodified platform text uses the same adaptation shown in Create", () => 
   const prepared = prepareAssistedBatch(owner, saved.id, randomUUID(), handoffs());
   assert.equal(prepared.find((item) => item.destination === "bluesky").text, "First line Second line");
   assert.equal(prepared.find((item) => item.destination === "linkedin").text, "First line\nSecond line");
+});
+
+test("queued handoff descriptions can be corrected without changing the draft or sibling", async () => {
+  const image = (await createMedia(owner, {
+    name: "detail.png", type: "image/png",
+    bytes: await sharp({ create: { width: 4, height: 4, channels: 3, background: "#aabbcc" } }).png().toBuffer(),
+  })).media;
+  const saved = saveDraft(owner, { ...draft("Image note", undefined, undefined, [image.id]), mediaAlt: ["Original description"] });
+  const [first, sibling] = prepareAssistedBatch(owner, saved.id, randomUUID(), handoffs());
+  assert.equal(updateAssistedMediaAlt(owner, first.id, ["Original description"], ["Corrected description"]), true);
+  const current = listWorkspace(owner);
+  assert.deepEqual(current.assisted.find((item) => item.id === first.id).mediaAlt, ["Corrected description"]);
+  assert.deepEqual(current.assisted.find((item) => item.id === sibling.id).mediaAlt, ["Original description"]);
+  assert.deepEqual(current.drafts.find((item) => item.id === saved.id).mediaAlt, ["Original description"]);
+  assert.equal(current.assisted.find((item) => item.id === first.id).scheduledFor, first.scheduledFor);
+  assert.throws(() => updateAssistedMediaAlt(owner, first.id, ["Original description"], ["Overwritten"]), /changed/);
+  assert.throws(() => updateAssistedMediaAlt(other, first.id, ["Corrected description"], ["Other owner"]), /no longer available/);
+  assert.throws(() => updateAssistedMediaAlt(owner, first.id, ["Corrected description"], ["x".repeat(501)]), /up to 500/);
+
+  const token = createSession(owner);
+  const request = (cookie, origin = "http://localhost:3000") => new globalThis.Request("http://localhost:3000/api/workspace", {
+    method: "POST", headers: { origin, "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify({ action: "update-assisted-media-alt", id: first.id,
+      expectedMediaAlt: ["Corrected description"], mediaAlt: ["Final description"] }),
+  });
+  assert.equal((await workspacePost(request())).status, 401);
+  assert.equal((await workspacePost(request(`${SESSION_COOKIE}=${token}`, "https://other.example"))).status, 403);
+  assert.equal((await workspacePost(request(`${SESSION_COOKIE}=${token}`))).status, 200);
+  assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === first.id).mediaAlt, ["Final description"]);
+  assert.equal(setAssistedStatus(owner, first.id, "posted"), true);
+  assert.throws(() => updateAssistedMediaAlt(owner, first.id, ["Final description"], ["After posting"]), /marked posted/);
+
+  const legacyDraft = saveDraft(owner, draft("Older image note", ["bluesky"], {}, [image.id]));
+  const [legacyHandoff] = prepareAssistedBatch(owner, legacyDraft.id, randomUUID(), [handoffs()[0]]);
+  assert.equal(legacyHandoff.mediaAlt, undefined);
+  assert.equal(updateAssistedMediaAlt(owner, legacyHandoff.id, [""], ["Added later"]), true);
+  assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === legacyHandoff.id).mediaAlt, ["Added later"]);
 });
 
 test("a revised handoff stays separate from its source draft and sibling destination", () => {

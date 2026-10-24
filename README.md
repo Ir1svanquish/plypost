@@ -7,7 +7,7 @@ Plypost is a local web app for drafting and planning social posts. It runs on yo
 - Write one draft, then edit separate versions for Bluesky, Mastodon, LinkedIn and Threads. Preview the text and selected images before sharing. Optional AI adaptation uses a Nebius or NVIDIA key stored on the server.
 - Save drafts and up to four ordered images with optional descriptions in local SQLite. Export a full backup from **Drafts**.
 - Put posts on a calendar as simulations or manual reminders. A local worker processes due simulations and individually confirmed Mastodon posts while your computer is running.
-- Prepare manual publishing checklists for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit and the four draft platforms. Copy the text and image descriptions, download images, publish on the platform, then record the result yourself.
+- Prepare manual publishing checklists for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit and the four draft platforms. Copy the text and image descriptions, download images, publish on the platform, then record the result yourself. You can correct a pending handoff's text or image descriptions without changing its source draft.
 - Generate weekly ideas from a saved brand brief. Each idea needs your review before it becomes a draft. Clicking **Generate ideas** sends the brand brief to your selected AI provider; self-reported post results stay local.
 
 | Publishing mode | What happens |

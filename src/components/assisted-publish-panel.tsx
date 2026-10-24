@@ -27,6 +27,7 @@ type Props = {
   onCopy: (text: string, destination: AssistedDestinationId) => void;
   onMarkPosted: (id: string, postUrl?: string) => void;
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
+  onUpdateDescriptions: (id: string, expectedMediaAlt: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdatePostUrl: (id: string, postUrl: string | null) => Promise<boolean>;
   onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null) => Promise<boolean>;
   onUndo: (id: string) => void;
@@ -75,7 +76,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, time, now, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, time, now, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onTimeChange, onAdd, onCopy, onMarkPosted, onUpdateText, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -172,6 +173,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
           <textarea id="assisted-text" value={text} maxLength={5000} onChange={(event) => onTextChange(event.target.value)} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
           <p className="mt-2 text-[12px] text-[var(--text-secondary)]">{imageCount ? `${imageCount} ${imageCount === 1 ? "image" : "images"} from the current draft will be saved with this handoff.` : "No images selected in the current draft."} <button type="button" onClick={onEditImages} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit images in Create</button></p>
+          {selected.needsMedia && <p className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">{destination === "youtube" ? "Bring a video when you publish. Plypost stores images, not video files; this handoff saves only the text and any selected images." : imageCount === 0 ? "Bring a photo or video when you publish. This handoff has no saved media." : "Check the selected images against this platform's current media options before posting. You can also bring media directly to the platform."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
             <p className={validation.valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}>{validation.count} / {validation.limit} {destination === "bluesky" ? "graphemes" : "characters"}{validation.byteCount !== undefined ? ` · ${validation.byteCount} / ${validation.byteLimit} UTF-8 bytes` : ""}</p>
             {validation.issues.map((issue) => <p key={issue.code} className={issue.severity === "error" ? "text-[var(--danger)]" : "text-[var(--warning)]"}>{issue.message}</p>)}
@@ -234,7 +236,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                   <button type="button" onClick={() => closeTextEditor(item.id)} disabled={busy || textSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                 </div>
               </div>}
-              <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} />
+              <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expected, next) => onUpdateDescriptions(item.id, expected, next) : undefined} />
               {item.status === "queued" && <div className="mt-3 max-w-xl">
                 <label htmlFor={`assisted-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Public post link · optional</label>
                 <input id={`assisted-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={enteredUrl} placeholder="https://social.example/your-post" aria-invalid={invalidUrl} aria-describedby={`assisted-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
