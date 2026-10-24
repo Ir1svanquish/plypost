@@ -9,11 +9,11 @@ import { createSession } from "../src/lib/server/auth.ts";
 import {
   cancelMastodonSchedule, claimDueMastodonSchedule, createMastodonSchedule,
   listMastodonSchedules, mastodonWorkerLastSeen, processOneDueMastodonSchedule, reconcileMastodonSchedules,
-  resolveMastodonSchedule,
+  resolveMastodonSchedule, rescheduleMastodonSchedule,
   touchMastodonWorker,
 } from "../src/lib/server/mastodon-schedule.ts";
 import { disconnectMastodon, publishMastodonText } from "../src/lib/server/mastodon.ts";
-import { GET, POST } from "../src/app/api/mastodon/schedule/route.ts";
+import { GET, PATCH, POST } from "../src/app/api/mastodon/schedule/route.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-mastodon-schedule-"));
 const user = "schedule-owner@example.test";
@@ -74,6 +74,65 @@ test("authenticated, same-origin owner can confirm one real schedule without dis
     body: JSON.stringify(plan("Cross-origin")),
   });
   assert.equal((await POST(crossOrigin)).status, 403);
+});
+
+test("an owner-confirmed time change keeps the exact intent and moves worker eligibility", async () => {
+  fresh();
+  const session = createSession(user);
+  const cookie = `plypost_session=${session}`;
+  const original = plan("Keep this exact account and text", new Date(Date.now() + 60_000).toISOString());
+  createMastodonSchedule(user, original);
+  const moved = new Date(Date.now() + 180_000).toISOString();
+  const change = { clientRequestId: original.clientRequestId,
+    expectedScheduledFor: original.scheduledFor, scheduledFor: moved };
+  assert.equal((await PATCH(routeRequest("PATCH", "", change))).status, 401);
+  const crossOrigin = new globalThis.Request(`${origin}/api/mastodon/schedule`, {
+    method: "PATCH", headers: { origin: "https://other.example", cookie,
+      "Content-Type": "application/json" }, body: JSON.stringify(change),
+  });
+  assert.equal((await PATCH(crossOrigin)).status, 403);
+  const response = await PATCH(routeRequest("PATCH", cookie, change));
+  assert.equal(response.status, 200);
+  const item = (await response.json()).item;
+  assert.equal(item.clientRequestId, original.clientRequestId);
+  assert.equal(item.text, original.text);
+  assert.equal(item.account.id, accountId);
+  assert.equal(item.scheduledFor, moved);
+  assert.equal(item.status, "queued");
+  const row = database().prepare("SELECT text,account_id,scheduled_for,dispatch_authorized,status FROM mastodon_scheduled_posts WHERE client_request_id=?")
+    .get(original.clientRequestId);
+  assert.equal(row.dispatch_authorized, 1);
+  assert.equal(row.scheduled_for, moved);
+  assert.equal(row.text, original.text);
+  assert.equal(row.account_id, accountId);
+  assert.equal(claimDueMastodonSchedule(new Date(Date.parse(original.scheduledFor) + 1)), null);
+  const stale = await PATCH(routeRequest("PATCH", cookie, change));
+  assert.equal(stale.status, 409);
+  assert.equal(claimDueMastodonSchedule(new Date(Date.parse(moved) + 1))?.client_request_id, original.clientRequestId);
+  assert.throws(() => rescheduleMastodonSchedule(user, { ...change, expectedScheduledFor: moved,
+    scheduledFor: new Date(Date.now() + 240_000).toISOString() }), /publishing has started/);
+});
+
+test("real time changes reject invalid, duplicate, paused and disconnected intents", () => {
+  const db = fresh();
+  const original = plan("Same text, two dates", new Date(Date.now() + 60_000).toISOString());
+  createMastodonSchedule(user, original);
+  const occupied = new Date(Date.now() + 180_000).toISOString();
+  createMastodonSchedule(user, plan(original.text, occupied));
+  const request = { clientRequestId: original.clientRequestId,
+    expectedScheduledFor: original.scheduledFor, scheduledFor: occupied };
+  assert.throws(() => rescheduleMastodonSchedule(user, request), /already queued at that time/);
+  for (const scheduledFor of ["2026-02-30T12:00:00.000Z", new Date(Date.now() - 1000).toISOString()]) {
+    assert.throws(() => rescheduleMastodonSchedule(user, { ...request, scheduledFor }), /UTC time|at least 10 seconds/);
+  }
+  process.env.PLYPOST_MASTODON_SCHEDULE_ENABLED = "false";
+  try { assert.throws(() => rescheduleMastodonSchedule(user, request), /paused/); }
+  finally { delete process.env.PLYPOST_MASTODON_SCHEDULE_ENABLED; }
+  db.prepare("UPDATE mastodon_connections SET account_id='other-account' WHERE user_id=?").run(user);
+  assert.throws(() => rescheduleMastodonSchedule(user, { ...request,
+    scheduledFor: new Date(Date.now() + 240_000).toISOString() }), /no longer connected/);
+  assert.equal(database().prepare("SELECT scheduled_for FROM mastodon_scheduled_posts WHERE client_request_id=?")
+    .get(original.clientRequestId).scheduled_for, original.scheduledFor);
 });
 
 test("real worker heartbeat is separate from simulation heartbeat and a paused installation cannot queue or claim", async () => {

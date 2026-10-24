@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { cancelMastodonSchedule, createMastodonSchedule, listMastodonSchedules, mastodonScheduleExecutionEnabled, mastodonWorkerLastSeen, MastodonScheduleError } from "@/lib/server/mastodon-schedule";
+import { cancelMastodonSchedule, createMastodonSchedule, listMastodonSchedules, mastodonScheduleExecutionEnabled, mastodonWorkerLastSeen, MastodonScheduleError, rescheduleMastodonSchedule } from "@/lib/server/mastodon-schedule";
 
 export const runtime = "nodejs";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -58,6 +58,16 @@ export async function DELETE(request: Request) {
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
   try {
     return NextResponse.json({ item: cancelMastodonSchedule(user, await limitedJson(request)) },
+      { headers: { "Cache-Control": "no-store" } });
+  } catch (error) { return errorResponse(error); }
+}
+
+export async function PATCH(request: Request) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  const user = currentUser(request);
+  if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
+  try {
+    return NextResponse.json({ item: rescheduleMastodonSchedule(user, await limitedJson(request)) },
       { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return errorResponse(error); }
 }

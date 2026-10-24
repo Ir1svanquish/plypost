@@ -6,6 +6,7 @@ import { LocalDateTimeField, formatLocalDateTime, isValidLocalDateTime } from "@
 import type { MastodonConnection } from "@/components/mastodon-live-panel";
 import { validatePlatformText } from "@/lib/platform-validation";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
+import { localDateTimeValue } from "@/lib/workspace";
 
 type ScheduledMastodonPost = RealMastodonSchedule;
 
@@ -17,6 +18,8 @@ type PendingRequest = {
   accountLabel: string;
   instance: string;
 };
+
+type PendingMove = { post: ScheduledMastodonPost; scheduledFor: string };
 
 type Props = {
   items: ScheduledMastodonPost[];
@@ -83,6 +86,64 @@ function statusLabel(post: ScheduledMastodonPost): string {
   }
 }
 
+function MastodonQueueItem({ item, now, moving, cancelling, resolving, onMove, onCancel, onResolve }: {
+  item: ScheduledMastodonPost;
+  now: number;
+  moving: string | null;
+  cancelling: string | null;
+  resolving: string | null;
+  onMove: (item: ScheduledMastodonPost, scheduledFor: string) => boolean;
+  onCancel: (item: ScheduledMastodonPost) => void;
+  onResolve: (item: ScheduledMastodonPost, resolution: "found" | "absent") => void;
+}) {
+  const [editingTime, setEditingTime] = useState(false);
+  const [moveTime, setMoveTime] = useState("");
+  const postUrl = item.status === "posted" ? safePostUrl(item.postUrl, item.instance) : null;
+  const tone = item.status === "posted" ? "text-[var(--positive)] bg-[var(--positive-soft)]" :
+    item.status === "unknown" || item.status === "rejected" ? "text-[var(--warning)] bg-[var(--warning-soft)]" :
+    "text-[var(--text-secondary)] bg-[var(--field)]";
+  const moveValid = isValidLocalDateTime(moveTime, now + 60_000) &&
+    moveTime !== localDateTimeValue(new Date(item.scheduledFor));
+  const actionBusy = Boolean(moving || cancelling || resolving);
+
+  function submitMove(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!moveValid || item.status !== "queued" || actionBusy) return;
+    if (onMove(item, new Date(moveTime).toISOString())) setEditingTime(false);
+  }
+
+  return <li id={`mastodon-schedule-${item.clientRequestId}`} tabIndex={-1}
+    className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-[12px] outline-none focus:ring-2 focus:ring-[var(--accent)]">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${tone}`}>{statusLabel(item)}</span>
+      <span className="text-[11px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</span>
+    </div>
+    <p className="mt-2 text-[11px] text-[var(--text-muted)]">{item.account.username} · {item.instance}</p>
+    <p className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text)]">{item.text}</p>
+    {item.error && <p role="status" className="mt-2 text-[11px] leading-5 text-[var(--warning)]">{item.error}</p>}
+    {item.status === "unknown" && !item.resolution && <p className="mt-2 text-[11px] leading-5 text-[var(--warning)]">The result is uncertain. Check this Mastodon account before making a new post with the same text.</p>}
+    <div className="mt-3 flex flex-wrap gap-3">
+      {postUrl && <a href={postUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]">View verified post <ArrowUpRight size={12} /></a>}
+      {item.status === "queued" && <>
+        <button type="button" onClick={() => { setMoveTime(localDateTimeValue(new Date(item.scheduledFor))); setEditingTime(true); }} disabled={actionBusy || editingTime} className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)] disabled:opacity-50"><CalendarClock size={12} /> Change time</button>
+        <button type="button" onClick={() => onCancel(item)} disabled={actionBusy} className="inline-flex items-center gap-1 font-semibold text-[var(--danger)] disabled:opacity-50">{cancelling === item.clientRequestId ? <LoaderCircle size={12} className="animate-spin" /> : <Trash2 size={12} />} Cancel queued post</button>
+      </>}
+      {item.status === "unknown" && !item.resolution && <>
+        <button type="button" onClick={() => onResolve(item, "found")} disabled={actionBusy} className="font-semibold text-[var(--accent-text)] disabled:opacity-50">I found the post</button>
+        <button type="button" onClick={() => onResolve(item, "absent")} disabled={actionBusy} className="font-semibold text-[var(--accent-text)] disabled:opacity-50">No post found</button>
+      </>}
+    </div>
+    {item.status === "queued" && editingTime && <form onSubmit={submitMove} className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+      <LocalDateTimeField id={`mastodon-move-${item.clientRequestId}`} label="New real publishing time" value={moveTime} minTimestamp={now + 60_000} onChange={setMoveTime} />
+      <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">The connected account and exact text above stay unchanged. You will confirm the new time before it takes effect.</p>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <button type="submit" disabled={!moveValid || actionBusy} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 font-semibold text-[var(--accent-text)] disabled:opacity-50">{moving === item.clientRequestId ? "Saving…" : "Review time change"}</button>
+        <button type="button" onClick={() => setEditingTime(false)} disabled={actionBusy} className="font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
+      </div>
+    </form>}
+  </li>;
+}
+
 export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange, connection, connectionLoading, connectionError, selected, text, imageCount, mediaBusy, now, visible, workerLastSeen, onOpenAccount, onOpenEditor }: Props) {
   const [time, setTime] = useState("");
   const [executionEnabled, setExecutionEnabled] = useState(false);
@@ -95,9 +156,15 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
   const [uncertain, setUncertain] = useState(false);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [moving, setMoving] = useState<string | null>(null);
+  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [moveUncertain, setMoveUncertain] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
   const busyRef = useRef(false);
+  const movingRef = useRef(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const moveDialogRef = useRef<HTMLDialogElement>(null);
   const validation = validatePlatformText("mastodon", text);
   const accountId = accountIdOf(connection);
   const queuedCount = items.filter((item) => item.status === "queued").length;
@@ -146,6 +213,12 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
     if (pending && dialog && !dialog.open) dialog.showModal();
     if (!pending && dialog?.open) dialog.close();
   }, [pending]);
+
+  useEffect(() => {
+    const dialog = moveDialogRef.current;
+    if (pendingMove && dialog && !dialog.open) dialog.showModal();
+    if (!pendingMove && dialog?.open) dialog.close();
+  }, [pendingMove]);
 
   useEffect(() => {
     if (!uncertain || !pending) return;
@@ -225,7 +298,7 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
   }
 
   async function cancel(post: ScheduledMastodonPost) {
-    if (post.status !== "queued" || cancelling) return;
+    if (post.status !== "queued" || cancelling || movingRef.current) return;
     if (!window.confirm(`Cancel the queued real Mastodon post for ${post.account.username} at ${formatLocalDateTime(post.scheduledFor)}?\n\n${post.text}`)) return;
     setCancelling(post.clientRequestId);
     setActionError(null);
@@ -246,6 +319,99 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
       void refresh().catch(() => {});
     } finally {
       setCancelling(null);
+    }
+  }
+
+  async function reconcileMove(post: ScheduledMastodonPost, scheduledFor: string): Promise<boolean> {
+    try {
+      const latest = (await refresh()).find((item) => item.clientRequestId === post.clientRequestId);
+      if (latest?.status === "queued" && latest.scheduledFor === scheduledFor &&
+          latest.text === post.text && latest.account.id === post.account.id) {
+        setNotice("The new real publishing time is saved. The account and text were kept.");
+        setActionError(null);
+        setPendingMove(null);
+        setMoveError(null);
+        setMoveUncertain(false);
+        return true;
+      }
+      if (latest?.status === "queued" && latest.scheduledFor === post.scheduledFor &&
+          latest.text === post.text && latest.account.id === post.account.id) {
+        setMoveError("The original time is still queued. No change was confirmed; you can retry this same request.");
+        setMoveUncertain(false);
+      } else {
+        setPendingMove(null);
+        setMoveUncertain(false);
+        setActionError("The queued post changed or publishing has started. Review its current status before taking another action.");
+      }
+    } catch {
+      setMoveError("The time change result is uncertain. Refresh the real queue before trying again.");
+      setMoveUncertain(true);
+    }
+    return false;
+  }
+
+  function reviewMove(post: ScheduledMastodonPost, scheduledFor: string): boolean {
+    if (post.status !== "queued" || movingRef.current || busyRef.current || !executionEnabled || pendingMove) return false;
+    setActionError(null);
+    setNotice(null);
+    setMoveError(null);
+    setMoveUncertain(false);
+    setPendingMove({ post, scheduledFor });
+    return true;
+  }
+
+  async function submitMove(): Promise<void> {
+    if (!pendingMove || movingRef.current || busyRef.current || !executionEnabled || moveUncertain) return;
+    const { post, scheduledFor } = pendingMove;
+    movingRef.current = true;
+    setMoving(post.clientRequestId);
+    setActionError(null);
+    setNotice(null);
+    setMoveError(null);
+    try {
+      const response = await fetch("/api/mastodon/schedule", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientRequestId: post.clientRequestId,
+          expectedScheduledFor: post.scheduledFor, scheduledFor }),
+      });
+      const data = await readJson(response);
+      if (!response.ok) {
+        if (response.status === 503) {
+          setExecutionEnabled(false);
+          setPendingMove(null);
+          setActionError(typeof data.error === "string" ? data.error : "Real scheduling is paused.");
+          return;
+        }
+        if (response.status >= 500) {
+          await reconcileMove(post, scheduledFor);
+          return;
+        }
+        if (response.status === 409) {
+          setPendingMove(null);
+          setActionError(typeof data.error === "string" ? data.error : "The queued post changed. Refresh the queue.");
+          void refresh().catch(() => {});
+          return;
+        }
+        setMoveError(typeof data.error === "string" ? data.error : "Could not change this real Mastodon time.");
+        return;
+      }
+      if (!isScheduledPost(data.item) || data.item.status !== "queued" ||
+          data.item.scheduledFor !== scheduledFor || data.item.text !== post.text ||
+          data.item.account.id !== post.account.id) {
+        await reconcileMove(post, scheduledFor);
+        return;
+      }
+      onItemsChange((current) => current.map((item) => item.clientRequestId === post.clientRequestId
+        ? data.item as ScheduledMastodonPost : item));
+      setPendingMove(null);
+      setMoveUncertain(false);
+      setNotice("The new real publishing time is saved. The account and text were kept.");
+      void refresh().catch(() => {});
+    } catch {
+      await reconcileMove(post, scheduledFor);
+    } finally {
+      movingRef.current = false;
+      setMoving(null);
     }
   }
 
@@ -310,13 +476,16 @@ export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange,
         {actionError && <p role="alert" className="mt-4 rounded-lg bg-[var(--danger-soft)] p-3 text-[12px] text-[var(--danger)]">{actionError}</p>}
         {notice && <p role="status" className="mt-4 rounded-lg bg-[var(--positive-soft)] p-3 text-[12px] text-[var(--positive)]">{notice}</p>}
         {!loading && !loadError && items.length === 0 && <p className="mt-4 rounded-xl border border-dashed border-[var(--line)] p-5 text-[12px] text-[var(--text-muted)]">No real Mastodon posts queued yet. Simulated and manual items appear in the calendar below.</p>}
-        <ul className="mt-4 max-h-[480px] space-y-3 overflow-y-auto">{items.map((item) => {
-          const postUrl = item.status === "posted" ? safePostUrl(item.postUrl, item.instance) : null;
-          const tone = item.status === "posted" ? "text-[var(--positive)] bg-[var(--positive-soft)]" : item.status === "unknown" || item.status === "rejected" ? "text-[var(--warning)] bg-[var(--warning-soft)]" : "text-[var(--text-secondary)] bg-[var(--field)]";
-          return <li key={item.clientRequestId} id={`mastodon-schedule-${item.clientRequestId}`} tabIndex={-1} className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-[12px] outline-none focus:ring-2 focus:ring-[var(--accent)]"><div className="flex flex-wrap items-center justify-between gap-2"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${tone}`}>{statusLabel(item)}</span><span className="text-[11px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</span></div><p className="mt-2 text-[11px] text-[var(--text-muted)]">{item.account.username} · {item.instance}</p><p className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text)]">{item.text}</p>{item.error && <p role="status" className="mt-2 text-[11px] leading-5 text-[var(--warning)]">{item.error}</p>}{item.status === "unknown" && !item.resolution && <p className="mt-2 text-[11px] leading-5 text-[var(--warning)]">The result is uncertain. Check this Mastodon account before making a new post with the same text.</p>}<div className="mt-3 flex flex-wrap gap-3">{postUrl && <a href={postUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]">View verified post <ArrowUpRight size={12} /></a>}{item.status === "queued" && <button type="button" onClick={() => void cancel(item)} disabled={Boolean(cancelling)} className="inline-flex items-center gap-1 font-semibold text-[var(--danger)] disabled:opacity-50">{cancelling === item.clientRequestId ? <LoaderCircle size={12} className="animate-spin" /> : <Trash2 size={12} />} Cancel queued post</button>}{item.status === "unknown" && !item.resolution && <><button type="button" onClick={() => void resolve(item, "found")} disabled={Boolean(resolving)} className="font-semibold text-[var(--accent-text)] disabled:opacity-50">I found the post</button><button type="button" onClick={() => void resolve(item, "absent")} disabled={Boolean(resolving)} className="font-semibold text-[var(--accent-text)] disabled:opacity-50">No post found</button></>}</div></li>;
-        })}</ul>
+        <ul className="mt-4 max-h-[480px] space-y-3 overflow-y-auto">{items.map((item) =>
+          <MastodonQueueItem key={item.clientRequestId} item={item} now={now} moving={moving} cancelling={cancelling}
+            resolving={resolving} onMove={reviewMove} onCancel={(post) => void cancel(post)}
+            onResolve={(post, result) => void resolve(post, result)} />
+        )}</ul>
       </div>
     </div>}
+    <dialog ref={moveDialogRef} onCancel={(event) => { if (moving || moveUncertain) { event.preventDefault(); return; } setPendingMove(null); }} aria-labelledby="mastodon-move-review-heading" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
+      {pendingMove && <><h3 id="mastodon-move-review-heading" className="text-[18px] font-bold">Confirm new publishing time</h3><p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">This changes the time of one queued real Mastodon post. The connected account and exact text stay the same.</p><dl className="mt-4 grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 text-[12px]"><div><dt className="font-bold text-[var(--text-secondary)]">Account</dt><dd className="mt-1 break-words">{pendingMove.post.account.username} · {pendingMove.post.instance}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Original local time</dt><dd className="mt-1">{formatLocalDateTime(pendingMove.post.scheduledFor)}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">New local time</dt><dd className="mt-1 font-bold text-[var(--accent-text)]">{formatLocalDateTime(pendingMove.scheduledFor)}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Exact text</dt><dd className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words">{pendingMove.post.text}</dd></div></dl>{moveError && <p role="alert" className="mt-4 text-[12px] leading-5 text-[var(--danger)]">{moveError}</p>}{!executionEnabled && <p role="alert" className="mt-4 text-[12px] text-[var(--warning)]">Real scheduling is paused. This time change cannot be saved.</p>}<div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { setPendingMove(null); setMoveError(null); }} disabled={Boolean(moving || moveUncertain)} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Back</button>{moveUncertain && <button type="button" onClick={() => { void reconcileMove(pendingMove.post, pendingMove.scheduledFor); }} disabled={Boolean(moving)} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">Refresh queue</button>}<button type="button" onClick={() => void submitMove()} disabled={Boolean(moving || moveUncertain || !executionEnabled)} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{moving && <LoaderCircle size={13} className="animate-spin" />}Confirm changed time</button></div></>}
+    </dialog>
     <dialog ref={dialogRef} onCancel={(event) => { if (busy || uncertain) { event.preventDefault(); return; } setPending(null); }} aria-labelledby="mastodon-schedule-review-heading" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       {pending && <><h3 id="mastodon-schedule-review-heading" className="text-[18px] font-bold">Confirm real Mastodon schedule</h3><p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">Once you confirm, Plypost will send this post automatically from the account below if the background worker is running. You can cancel only while it is still queued.</p><dl className="mt-4 grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 text-[12px]"><div><dt className="font-bold text-[var(--text-secondary)]">Account</dt><dd className="mt-1 break-words">{pending.accountLabel} · {pending.instance}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Local time</dt><dd className="mt-1">{formatLocalDateTime(pending.scheduledFor)}</dd></div><div><dt className="font-bold text-[var(--text-secondary)]">Exact text</dt><dd className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words">{pending.text}</dd></div></dl>{!executionEnabled && <p role="alert" className="mt-4 text-[12px] text-[var(--warning)]">Real scheduling is unavailable. Close this review; nothing has been queued.</p>}{actionError && <p role="alert" className="mt-4 text-[12px] text-[var(--danger)]">{actionError}</p>}{uncertain && <p className="mt-2 text-[12px] text-[var(--warning)]">Refresh the queue first. Retrying below uses the same request ID to avoid adding a second copy.</p>}<div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { setPending(null); setUncertain(false); setActionError(null); }} disabled={busy || uncertain} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Back</button>{uncertain && <button type="button" onClick={() => { void refresh().catch((cause) => setLoadError(cause instanceof Error ? cause.message : "Could not check the queue.")); }} disabled={busy} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--accent-text)]">Check queue</button>}<button type="button" onClick={() => void submit()} disabled={busy || !executionEnabled} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{busy && <LoaderCircle size={13} className="animate-spin" />}{uncertain ? "Retry same request" : "Confirm real schedule"}</button></div></>}
     </dialog>

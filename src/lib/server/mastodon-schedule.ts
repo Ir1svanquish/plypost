@@ -210,6 +210,58 @@ export function cancelMastodonSchedule(userId: string, body: unknown): MastodonS
   });
 }
 
+/** Move an individually confirmed intent only before the worker claims it. Its account and text stay immutable. */
+export function rescheduleMastodonSchedule(userId: string, body: unknown): MastodonScheduledPost {
+  if (!mastodonScheduleExecutionEnabled()) {
+    throw new MastodonScheduleError("Automatic Mastodon publishing is paused on this installation.", 503);
+  }
+  const input = inputObject(body, ["clientRequestId", "expectedScheduledFor", "scheduledFor"]);
+  if (!validId(input.clientRequestId) || !validUtc(input.expectedScheduledFor) || !validUtc(input.scheduledFor)) {
+    throw new MastodonScheduleError("Choose a valid UTC time and refresh the queued post before moving it.");
+  }
+  const clientRequestId = input.clientRequestId;
+  const expectedScheduledFor = input.expectedScheduledFor;
+  const scheduledFor = input.scheduledFor;
+  const now = new Date();
+  if (Date.parse(scheduledFor) < now.getTime() + 10_000 ||
+      Date.parse(scheduledFor) > now.getTime() + MAX_AHEAD_MS) {
+    throw new MastodonScheduleError("Choose a time at least 10 seconds ahead and within one year.");
+  }
+  return transaction((db) => {
+    const row = db.prepare("SELECT * FROM mastodon_scheduled_posts WHERE client_request_id=? AND user_id=?")
+      .get(clientRequestId, userId) as Row | undefined;
+    if (!row || row.status !== "queued" || row.dispatch_authorized !== 1 ||
+        row.scheduled_for !== expectedScheduledFor) {
+      throw new MastodonScheduleError("This queued post changed or publishing has started. Refresh the real queue before moving it.", 409);
+    }
+    const connection = mastodonConnection(userId);
+    const activeConnection = db.prepare("SELECT disconnecting FROM mastodon_connections WHERE user_id=?")
+      .get(userId) as { disconnecting: number } | undefined;
+    if (!connection.connected || connection.instance !== row.instance ||
+        connection.account?.id !== row.account_id || !activeConnection || activeConnection.disconnecting) {
+      throw new MastodonScheduleError("The scheduled Mastodon account is no longer connected. Refresh the account before moving it.", 409);
+    }
+    if (scheduledFor === row.scheduled_for) return publicItem(row);
+    if (db.prepare(`SELECT 1 FROM mastodon_scheduled_posts WHERE client_request_id<>? AND user_id=?
+      AND instance=? AND account_id=? AND content_hash=? AND
+      ((status='queued' AND scheduled_for=?) OR status='inflight' OR
+       (status='unknown' AND (resolution IS NULL OR resolution='found')) OR
+       (status='posted' AND scheduled_for=?)) LIMIT 1`)
+      .get(clientRequestId, userId, row.instance, row.account_id, row.content_hash, scheduledFor, scheduledFor)) {
+      throw new MastodonScheduleError("This text is already queued at that time, being sent, or needs a result check for this account.", 409);
+    }
+    const stamp = now.toISOString();
+    const changed = db.prepare(`UPDATE mastodon_scheduled_posts SET scheduled_for=?,updated_at=?
+      WHERE client_request_id=? AND user_id=? AND status='queued' AND dispatch_authorized=1 AND scheduled_for=?`)
+      .run(scheduledFor, stamp, clientRequestId, userId, expectedScheduledFor);
+    if (changed.changes !== 1) {
+      throw new MastodonScheduleError("Publishing started before this time change. Refresh the real queue.", 409);
+    }
+    audit(userId, "mastodon.schedule_rescheduled", clientRequestId, `${expectedScheduledFor} -> ${scheduledFor}`);
+    return publicItem({ ...row, scheduled_for: scheduledFor, updated_at: stamp });
+  });
+}
+
 export function resolveMastodonSchedule(userId: string, body: unknown): MastodonScheduledPost {
   const input = inputObject(body, ["clientRequestId", "resolution"]);
   if (!validId(input.clientRequestId) || (input.resolution !== "found" && input.resolution !== "absent")) {
