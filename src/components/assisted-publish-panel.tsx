@@ -46,6 +46,7 @@ type Props = {
   onOpenSourceDraft: (draft: SavedDraft) => void;
   mastodonInstance?: string;
   focusItemId?: string;
+  startExpanded?: boolean;
 };
 
 type OutcomeForm = { views: string; likes: string; replies: string; notes: string };
@@ -93,7 +94,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, imageCount, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -108,7 +109,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   const [editingOutcomes, setEditingOutcomes] = useState<Record<string, boolean>>({});
   const [outcomeSavingId, setOutcomeSavingId] = useState<string | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
-  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(startExpanded);
   const [composerInitialized, setComposerInitialized] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("to-post");
   const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
@@ -145,9 +146,9 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
 
   useEffect(() => {
     if (!workspaceReady || composerInitialized) return;
-    setComposerOpen(items.length === 0 || Boolean(time));
+    setComposerOpen(startExpanded || items.length === 0 || Boolean(time));
     setComposerInitialized(true);
-  }, [workspaceReady, composerInitialized, items.length, time]);
+  }, [workspaceReady, composerInitialized, items.length, time, startExpanded]);
 
   useEffect(() => {
     setShowVideoDestinations(assistedVideoDisplayIds.some((id) => id === destination));
