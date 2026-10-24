@@ -37,7 +37,7 @@ test("batch handoffs snapshot saved platform versions and media, while repeat re
     name: "cover.png", type: "image/png",
     bytes: await sharp({ create: { width: 4, height: 4, channels: 3, background: "#3366cc" } }).png().toBuffer(),
   })).media;
-  const saved = saveDraft(owner, draft("Saved source", undefined, undefined, [image.id]));
+  const saved = saveDraft(owner, { ...draft("Saved source", undefined, undefined, [image.id]), mediaAlt: ["Blue cover image"] });
   const batchId = randomUUID();
   const items = handoffs();
   const first = prepareAssistedBatch(owner, saved.id, batchId, items);
@@ -45,7 +45,7 @@ test("batch handoffs snapshot saved platform versions and media, while repeat re
   assert.deepEqual(first.map((item) => item.text), ["Edited Bluesky text", "Saved source"]);
   assert.deepEqual(first.map((item) => item.destination), ["bluesky", "linkedin"]);
   assert.ok(first.every((item) => item.sourceDraftId === saved.id && item.batchId === batchId && item.status === "queued"));
-  assert.ok(first.every((item) => item.title === saved.title && item.mediaIds[0] === image.id));
+  assert.ok(first.every((item) => item.title === saved.title && item.mediaIds[0] === image.id && item.mediaAlt[0] === "Blue cover image"));
   assert.equal(listWorkspace(owner).log.find((entry) => entry.action === "assisted.batch_prepared").detail, "2 manual handoffs");
   closeDatabase();
   assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, [...items].reverse()), [...first].reverse());
@@ -53,8 +53,9 @@ test("batch handoffs snapshot saved platform versions and media, while repeat re
   assert.deepEqual(listWorkspace(other).assisted, []);
   assert.throws(() => prepareAssistedBatch(other, saved.id, randomUUID(), items), /Saved draft not found/);
 
-  saveDraft(owner, { ...saved, source: "New source", variants: { bluesky: "New version" } }, saved.updatedAt);
+  saveDraft(owner, { ...saved, source: "New source", variants: { bluesky: "New version" }, mediaAlt: ["Changed description"] }, saved.updatedAt);
   assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, items).map((item) => item.text), first.map((item) => item.text));
+  assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, items).map((item) => item.mediaAlt), first.map((item) => item.mediaAlt));
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, items.slice(0, 1)), /different or partial/);
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, [items[0], { ...items[1], scheduledFor: new Date(Date.now() + 180_000).toISOString() }]), /different or partial/);
   assert.throws(() => prepareAssistedBatch(owner, randomUUID(), batchId, items), /different or partial/);

@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { useEffect, useId, useRef, useState } from "react";
-import { Check, Download, ImagePlus, LoaderCircle, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Download, ImagePlus, LoaderCircle, Trash2, X } from "lucide-react";
+import { MAX_IMAGE_ALT_CHARS } from "@/lib/workspace";
 
 const MAX_IMAGES = 4;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -20,7 +21,9 @@ export type MediaAsset = {
 
 type ImageAttachmentPickerProps = {
   selectedIds: readonly string[];
+  descriptions: Readonly<Record<string, string>>;
   onChange: (ids: string[]) => void;
+  onDescriptionChange: (id: string, description: string) => void;
   onBusyChange: (busy: boolean) => void;
   disabled?: boolean;
 };
@@ -57,7 +60,7 @@ async function responseError(response: Response, fallback: string) {
  * A private image library selector. Selection is controlled by the draft editor;
  * uploading an asset alone does not publish it or attach it to a saved draft.
  */
-export function ImageAttachmentPicker({ selectedIds, onChange, onBusyChange, disabled = false }: ImageAttachmentPickerProps) {
+export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onDescriptionChange, onBusyChange, disabled = false }: ImageAttachmentPickerProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef(selectedIds);
@@ -159,6 +162,16 @@ export function ImageAttachmentPicker({ selectedIds, onChange, onBusyChange, dis
     }
   }
 
+  function moveImage(id: string, direction: -1 | 1) {
+    if (disabled || uploading || deletingId) return;
+    const next = [...selectedRef.current];
+    const index = next.indexOf(id);
+    const other = index + direction;
+    if (index < 0 || other < 0 || other >= next.length) return;
+    [next[index], next[other]] = [next[other], next[index]];
+    setSelection(next);
+  }
+
   async function deleteAsset(item: MediaAsset) {
     if (disabled || uploading || deletingId) return;
     if (!window.confirm(`Permanently delete ${item.name} from your image library? First remove it from any saved drafts and save those changes. This cannot be undone.`)) return;
@@ -200,9 +213,20 @@ export function ImageAttachmentPicker({ selectedIds, onChange, onBusyChange, dis
 
       {error && <p role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</p>}
       {missingCount > 0 && libraryLoaded && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><p role="status">{missingCount} saved {missingCount === 1 ? "image is" : "images are"} unavailable.</p><button type="button" onClick={() => setSelection(selected.map((item) => item.id))} disabled={disabled || uploading || deletingId !== null} className="font-semibold underline underline-offset-2 disabled:opacity-50">Remove unavailable</button></div>}
-      {selected.length > 0 && <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Selected images">{selected.map((item) => <li key={item.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
-        <div className="relative aspect-square overflow-hidden bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id)} alt={item.name} fill sizes="(max-width: 640px) 50vw, 160px" className="object-cover" /></div>
-        <div className="flex min-w-0 items-center gap-1 p-2"><span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{item.name}</span><button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null} aria-label={`Remove ${item.name} from draft`} title="Remove from draft" className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><X size={14} aria-hidden="true" /></button></div>
+      {selected.length > 0 && <ul className="mt-4 grid gap-3 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+        <div className="flex min-w-0 gap-3">
+          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id)} alt={descriptions[item.id] || item.name} fill sizes="80px" className="object-cover" /></div>
+          <div className="flex min-w-0 flex-1 flex-col justify-between">
+            <span className="truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{index + 1}. {item.name}</span>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => moveImage(item.id, -1)} disabled={disabled || uploading || deletingId !== null || index === 0} aria-label={`Move image ${index + 1} earlier`} title="Move earlier" className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-40"><ArrowUp size={15} aria-hidden="true" /></button>
+              <button type="button" onClick={() => moveImage(item.id, 1)} disabled={disabled || uploading || deletingId !== null || index === selectedIds.length - 1} aria-label={`Move image ${index + 1} later`} title="Move later" className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-40"><ArrowDown size={15} aria-hidden="true" /></button>
+              <button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null} aria-label={`Remove ${item.name} from draft`} title="Remove from draft" className="ml-auto rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><X size={15} aria-hidden="true" /></button>
+            </div>
+          </div>
+        </div>
+        <label htmlFor={`${inputId}-${item.id}-alt`} className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Image description <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
+        <input id={`${inputId}-${item.id}-alt`} type="text" value={descriptions[item.id] ?? ""} onChange={(event) => onDescriptionChange(item.id, Array.from(event.target.value).filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127).join(""))} disabled={disabled || uploading || deletingId !== null} maxLength={MAX_IMAGE_ALT_CHARS} placeholder="Describe what this image shows" className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-2.5 py-2 text-[12px] text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
       </li>)}</ul>}
       {selectedIds.length === 0 && !loading && <p className="mt-3 text-[12px] text-[var(--text-soft)]">No images selected for this draft.</p>}
 
@@ -220,7 +244,7 @@ export function ImageAttachmentPicker({ selectedIds, onChange, onBusyChange, dis
         })}</ul>}
         </>}
       </div>
-      <p className="mt-4 text-[11px] leading-5 text-[var(--text-soft)]">Removing an image from this draft keeps it in your private library. Assisted publishing still requires you to add images on the destination platform. The calendar plan is simulated; real Mastodon scheduling supports text only.</p>
+      <p className="mt-4 text-[11px] leading-5 text-[var(--text-soft)]">Image order and descriptions stay with this draft. When publishing yourself, download the images and add their descriptions on the platform. Removing an image keeps it in your private library.</p>
     </section>
   );
 }

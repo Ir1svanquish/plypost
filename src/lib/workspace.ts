@@ -11,6 +11,8 @@ export type SavedDraft = {
   selected: PlatformId[];
   variants: Partial<Record<PlatformId, string>>;
   mediaIds?: string[];
+  /** Optional image descriptions, in the same order as mediaIds. */
+  mediaAlt?: string[];
   createdAt: string;
   updatedAt: string;
 };
@@ -21,6 +23,7 @@ export type ScheduledPost = {
   source: string;
   posts: Partial<Record<PlatformId, string>>;
   mediaIds?: string[];
+  mediaAlt?: string[];
   scheduledFor: string;
   createdAt: string;
   status: "queued" | "running" | "simulated" | "failed";
@@ -37,6 +40,7 @@ export type AssistedPost = {
   destination: AssistedDestinationId;
   text: string;
   mediaIds?: string[];
+  mediaAlt?: string[];
   /** Present together for handoffs prepared from a saved draft. */
   sourceDraftId?: string;
   batchId?: string;
@@ -63,6 +67,7 @@ export type AssistedOutcome = AssistedOutcomeInput & { recordedAt: string };
 
 export const MAX_ASSISTED_OUTCOME_COUNT = 1_000_000_000;
 export const MAX_ASSISTED_OUTCOME_NOTES = 500;
+export const MAX_IMAGE_ALT_CHARS = 500;
 
 export type Workspace = {
   version: 3;
@@ -137,6 +142,13 @@ function validMediaIds(value: unknown): value is string[] {
     value.every((id) => typeof id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id));
 }
 
+function validMediaAlt(value: unknown, mediaIds: unknown): value is string[] {
+  return validMediaIds(mediaIds) && Array.isArray(value) && value.length === mediaIds.length &&
+    value.every((description) => typeof description === "string" &&
+      description === description.trim() && description.length <= MAX_IMAGE_ALT_CHARS &&
+      !Array.from(description).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127));
+}
+
 function selectedPlatforms(value: unknown): PlatformId[] {
   if (!Array.isArray(value)) return [];
   return platformIds.filter((id) => value.includes(id));
@@ -177,6 +189,7 @@ function parseDraft(value: unknown): SavedDraft | null {
       characterCount(value.title) > 120 || characterCount(value.source) > 3000 ||
       !validDate(value.createdAt) || !validDate(value.updatedAt)) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
+  if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
   return {
     id: value.id,
     title: value.title,
@@ -184,6 +197,7 @@ function parseDraft(value: unknown): SavedDraft | null {
     selected: selectedPlatforms(value.selected),
     variants: validVariants(value.variants),
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
+    ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   };
@@ -197,6 +211,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
       (value.status !== "queued" && value.status !== "running" && value.status !== "simulated" && value.status !== "failed") ||
       !isRecord(value.posts)) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
+  if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
   const posts: Partial<Record<PlatformId, string>> = {};
   for (const id of Object.keys(value.posts)) {
     if (!isPlatformId(id)) return null;
@@ -214,6 +229,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
     source: value.source,
     posts,
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
+    ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
     scheduledFor: value.scheduledFor,
     createdAt: value.createdAt,
     status: value.status,
@@ -235,6 +251,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
   if ((value.sourceDraftId !== undefined || value.batchId !== undefined) &&
       (!validUuid(value.sourceDraftId) || !validUuid(value.batchId) || !isPlatformId(value.destination))) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
+  if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
   if (value.contentEditedAt !== undefined && !validUtcInstant(value.contentEditedAt)) return null;
   if (value.postUrl !== undefined && (value.status !== "posted" ||
       normalizePublicPostUrl(value.postUrl) !== value.postUrl)) return null;
@@ -247,6 +264,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
     destination: value.destination,
     text: value.text,
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
+    ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
     ...(value.sourceDraftId !== undefined ? { sourceDraftId: value.sourceDraftId as string, batchId: value.batchId as string } : {}),
     scheduledFor: value.scheduledFor,
     createdAt: value.createdAt,

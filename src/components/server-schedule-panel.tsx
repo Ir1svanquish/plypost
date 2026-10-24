@@ -300,7 +300,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
               {editError && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{editError}</p>}
               <div className="mt-3 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => setEditingId(null)} disabled={saving} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Cancel</button><button type="submit" disabled={saving || !isValidLocalDateTime(editValue, now + 10_000)} className="gradient-button rounded-lg px-3 py-2 text-[12px] font-bold text-white disabled:opacity-50">{saving ? "Moving..." : "Save new time"}</button></div>
             </form>}
-            <MediaHandoff mediaIds={manual.mediaIds} />
+            <MediaHandoff mediaIds={manual.mediaIds} mediaAlt={manual.mediaAlt} />
           </article>;
         }
         const post = item.post;
@@ -323,7 +323,7 @@ export function ServerSchedulePanel({ schedule, assisted, realMastodon, showReal
               <button type="button" disabled={state === "running" || saving} aria-label={`Remove ${post.title} from plan`} onClick={() => onRemove(post.id)} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-40"><Trash2 size={14} /></button>
             </div>
           </div>
-          <MediaHandoff mediaIds={post.mediaIds} />
+          <MediaHandoff mediaIds={post.mediaIds} mediaAlt={post.mediaAlt} />
           {editingId === post.id && <form onSubmit={(event) => void saveReschedule(event, post)} className="mt-4 rounded-xl border border-[var(--accent-border)] bg-[var(--surface-muted)] p-4">
             <LocalDateTimeField id={`move-${post.id}`} label="New simulation time" value={editValue} minTimestamp={now + 10_000} onChange={(next) => { setEditValue(next); setEditError(""); }} />
             {!!post.receipts?.length && <p className="mt-2 text-[12px] leading-5 text-[var(--warning)]">Existing simulated receipts stay recorded; only remaining destinations are queued for the new time.</p>}

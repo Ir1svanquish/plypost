@@ -234,7 +234,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, time, n
                   <button type="button" onClick={() => closeTextEditor(item.id)} disabled={busy || textSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                 </div>
               </div>}
-              <MediaHandoff mediaIds={item.mediaIds} />
+              <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} />
               {item.status === "queued" && <div className="mt-3 max-w-xl">
                 <label htmlFor={`assisted-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Public post link · optional</label>
                 <input id={`assisted-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={enteredUrl} placeholder="https://social.example/your-post" aria-invalid={invalidUrl} aria-describedby={`assisted-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />

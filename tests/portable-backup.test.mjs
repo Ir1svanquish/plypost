@@ -44,11 +44,11 @@ function backupRequest(body, { cookie, origin = "http://localhost", contentType 
 test("portable backup restores image pixels and saved records in a fresh database", async () => {
   const image = (await createMedia(owner, { name: "cover.png", type: "image/png", bytes: await png() })).media;
   const originalPixels = await sharp(getMedia(owner, image.id).bytes).raw().toBuffer();
-  const saved = saveDraft(owner, draft(randomUUID(), [image.id]));
-  const plan = { id: randomUUID(), title: "Planned", source: "A saved idea", posts: { bluesky: "A saved idea" }, mediaIds: [image.id],
+  const saved = saveDraft(owner, { ...draft(randomUUID(), [image.id]), mediaAlt: ["Pink cover image"] });
+  const plan = { id: randomUUID(), title: "Planned", source: "A saved idea", posts: { bluesky: "A saved idea" }, mediaIds: [image.id], mediaAlt: ["Pink cover image"],
     scheduledFor: new Date(Date.now() + 3_600_000).toISOString(), createdAt: stamp(), status: "queued" };
   addSchedule(owner, plan, "Asia/Hong_Kong");
-  const assisted = { id: randomUUID(), title: "Manual", destination: "x", text: "A saved idea", mediaIds: [image.id],
+  const assisted = { id: randomUUID(), title: "Manual", destination: "x", text: "A saved idea", mediaIds: [image.id], mediaAlt: ["Pink cover image"],
     scheduledFor: new Date(Date.now() + 7_200_000).toISOString(), createdAt: stamp(), status: "queued" };
   database().prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
     .run(assisted.id, owner, JSON.stringify(assisted), assisted.scheduledFor, stamp());
@@ -68,6 +68,7 @@ test("portable backup restores image pixels and saved records in a fresh databas
   assert.deepEqual(archive.weeklyPlans, []);
   assert.equal(archive.media.length, 1);
   assert.equal(archive.drafts[0].mediaIds[0], image.id);
+  assert.deepEqual(archive.drafts[0].mediaAlt, ["Pink cover image"]);
   assert.equal(archive.jobs[0].timezone, "Asia/Hong_Kong");
   assert.equal(archive.assisted[0].postUrl, postUrl);
   assert.ok(archive.assisted[0].postedAt);
@@ -87,10 +88,12 @@ test("portable backup restores image pixels and saved records in a fresh databas
   assert.equal(restored.schedule[0].status, "queued");
   assert.equal(restored.schedule[0].scheduledFor, plan.scheduledFor);
   assert.deepEqual(restored.schedule[0].mediaIds, restored.drafts[0].mediaIds);
+  assert.deepEqual(restored.schedule[0].mediaAlt, restored.drafts[0].mediaAlt);
   assert.equal(restored.assisted[0].text, assisted.text);
   assert.equal(restored.assisted[0].postUrl, postUrl);
   assert.equal(restored.assisted[0].postedAt, archive.assisted[0].postedAt);
   assert.deepEqual(restored.assisted[0].mediaIds, restored.drafts[0].mediaIds);
+  assert.deepEqual(restored.assisted[0].mediaAlt, restored.drafts[0].mediaAlt);
   assert.deepEqual(getSlotSettings(owner), weeklySlots);
   const restoredImage = getMedia(owner, restored.drafts[0].mediaIds[0]);
   assert.ok(restoredImage);
@@ -138,6 +141,9 @@ test("tampered or incomplete archives fail without changing saved work", async (
   const missingAssistedImage = globalThis.structuredClone(original);
   missingAssistedImage.assisted[0].mediaIds = [randomUUID()];
   await assert.rejects(importPortableBackup(owner, missingAssistedImage), /missing from the archive/);
+  const misalignedDescription = globalThis.structuredClone(original);
+  misalignedDescription.drafts[0].mediaAlt = [];
+  await assert.rejects(importPortableBackup(owner, misalignedDescription), /invalid drafts/);
   assert.deepEqual(listWorkspace(owner).drafts, baseline.drafts);
   assert.deepEqual(listMedia(owner).map((item) => item.id), original.media.map((item) => item.id));
 });

@@ -68,6 +68,7 @@ type EditorContent = {
   selected: readonly PlatformId[];
   variants: Partial<Record<PlatformId, string>>;
   mediaIds: readonly string[];
+  mediaAlt: readonly string[];
 };
 type EditorOrigin = "starter" | "new" | "planned";
 type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft } | { kind: "planned"; post: ScheduledPost };
@@ -79,6 +80,7 @@ function sameItems(left: readonly string[], right: readonly string[]): boolean {
 function sameEditorContent(left: EditorContent, right: EditorContent | SavedDraft): boolean {
   return left.title === right.title && left.source === right.source &&
     sameItems(left.selected, right.selected) && sameItems(left.mediaIds, right.mediaIds ?? []) &&
+    sameItems(left.mediaAlt.map((value) => value.trim()), (right.mediaAlt ?? (right.mediaIds ?? []).map(() => "")).map((value) => value.trim())) &&
     platformIds.every((id) => left.variants[id] === right.variants[id]);
 }
 
@@ -90,7 +92,7 @@ function hasUnsavedEditorChanges(editor: EditorContent, currentDraftId: string |
   if (origin === "planned") return true;
   return !sameEditorContent(editor, {
     title: "", source: origin === "starter" ? sampleDraft : "",
-    selected: platformIds, variants: {}, mediaIds: [],
+    selected: platformIds, variants: {}, mediaIds: [], mediaAlt: [],
   });
 }
 
@@ -125,6 +127,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [active, setActive] = useState<PlatformId>("bluesky");
   const [variants, setVariants] = useState<Partial<Record<PlatformId, string>>>({});
   const [mediaIds, setMediaIds] = useState<string[]>([]);
+  const [mediaAltById, setMediaAltById] = useState<Record<string, string>>({});
   const [mediaPickerEpoch, setMediaPickerEpoch] = useState(0);
   const mediaPickerEpochRef = useRef(0);
   const mediaBusyRef = useRef(false);
@@ -189,7 +192,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [blueskyConnection, setBlueskyConnection] = useState<BlueskyConnection | null>(null);
   const [blueskyLoading, setBlueskyLoading] = useState(true);
   const [blueskyError, setBlueskyError] = useState<string | null>(null);
-  const editorContent: EditorContent = { title, source, selected, variants, mediaIds };
+  const mediaAlt = mediaIds.map((id) => mediaAltById[id] ?? "");
+  const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt };
   const editorContentRef = useRef(editorContent);
   editorContentRef.current = editorContent;
   const editorDirty = hasUnsavedEditorChanges(editorContent, currentDraftId, drafts, editorOrigin);
@@ -360,6 +364,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           currentDraftId?: unknown;
           currentDraftVersion?: unknown;
           mediaIds?: unknown;
+          mediaAlt?: unknown;
           editorOrigin?: unknown;
         };
         if (typeof data.source === "string") {
@@ -387,7 +392,15 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           if (typeof data.currentDraftVersion === "string") setCurrentDraftVersion(data.currentDraftVersion);
           else setDraftConflict(true);
         }
-        if (Array.isArray(data.mediaIds) && data.mediaIds.length <= 4 && data.mediaIds.every((id) => typeof id === "string")) setMediaIds(data.mediaIds);
+        if (Array.isArray(data.mediaIds) && data.mediaIds.length <= 4 && data.mediaIds.every((id) => typeof id === "string")) {
+          setMediaIds(data.mediaIds);
+          const cachedAlt = data.mediaAlt;
+          if (Array.isArray(cachedAlt) && cachedAlt.length === data.mediaIds.length &&
+              cachedAlt.every((value) => typeof value === "string" && value.length <= 500 &&
+                !Array.from(value).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))) {
+            setMediaAltById(Object.fromEntries(data.mediaIds.map((id, index) => [id, cachedAlt[index]])));
+          }
+        }
         if (data.editorOrigin === "starter" || data.editorOrigin === "new" || data.editorOrigin === "planned") setEditorOrigin(data.editorOrigin);
       }
     } catch {
@@ -426,12 +439,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     if (!hydrated) return;
     try {
-      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
+      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
+  }, [source, selected, variants, mediaIds, mediaAltById, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -592,6 +605,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       selected: [...selected],
       variants: { ...variants },
       mediaIds: [...mediaIds],
+      mediaAlt: mediaAlt.map((value) => value.trim()),
       createdAt: !asCopy && existing ? existing.createdAt : stamp,
       updatedAt: stamp,
     };
@@ -645,6 +659,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setSource("");
       setVariants({});
       setMediaIds([]);
+      setMediaAltById({});
       setSelected([...platformIds]);
       setActive("bluesky");
       setNotice(null);
@@ -659,6 +674,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setSelected([...draft.selected]);
       setVariants({ ...draft.variants });
       setMediaIds([...(draft.mediaIds ?? [])]);
+      setMediaAltById(Object.fromEntries((draft.mediaIds ?? []).map((id, index) => [id, draft.mediaAlt?.[index] ?? ""])));
       setActive(draft.selected[0] ?? "bluesky");
       setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
     } else {
@@ -672,6 +688,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setSelected(platformIds.filter((id) => post.posts[id] !== undefined));
       setVariants({ ...post.posts });
       setMediaIds([...(post.mediaIds ?? [])]);
+      setMediaAltById(Object.fromEntries((post.mediaIds ?? []).map((id, index) => [id, post.mediaAlt?.[index] ?? ""])));
       setActive(platformIds.find((id) => post.posts[id] !== undefined) ?? "bluesky");
       setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
     }
@@ -776,6 +793,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       source,
       posts: Object.fromEntries(selected.map((id) => [id, textFor(id)])),
       mediaIds: [...mediaIds],
+      mediaAlt: mediaAlt.map((value) => value.trim()),
       scheduledFor: scheduledFor.toISOString(),
       createdAt: new Date().toISOString(),
       status: "queued",
@@ -1053,6 +1071,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       destination: assistDestination,
       text,
       mediaIds: [...mediaIds],
+      mediaAlt: mediaAlt.map((value) => value.trim()),
       scheduledFor: scheduledFor.toISOString(),
       createdAt: new Date().toISOString(),
       status: "queued",
@@ -1197,8 +1216,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   <ImageAttachmentPicker
                     key={mediaPickerEpoch}
                     selectedIds={mediaIds}
+                    descriptions={mediaAltById}
                     disabled={restoringBackup}
                     onChange={(ids) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) { editorRevision.current += 1; setMediaIds(ids); } }}
+                    onDescriptionChange={(id, description) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) { editorRevision.current += 1; setMediaAltById((current) => ({ ...current, [id]: description })); } }}
                     onBusyChange={(busy) => {
                       if (mediaPickerEpochRef.current !== mediaPickerEpoch) return;
                       mediaBusyRef.current = busy;
@@ -1229,7 +1250,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="preview-heading">
                 <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="preview-heading" className="text-[17px] font-bold tracking-[-0.025em]">Platform preview</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your text before sharing.</p></div><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--accent-text)]">EXAMPLE</span></div>
                 <div className="mobile-x-scroll flex gap-1 border-b border-[var(--line)] px-4 sm:px-6" role="tablist" aria-label="Platform previews">{platformIds.map((id) => <button key={id} type="button" role="tab" aria-selected={active === id} onClick={() => setActive(id)} className={`relative flex shrink-0 items-center gap-1.5 px-3 py-4 text-[12px] font-semibold transition sm:text-[13px] ${active === id ? "text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}><span className={`${selected.includes(id) ? "" : "opacity-40"}`}>{platforms[id].name}</span>{active === id && <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--accent)]" />}</button>)}</div>
-                <div className="dot-grid bg-[var(--surface-muted)] p-5 sm:p-7"><PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} mediaIds={mediaIds} /></div>
+                <div className="dot-grid bg-[var(--surface-muted)] p-5 sm:p-7"><PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} mediaIds={mediaIds} mediaAlt={mediaAlt} /></div>
                 {currentValidation.issues.length > 0 && <div role="status" className="space-y-2 px-6 pt-5 sm:px-7">
                   {currentValidation.issues.map((issue) => <p key={issue.code} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${issue.severity === "error" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--warning-soft)] text-[var(--warning)]"}`}>
                     <CircleAlert size={14} className="mt-0.5 shrink-0" />

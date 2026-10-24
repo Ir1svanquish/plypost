@@ -59,10 +59,17 @@ test("assisted post links accept public HTTPS format while preserving legacy ite
 
 test("plan and assisted image snapshots round trip while malformed references are rejected", () => {
   const imageId = "5be12631-17ee-4ec5-98f3-9756a0b3f57b";
-  const plan = { id: "s-images", title: "Illustrated", source: "Text", posts: { bluesky: "Text" }, mediaIds: [imageId], scheduledFor: stamp, createdAt: stamp, status: "queued" };
-  const assisted = { id: "a-images", title: "Illustrated", destination: "instagram", text: "Text", mediaIds: [imageId], scheduledFor: stamp, createdAt: stamp, status: "queued" };
-  const backup = { version: 3, drafts: [], schedule: [plan], assisted: [assisted] };
+  const description = "A person holding a blue poster.";
+  const draft = { id: "d-images", title: "Illustrated", source: "Text", selected: ["bluesky"], variants: {}, mediaIds: [imageId], mediaAlt: [description], createdAt: stamp, updatedAt: stamp };
+  const plan = { id: "s-images", title: "Illustrated", source: "Text", posts: { bluesky: "Text" }, mediaIds: [imageId], mediaAlt: [description], scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  const assisted = { id: "a-images", title: "Illustrated", destination: "instagram", text: "Text", mediaIds: [imageId], mediaAlt: [description], scheduledFor: stamp, createdAt: stamp, status: "queued" };
+  const backup = { version: 3, drafts: [draft], schedule: [plan], assisted: [assisted] };
   assert.deepEqual(parseWorkspace(backup), backup);
+  assert.deepEqual(parseWorkspace({ ...backup, drafts: [{ ...draft, mediaAlt: [] }] })?.drafts, []);
+  assert.deepEqual(parseWorkspace({ ...backup, drafts: [{ ...draft, mediaAlt: ["  padded"] }] })?.drafts, []);
+  assert.deepEqual(parseWorkspace({ ...backup, drafts: [{ ...draft, mediaAlt: ["x".repeat(501)] }] })?.drafts, []);
+  assert.deepEqual(parseWorkspace({ ...backup, schedule: [{ ...plan, mediaAlt: ["line\nbreak"] }] })?.schedule, []);
+  assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...assisted, mediaAlt: [4] }] })?.assisted, []);
   assert.deepEqual(parseWorkspace({ ...backup, schedule: [{ ...plan, mediaIds: [imageId, imageId] }] })?.schedule, []);
   assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...assisted, mediaIds: ["not-a-uuid"] }] })?.assisted, []);
   assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...assisted, mediaIds: ["-".repeat(36)] }] })?.assisted, []);

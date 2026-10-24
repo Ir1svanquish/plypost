@@ -187,6 +187,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
       const item: AssistedPost = {
         id: randomUUID(), title: draftTitle(draft.title, draft.source), destination, text,
         ...(draft.mediaIds !== undefined ? { mediaIds: [...draft.mediaIds] } : {}),
+        ...(draft.mediaAlt !== undefined ? { mediaAlt: [...draft.mediaAlt] } : {}),
         sourceDraftId: draft.id, batchId, scheduledFor, createdAt: now, status: "queued",
         ...(Date.parse(scheduledFor) <= Date.parse(now) ? { notifiedAt: now } : {}),
       };
