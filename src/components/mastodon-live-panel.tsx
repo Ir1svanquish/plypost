@@ -105,7 +105,7 @@ export function MastodonConnectionPanel({ connection, loading, loadError, onRefr
   return <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="mastodon-connection-heading">
     <div className="border-b border-[var(--line)] px-6 py-5 sm:px-7">
       <h2 id="mastodon-connection-heading" className="text-[17px] font-bold text-[var(--text)]">Mastodon connection</h2>
-      <p className="mt-1 text-[13px] text-[var(--text-muted)]">An optional connection for immediate real text posts from Create. Plan previews a separate real scheduling workflow that is not enabled yet; its ordinary calendar still runs simulations.</p>
+      <p className="mt-1 text-[13px] text-[var(--text-muted)]">An optional connection for immediate real text posts from Create and individually confirmed real text schedules in Plan. Ordinary calendar simulations remain separate.</p>
     </div>
     <div className="space-y-3 px-6 py-5 sm:px-7">
       {loading ? <p role="status" className="text-[13px] text-[var(--text-muted)]">Checking connection…</p> : loadError ? <div role="alert" className="space-y-2"><p className="text-[13px] text-[var(--danger)]">{loadError}</p><button type="button" onClick={() => void onRefresh()} className="text-[12px] font-semibold text-[var(--accent-text)]">Try again</button></div> : <>

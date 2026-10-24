@@ -1,25 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import { ArrowUpRight, CalendarClock, CircleAlert, LoaderCircle, RotateCcw, Trash2 } from "lucide-react";
 import { LocalDateTimeField, formatLocalDateTime, isValidLocalDateTime } from "@/components/local-date-time-field";
 import type { MastodonConnection } from "@/components/mastodon-live-panel";
 import { validatePlatformText } from "@/lib/platform-validation";
+import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 
-type ScheduledMastodonPost = {
-  clientRequestId: string;
-  status: "queued" | "inflight" | "posted" | "unknown" | "rejected" | "cancelled";
-  text: string;
-  scheduledFor: string;
-  createdAt: string;
-  instance: string;
-  account: { id: string; username: string; url: string };
-  postUrl?: string;
-  id?: string;
-  error?: string;
-  resolution?: "found" | "absent";
-  resolvedAt?: string;
-};
+type ScheduledMastodonPost = RealMastodonSchedule;
 
 type PendingRequest = {
   clientRequestId: string;
@@ -31,6 +19,9 @@ type PendingRequest = {
 };
 
 type Props = {
+  items: ScheduledMastodonPost[];
+  onItemsChange: Dispatch<SetStateAction<ScheduledMastodonPost[]>>;
+  onLoadErrorChange: Dispatch<SetStateAction<string | null>>;
   connection: MastodonConnection | null;
   connectionLoading: boolean;
   connectionError: string | null;
@@ -92,9 +83,8 @@ function statusLabel(post: ScheduledMastodonPost): string {
   }
 }
 
-export function MastodonSchedulePanel({ connection, connectionLoading, connectionError, selected, text, imageCount, mediaBusy, now, visible, workerLastSeen, onOpenAccount, onOpenEditor }: Props) {
+export function MastodonSchedulePanel({ items, onItemsChange, onLoadErrorChange, connection, connectionLoading, connectionError, selected, text, imageCount, mediaBusy, now, visible, workerLastSeen, onOpenAccount, onOpenEditor }: Props) {
   const [time, setTime] = useState("");
-  const [items, setItems] = useState<ScheduledMastodonPost[]>([]);
   const [executionEnabled, setExecutionEnabled] = useState(false);
   const [realWorkerLastSeen, setRealWorkerLastSeen] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -124,6 +114,8 @@ export function MastodonSchedulePanel({ connection, connectionLoading, connectio
     executionEnabled && !connectionLoading && !connectionError && selected && !mediaBusy && imageCount === 0 && text.trim() && validation.valid &&
     isValidLocalDateTime(time, now + 60_000) && !sameTextInProgress && !loading && !loadError && !busy && !pending);
 
+  useEffect(() => { onLoadErrorChange(loadError); }, [loadError, onLoadErrorChange]);
+
   async function refresh() {
     const response = await fetch("/api/mastodon/schedule", { cache: "no-store" });
     const data = await readJson(response);
@@ -131,7 +123,7 @@ export function MastodonSchedulePanel({ connection, connectionLoading, connectio
     if (!Array.isArray(data.items) || !data.items.every(isScheduledPost)) throw new Error("Mastodon schedule returned an unexpected result.");
     setExecutionEnabled(data.executionEnabled === true);
     setRealWorkerLastSeen(typeof data.mastodonWorkerLastSeen === "string" ? data.mastodonWorkerLastSeen : null);
-    setItems(data.items);
+    onItemsChange(data.items);
     setLoadError(null);
     return data.items;
   }
@@ -217,7 +209,7 @@ export function MastodonSchedulePanel({ connection, connectionLoading, connectio
         void refresh().catch(() => {});
         return;
       }
-      setItems((current) => [data.item as ScheduledMastodonPost, ...current.filter((item) => item.clientRequestId !== pending.clientRequestId)]);
+      onItemsChange((current) => [data.item as ScheduledMastodonPost, ...current.filter((item) => item.clientRequestId !== pending.clientRequestId)]);
       setPending(null);
       setTime("");
       setNotice("The real Mastodon post is queued. It will require the background worker to be running at or after the scheduled time.");
@@ -247,7 +239,7 @@ export function MastodonSchedulePanel({ connection, connectionLoading, connectio
       const data = await readJson(response);
       if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Could not cancel this queued post.");
       if (!isScheduledPost(data.item)) throw new Error("Cancellation result is uncertain. Refresh the queue before taking another action.");
-      setItems((current) => current.map((item) => item.clientRequestId === post.clientRequestId ? data.item as ScheduledMastodonPost : item));
+      onItemsChange((current) => current.map((item) => item.clientRequestId === post.clientRequestId ? data.item as ScheduledMastodonPost : item));
       setNotice("The queued Mastodon post was cancelled before publishing began.");
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : "Could not cancel this queued post.");
@@ -275,7 +267,7 @@ export function MastodonSchedulePanel({ connection, connectionLoading, connectio
       const data = await readJson(response);
       if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Could not record your Mastodon check.");
       if (!isScheduledPost(data.item)) throw new Error("The result of your check is uncertain. Refresh the queue before retrying.");
-      setItems((current) => current.map((item) => item.clientRequestId === post.clientRequestId ? data.item as ScheduledMastodonPost : item));
+      onItemsChange((current) => current.map((item) => item.clientRequestId === post.clientRequestId ? data.item as ScheduledMastodonPost : item));
       setNotice(resolution === "found" ? "Recorded that you found the post. This is your report, not platform confirmation." : "Recorded that you could not find the post. Check again before making another attempt.");
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : "Could not record your Mastodon check.");
@@ -321,7 +313,7 @@ export function MastodonSchedulePanel({ connection, connectionLoading, connectio
         <ul className="mt-4 max-h-[480px] space-y-3 overflow-y-auto">{items.map((item) => {
           const postUrl = item.status === "posted" ? safePostUrl(item.postUrl, item.instance) : null;
           const tone = item.status === "posted" ? "text-[var(--positive)] bg-[var(--positive-soft)]" : item.status === "unknown" || item.status === "rejected" ? "text-[var(--warning)] bg-[var(--warning-soft)]" : "text-[var(--text-secondary)] bg-[var(--field)]";
-          return <li key={item.clientRequestId} className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-[12px]"><div className="flex flex-wrap items-center justify-between gap-2"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${tone}`}>{statusLabel(item)}</span><span className="text-[11px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</span></div><p className="mt-2 text-[11px] text-[var(--text-muted)]">{item.account.username} · {item.instance}</p><p className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text)]">{item.text}</p>{item.error && <p role="status" className="mt-2 text-[11px] leading-5 text-[var(--warning)]">{item.error}</p>}{item.status === "unknown" && !item.resolution && <p className="mt-2 text-[11px] leading-5 text-[var(--warning)]">The result is uncertain. Check this Mastodon account before making a new post with the same text.</p>}<div className="mt-3 flex flex-wrap gap-3">{postUrl && <a href={postUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]">View verified post <ArrowUpRight size={12} /></a>}{item.status === "queued" && <button type="button" onClick={() => void cancel(item)} disabled={Boolean(cancelling)} className="inline-flex items-center gap-1 font-semibold text-[var(--danger)] disabled:opacity-50">{cancelling === item.clientRequestId ? <LoaderCircle size={12} className="animate-spin" /> : <Trash2 size={12} />} Cancel queued post</button>}{item.status === "unknown" && !item.resolution && <><button type="button" onClick={() => void resolve(item, "found")} disabled={Boolean(resolving)} className="font-semibold text-[var(--accent-text)] disabled:opacity-50">I found the post</button><button type="button" onClick={() => void resolve(item, "absent")} disabled={Boolean(resolving)} className="font-semibold text-[var(--accent-text)] disabled:opacity-50">No post found</button></>}</div></li>;
+          return <li key={item.clientRequestId} id={`mastodon-schedule-${item.clientRequestId}`} tabIndex={-1} className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-[12px] outline-none focus:ring-2 focus:ring-[var(--accent)]"><div className="flex flex-wrap items-center justify-between gap-2"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${tone}`}>{statusLabel(item)}</span><span className="text-[11px] text-[var(--text-muted)]">{formatLocalDateTime(item.scheduledFor)}</span></div><p className="mt-2 text-[11px] text-[var(--text-muted)]">{item.account.username} · {item.instance}</p><p className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text)]">{item.text}</p>{item.error && <p role="status" className="mt-2 text-[11px] leading-5 text-[var(--warning)]">{item.error}</p>}{item.status === "unknown" && !item.resolution && <p className="mt-2 text-[11px] leading-5 text-[var(--warning)]">The result is uncertain. Check this Mastodon account before making a new post with the same text.</p>}<div className="mt-3 flex flex-wrap gap-3">{postUrl && <a href={postUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]">View verified post <ArrowUpRight size={12} /></a>}{item.status === "queued" && <button type="button" onClick={() => void cancel(item)} disabled={Boolean(cancelling)} className="inline-flex items-center gap-1 font-semibold text-[var(--danger)] disabled:opacity-50">{cancelling === item.clientRequestId ? <LoaderCircle size={12} className="animate-spin" /> : <Trash2 size={12} />} Cancel queued post</button>}{item.status === "unknown" && !item.resolution && <><button type="button" onClick={() => void resolve(item, "found")} disabled={Boolean(resolving)} className="font-semibold text-[var(--accent-text)] disabled:opacity-50">I found the post</button><button type="button" onClick={() => void resolve(item, "absent")} disabled={Boolean(resolving)} className="font-semibold text-[var(--accent-text)] disabled:opacity-50">No post found</button></>}</div></li>;
         })}</ul>
       </div>
     </div>}

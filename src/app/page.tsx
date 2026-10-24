@@ -28,7 +28,9 @@ import { AccountPanel } from "@/components/account-panel";
 import { PlatformPreview } from "@/components/platform-preview";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { MastodonLivePanel, isMastodonConnection, type MastodonConnection } from "@/components/mastodon-live-panel";
+import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@/components/bluesky-live-panel";
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
+import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -134,6 +136,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [activity, setActivity] = useState<Receipt[]>([]);
   const [drafts, setDrafts] = useState<SavedDraft[]>([]);
   const [schedule, setSchedule] = useState<ScheduledPost[]>([]);
+  const [realMastodonSchedules, setRealMastodonSchedules] = useState<RealMastodonSchedule[]>([]);
+  const [realMastodonQueueError, setRealMastodonQueueError] = useState<string | null>(null);
   const [assisted, setAssisted] = useState<AssistedPost[]>([]);
   const [assistedBusy, setAssistedBusy] = useState(false);
   const [focusedAssistedId, setFocusedAssistedId] = useState<string | null>(null);
@@ -172,6 +176,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [mastodonConnection, setMastodonConnection] = useState<MastodonConnection | null>(null);
   const [mastodonLoading, setMastodonLoading] = useState(true);
   const [mastodonError, setMastodonError] = useState<string | null>(null);
+  const [blueskyConnection, setBlueskyConnection] = useState<BlueskyConnection | null>(null);
+  const [blueskyLoading, setBlueskyLoading] = useState(true);
+  const [blueskyError, setBlueskyError] = useState<string | null>(null);
   const editorContent: EditorContent = { title, source, selected, variants, mediaIds };
   const editorContentRef = useRef(editorContent);
   editorContentRef.current = editorContent;
@@ -210,6 +217,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function openRealMastodonSchedule(item: RealMastodonSchedule) {
+    const target = document.getElementById(`mastodon-schedule-${item.clientRequestId}`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    target?.focus({ preventScroll: true });
+  }
+
   async function refreshMastodonConnection() {
     setMastodonLoading(true);
     setMastodonError(null);
@@ -228,6 +241,24 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
+  async function refreshBlueskyConnection() {
+    setBlueskyLoading(true);
+    setBlueskyError(null);
+    try {
+      const response = await fetch("/api/bluesky/connection", { cache: "no-store" });
+      const data: unknown = await response.json();
+      if (!response.ok || !isBlueskyConnection(data)) {
+        const message = data && typeof data === "object" && "error" in data && typeof data.error === "string" ? data.error : "Could not load Bluesky connection.";
+        throw new Error(message);
+      }
+      setBlueskyConnection(data);
+    } catch (cause) {
+      setBlueskyError(cause instanceof Error ? cause.message : "Could not load Bluesky connection.");
+    } finally {
+      setBlueskyLoading(false);
+    }
+  }
+
   useEffect(() => {
     void refreshMastodonConnection();
     const refreshOnFocus = () => { void refreshMastodonConnection(); };
@@ -241,6 +272,23 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       url.searchParams.delete("mastodon");
       window.history.replaceState(null, "", url.toString());
       if (result === "connected") setView("account");
+    }
+    return () => window.removeEventListener("focus", refreshOnFocus);
+  }, []);
+
+  useEffect(() => {
+    void refreshBlueskyConnection();
+    const refreshOnFocus = () => { void refreshBlueskyConnection(); };
+    window.addEventListener("focus", refreshOnFocus);
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("bluesky");
+    if (result === "connected" || result === "error") {
+      setNotice(result === "connected"
+        ? { kind: "success", text: "Bluesky connection completed. Check the account ID in Account before live posting." }
+        : { kind: "error", text: "Bluesky connection did not complete. Open Account to try again." });
+      url.searchParams.delete("bluesky");
+      window.history.replaceState(null, "", url.toString());
+      setView("account");
     }
     return () => window.removeEventListener("focus", refreshOnFocus);
   }, []);
@@ -1064,7 +1112,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
               <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your selected drafts first.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? selected.map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No destinations selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={simulatePublish} disabled={!canPublish} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> {publishing ? "Simulating..." : `Simulate publish to ${selected.length || 0} platform${selected.length === 1 ? "" : "s"}`} <ArrowRight size={15} className="ml-1" /></button><p className="mt-3 text-center text-[12px] text-[var(--text-soft)]">The simulation button above never posts to a social platform.</p></section>
               {currentSavedDraft && <BatchHandoffPanel key={`${currentSavedDraft.id}:${currentSavedDraft.updatedAt}`} draft={currentSavedDraft} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} />}
-              {selected.includes("mastodon") && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active={active === "mastodon"} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[12px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
+              {selected.includes("bluesky") && active === "bluesky" && <BlueskyLivePanel connection={blueskyConnection} connectionLoading={blueskyLoading} connectionError={blueskyError} selected active text={textFor("bluesky")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
+              {selected.includes("mastodon") && active === "mastodon" && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[12px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
             </div>
           </div>
           </div>}
@@ -1078,17 +1127,17 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             <DraftLibraryPanel drafts={drafts} currentDraftId={currentDraftId} onNew={newDraft} onLoad={loadDraft} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />
           </div>}
           <div hidden={view !== "schedule"}>
-            <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Turn a goal into reviewed drafts, plan a simulation or manual handoff, and check Mastodon scheduling availability.</p></div>
+            <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Turn a goal into reviewed drafts and see real Mastodon posts, simulations and manual handoffs together.</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{source.trim() ? draftTitle(title, source) : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
-            <MastodonSchedulePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected={selected.includes("mastodon")} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} now={now} visible={view === "schedule"} workerLastSeen={workerLastSeen} onOpenAccount={() => openView("account")} onOpenEditor={() => openView("compose")} />
-            <ServerSchedulePanel schedule={schedule} assisted={assisted} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} />
+            <ServerSchedulePanel schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenRealMastodon={openRealMastodonSchedule} />
+            <MastodonSchedulePanel items={realMastodonSchedules} onItemsChange={setRealMastodonSchedules} onLoadErrorChange={setRealMastodonQueueError} connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected={selected.includes("mastodon")} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} now={now} visible={view === "schedule"} workerLastSeen={workerLastSeen} onOpenAccount={() => openView("account")} onOpenEditor={() => openView("compose")} />
             <div className="mt-6"><StrategyPanel drafts={drafts} assisted={assisted} refreshToken={strategyRefreshEpoch} onDirtyChange={setStrategyDirty} onDraftApproved={() => { void refreshWorkspace().catch(() => setNotice({ kind: "error", text: "The idea was approved, but the draft library could not refresh. Reload this page to see it." })); }} onOpenDraft={loadDraft} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} /></div>
           </div>
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
             <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} destination={assistDestination} text={assistText} time={assistTime} now={now} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} notificationPermission={notificationPermission} onDestinationChange={(destination) => { setAssistDestination(destination); setAssistOverride(null); }} onTextChange={setAssistOverride} onTimeChange={setAssistTime} onAdd={addAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
-          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} />}
+          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} />}
         </main>
       </div>
     </div>

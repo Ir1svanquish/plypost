@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agendaForMonth, buildPlanAgenda, localAgendaDay, matchesPlanAgendaFilter } from "../src/lib/plan-agenda.ts";
+import { agendaForMonth, buildPlanAgenda, localAgendaDay, matchesPlanAgendaFilter, realMastodonNeedsAttention } from "../src/lib/plan-agenda.ts";
 
 const localInstant = (day, hour) => new Date(2026, 9, day, hour).toISOString();
 const scheduled = (id, day, hour, status) => ({
@@ -10,6 +10,12 @@ const scheduled = (id, day, hour, status) => ({
 const manual = (id, day, hour, status) => ({
   id, title: id, destination: "instagram", text: "Text", scheduledFor: localInstant(day, hour),
   createdAt: localInstant(20, 8), status,
+});
+const real = (id, day, hour, status, resolution) => ({
+  clientRequestId: id, text: `Real ${id}`, scheduledFor: localInstant(day, hour),
+  createdAt: localInstant(20, 8), instance: "https://example.social",
+  account: { id: "owner", username: "@owner@example.social", url: "https://example.social/@owner" },
+  status, ...(resolution ? { resolution } : {}),
 });
 
 test("plan agenda interleaves simulation and manual handoff by local scheduled time", () => {
@@ -38,4 +44,38 @@ test("manual self-reported completion never appears as a simulated receipt", () 
   assert.deepEqual(names("simulation-failed"), ["failed"]);
   assert.deepEqual(names("simulation-complete"), ["done"]);
   assert.equal(names("all").length, 5);
+});
+
+test("real Mastodon statuses interleave by date and stay separate from simulated and manual filters", () => {
+  const statuses = ["queued", "inflight", "posted", "unknown", "rejected", "cancelled"];
+  const realPosts = statuses.map((status, index) => real(status, 21, 9 + index, status));
+  const items = buildPlanAgenda(
+    [scheduled("simulation", 21, 12, "simulated")],
+    [manual("manual", 21, 8, "queued")],
+    realPosts,
+  );
+  assert.deepEqual(items.map((item) => item.kind), [
+    "manual", "real-mastodon", "real-mastodon", "real-mastodon", "simulation",
+    "real-mastodon", "real-mastodon", "real-mastodon",
+  ]);
+  assert.deepEqual(items.filter((item) => matchesPlanAgendaFilter(item, "real-all")).map((item) => item.post.clientRequestId), statuses);
+  for (const status of statuses) {
+    assert.deepEqual(items.filter((item) => matchesPlanAgendaFilter(item, `real-${status}`)).map((item) => item.post.clientRequestId), [status]);
+  }
+  assert.deepEqual(items.filter((item) => matchesPlanAgendaFilter(item, "simulation-complete")).map((item) => item.post.id), ["simulation"]);
+  assert.deepEqual(items.filter((item) => matchesPlanAgendaFilter(item, "manual-pending")).map((item) => item.post.id), ["manual"]);
+  assert.equal(agendaForMonth(items, 2026, 9).length, 8);
+});
+
+test("real attention includes unresolved unknown, rejected and overdue queued without treating a checked result as verified", () => {
+  const now = new Date(2026, 9, 22, 10).getTime();
+  assert.equal(realMastodonNeedsAttention(real("unknown", 21, 9, "unknown"), now), true);
+  assert.equal(realMastodonNeedsAttention(real("found", 21, 9, "unknown", "found"), now), false);
+  assert.equal(realMastodonNeedsAttention(real("absent", 21, 9, "unknown", "absent"), now), false);
+  assert.equal(realMastodonNeedsAttention(real("rejected", 21, 9, "rejected"), now), true);
+  assert.equal(realMastodonNeedsAttention(real("overdue", 22, 9, "queued"), now), true);
+  assert.equal(realMastodonNeedsAttention(real("upcoming", 22, 11, "queued"), now), false);
+  assert.equal(realMastodonNeedsAttention(real("posted", 21, 9, "posted"), now), false);
+  assert.equal(realMastodonNeedsAttention(real("inflight", 21, 9, "inflight"), now), false);
+  assert.equal(realMastodonNeedsAttention(real("cancelled", 21, 9, "cancelled"), now), false);
 });

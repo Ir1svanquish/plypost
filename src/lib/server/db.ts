@@ -110,6 +110,33 @@ export function database(): DatabaseSync {
       ON mastodon_scheduled_posts(status, scheduled_for);
     CREATE INDEX IF NOT EXISTS mastodon_scheduled_owner
       ON mastodon_scheduled_posts(user_id, scheduled_for DESC);
+    CREATE TABLE IF NOT EXISTS bluesky_oauth_states (
+      state_key TEXT PRIMARY KEY, payload_cipher TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS bluesky_sessions (
+      did TEXT PRIMARY KEY, payload_cipher TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS bluesky_oauth_pending (
+      nonce_hash TEXT PRIMARY KEY, app_state_hash TEXT NOT NULL,
+      user_id TEXT NOT NULL, session_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS bluesky_oauth_pending_owner ON bluesky_oauth_pending(user_id);
+    CREATE TABLE IF NOT EXISTS bluesky_connections (
+      user_id TEXT PRIMARY KEY, did TEXT NOT NULL UNIQUE,
+      connected_at TEXT NOT NULL, disconnecting INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS bluesky_publish_attempts (
+      client_request_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, did TEXT NOT NULL,
+      content_hash TEXT NOT NULL, text_excerpt TEXT,
+      status TEXT NOT NULL CHECK(status IN ('inflight','posted','unknown','rejected')),
+      remote_uri TEXT, remote_cid TEXT, last_error TEXT,
+      resolution TEXT CHECK(resolution IN ('found','absent') OR resolution IS NULL),
+      resolved_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS bluesky_attempts_owner
+      ON bluesky_publish_attempts(user_id, created_at DESC);
   `);
   const oauthColumns = db.prepare("PRAGMA table_info(mastodon_oauth_states)").all() as { name: string }[];
   if (!oauthColumns.some((column) => column.name === "session_hash")) {
@@ -135,6 +162,21 @@ export function database(): DatabaseSync {
   const scheduledColumns = db.prepare("PRAGMA table_info(mastodon_scheduled_posts)").all() as { name: string }[];
   if (!scheduledColumns.some((column) => column.name === "dispatch_authorized")) {
     db.exec("ALTER TABLE mastodon_scheduled_posts ADD COLUMN dispatch_authorized INTEGER NOT NULL DEFAULT 0 CHECK(dispatch_authorized IN (0,1))");
+  }
+  const blueskyAttemptColumns = db.prepare("PRAGMA table_info(bluesky_publish_attempts)").all() as { name: string }[];
+  if (!blueskyAttemptColumns.some((column) => column.name === "resolution")) {
+    db.exec("ALTER TABLE bluesky_publish_attempts ADD COLUMN resolution TEXT CHECK(resolution IN ('found','absent') OR resolution IS NULL)");
+  }
+  if (!blueskyAttemptColumns.some((column) => column.name === "resolved_at")) {
+    db.exec("ALTER TABLE bluesky_publish_attempts ADD COLUMN resolved_at TEXT");
+  }
+  const blueskyIndex = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='bluesky_attempts_unresolved_content'")
+    .get() as { sql: string } | undefined;
+  if (!blueskyIndex?.sql.includes("resolution='found'")) {
+    db.exec(`DROP INDEX IF EXISTS bluesky_attempts_unresolved_content;
+      CREATE UNIQUE INDEX bluesky_attempts_unresolved_content
+      ON bluesky_publish_attempts(user_id,did,content_hash)
+      WHERE status='inflight' OR (status='unknown' AND (resolution IS NULL OR resolution='found'));`);
   }
   // A record from before real scheduling was enabled must never start publishing after an upgrade.
   db.prepare(`UPDATE mastodon_scheduled_posts SET status='cancelled',

@@ -3,6 +3,7 @@
 import { Clock3, LogOut, UserRound } from "lucide-react";
 import { platforms, type PlatformId } from "@/lib/platforms";
 import { MastodonConnectionPanel, type MastodonConnection } from "@/components/mastodon-live-panel";
+import { BlueskyConnectionPanel, type BlueskyConnection } from "@/components/bluesky-live-panel";
 
 type AuditEntry = { action: string; subject_id: string | null; detail: string | null; created_at: string };
 type SimulationReceipt = { platform: PlatformId; id: string; status: "simulated"; publishedAt: string; content: string };
@@ -17,6 +18,11 @@ type Props = {
   mastodonLoading: boolean;
   mastodonError: string | null;
   onRefreshMastodon: () => Promise<void>;
+  blueskyConnection: BlueskyConnection | null;
+  blueskyLoading: boolean;
+  blueskyError: string | null;
+  onRefreshBluesky: () => Promise<void>;
+  editorDirty: boolean;
 };
 
 function formatTime(iso: string) {
@@ -25,7 +31,7 @@ function formatTime(iso: string) {
   });
 }
 
-export function AccountPanel({ email, auditLog, activity, onClearActivity, onLogout, mastodonConnection, mastodonLoading, mastodonError, onRefreshMastodon }: Props) {
+export function AccountPanel({ email, auditLog, activity, onClearActivity, onLogout, mastodonConnection, mastodonLoading, mastodonError, onRefreshMastodon, blueskyConnection, blueskyLoading, blueskyError, onRefreshBluesky, editorDirty }: Props) {
   return <div id="account" className="section-anchor space-y-6">
     <div>
       <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Account</p>
@@ -37,6 +43,7 @@ export function AccountPanel({ email, auditLog, activity, onClearActivity, onLog
       <button type="button" onClick={onLogout} className="inline-flex items-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><LogOut size={15} /> Sign out</button>
     </section>
     <MastodonConnectionPanel connection={mastodonConnection} loading={mastodonLoading} loadError={mastodonError} onRefresh={onRefreshMastodon} />
+    <BlueskyConnectionPanel connection={blueskyConnection} loading={blueskyLoading} loadError={blueskyError} onRefresh={onRefreshBluesky} editorDirty={editorDirty} />
     <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="audit-heading">
       <div className="border-b border-[var(--line)] px-6 py-5 sm:px-7"><h2 id="audit-heading" className="text-[17px] font-bold">Account activity</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Recent saved changes and worker results.</p></div>
       {auditLog.length === 0 ? <p className="px-6 py-8 text-[13px] text-[var(--text-soft)] sm:px-7">No activity yet.</p> : <div className="divide-y divide-[var(--line)] px-6 sm:px-7">{auditLog.slice(0, 12).map((item, index) => <div key={`${item.created_at}-${index}`} className="flex flex-wrap justify-between gap-2 py-3 text-[12px]"><span className="font-medium text-[var(--text-secondary)]">{item.action.replaceAll(".", " · ")}{item.detail ? ` · ${item.detail}` : ""}</span><time className="text-[var(--text-soft)]">{formatTime(item.created_at)}</time></div>)}</div>}
