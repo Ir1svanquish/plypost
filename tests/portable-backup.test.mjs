@@ -12,6 +12,7 @@ import { addSchedule, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraf
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { approveStrategyIdea, createWeeklyPlan, listStrategy, saveBrandBrief } from "../src/lib/server/strategy.ts";
+import { getSlotSettings, saveSlotSettings } from "../src/lib/server/slots.ts";
 import { GET, POST } from "../src/app/api/backup/route.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-portable-"));
@@ -53,11 +54,16 @@ test("portable backup restores image pixels and saved records in a fresh databas
     .run(assisted.id, owner, JSON.stringify(assisted), assisted.scheduledFor, stamp());
   const postUrl = "https://social.example/creator/post/2026";
   assert.equal(setAssistedStatus(owner, assisted.id, "posted", postUrl), true);
+  const weeklySlots = saveSlotSettings(owner, { timeZone: "Asia/Hong_Kong", rules: [
+    { platform: "bluesky", day: 1, time: "09:00" },
+    { platform: "linkedin", day: 4, time: "16:30" },
+  ] });
 
   const exported = exportPortableBackup(owner);
   const archive = JSON.parse(exported);
   assert.equal(archive.format, "plypost-portable");
-  assert.equal(archive.version, 2);
+  assert.equal(archive.version, 3);
+  assert.deepEqual(archive.slotSettings, weeklySlots);
   assert.equal(archive.brandBrief, null);
   assert.deepEqual(archive.weeklyPlans, []);
   assert.equal(archive.media.length, 1);
@@ -69,6 +75,10 @@ test("portable backup restores image pixels and saved records in a fresh databas
 
   closeDatabase();
   process.env.PLYPOST_DB_PATH = join(temporary, "restored.sqlite");
+  const brokenSlots = globalThis.structuredClone(archive);
+  brokenSlots.slotSettings.rules[0].time = "25:00";
+  await assert.rejects(importPortableBackup(owner, brokenSlots), /invalid weekly slots/);
+  assert.equal(getSlotSettings(owner), null);
   const result = await importPortableBackup(owner, archive);
   assert.deepEqual(result, { drafts: 1, jobs: 1, assisted: 1, media: 1 });
   const restored = listWorkspace(owner);
@@ -81,6 +91,7 @@ test("portable backup restores image pixels and saved records in a fresh databas
   assert.equal(restored.assisted[0].postUrl, postUrl);
   assert.equal(restored.assisted[0].postedAt, archive.assisted[0].postedAt);
   assert.deepEqual(restored.assisted[0].mediaIds, restored.drafts[0].mediaIds);
+  assert.deepEqual(getSlotSettings(owner), weeklySlots);
   const restoredImage = getMedia(owner, restored.drafts[0].mediaIds[0]);
   assert.ok(restoredImage);
   assert.equal((await sharp(restoredImage.bytes).metadata()).width, 8);
@@ -255,7 +266,7 @@ test("full backup preserves brand details, reviewed ideas, and their remapped dr
   }]);
   const originalDraft = approveStrategyIdea(sourceOwner, plan.id, plan.ideas[0].id);
   const archive = JSON.parse(exportPortableBackup(sourceOwner));
-  assert.equal(archive.version, 2);
+  assert.equal(archive.version, 3);
   assert.equal(archive.brandBrief.brandName, "Plypost");
   assert.equal(archive.weeklyPlans[0].ideas[0].draftId, originalDraft.id);
 
@@ -273,12 +284,21 @@ test("full backup preserves brand details, reviewed ideas, and their remapped dr
   assert.equal(restoredState.plans[0].ideas[0].draftId, restoredDraft.id);
   assert.equal(restoredState.plans[0].ideas[0].seed, plan.ideas[0].seed);
 
+  const previous = globalThis.structuredClone(archive);
+  previous.version = 2;
+  delete previous.slotSettings;
+  await importPortableBackup(destinationOwner, previous);
+  assert.equal(listStrategy(destinationOwner).brief.brandName, brief.brandName);
+  assert.equal(getSlotSettings(destinationOwner), null);
+
   const legacy = globalThis.structuredClone(archive);
   legacy.version = 1;
   delete legacy.brandBrief;
   delete legacy.weeklyPlans;
+  delete legacy.slotSettings;
   await importPortableBackup(destinationOwner, legacy);
   assert.deepEqual(listStrategy(destinationOwner), { brief: null, plans: [] });
+  assert.equal(getSlotSettings(destinationOwner), null);
 });
 
 test("full backup remaps batch handoff origins while preserving snapshots from deleted drafts", async () => {

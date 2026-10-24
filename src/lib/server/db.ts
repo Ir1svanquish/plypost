@@ -27,6 +27,9 @@ export function database(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS brand_briefs (
       user_id TEXT PRIMARY KEY, payload TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS slot_settings (
+      user_id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS weekly_plans (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL
     );

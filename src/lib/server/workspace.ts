@@ -4,6 +4,7 @@ import { draftTitle, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWor
 import { adaptDraft, isPlatformId, platformIds, type PlatformId } from "../platforms";
 import { validatePlatformText } from "../platform-validation";
 import { assertOwnedMedia } from "./media";
+import { slotIsFree } from "./slots";
 
 type DraftRow = { payload: string };
 type JobRow = {
@@ -124,7 +125,9 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
 type BatchHandoff = { destination: PlatformId; scheduledFor: string };
 
 /** Snapshot reviewed, saved platform drafts as one atomic manual-publishing handoff. */
-export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: unknown, items: unknown): AssistedPost[] {
+export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: unknown, items: unknown,
+  requireFreeSlots: unknown = false): AssistedPost[] {
+  if (typeof requireFreeSlots !== "boolean") throw new Error("Invalid weekly slot confirmation.");
   if (!validUuid(draftId) || !validUuid(batchId) || !Array.isArray(items) ||
       items.length < 1 || items.length > 4 || items.some((entry) =>
         !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor") ||
@@ -165,6 +168,11 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     if (!draft || draft.id !== draftId) throw new Error("Saved draft not found.");
     if (requested.some((item) => !draft.selected.includes(item.destination))) {
       throw new Error("Choose destinations selected in this saved draft.");
+    }
+    if (requireFreeSlots && requested.some((item) =>
+      Date.parse(item.scheduledFor) < Date.now() + 10_000 ||
+      !slotIsFree(db, userId, item.destination, item.scheduledFor))) {
+      throw new Error("A suggested slot is now occupied or too soon. Preview free slots again.");
     }
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
     if (count.count + requested.length > 100) throw new Error("Assisted publishing list is full.");

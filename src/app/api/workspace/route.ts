@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; scheduledFor?: unknown; timezone?: unknown; backup?: unknown };
+  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; timezone?: unknown; backup?: unknown };
   try { input = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
   let assistedMigration: "imported" | "skipped" | undefined;
   try {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       case "save-draft": saveDraft(user, input.item); break;
       case "delete-draft": if (typeof input.id !== "string" || !deleteDraft(user, input.id)) throw new Error("Draft not found."); break;
       case "add-assisted": addAssisted(user, input.item); break;
-      case "prepare-assisted-batch": prepareAssistedBatch(user, input.draftId, input.batchId, input.items); break;
+      case "prepare-assisted-batch": prepareAssistedBatch(user, input.draftId, input.batchId, input.items, input.requireFreeSlots); break;
       case "set-assisted-status": if (typeof input.id !== "string" || !setAssistedStatus(user, input.id, input.status, input.postUrl)) throw new Error("Assisted item not found."); break;
       case "set-assisted-outcome": if (typeof input.id !== "string" || !setAssistedOutcome(user, input.id, input.outcome)) throw new Error("Assisted item not found."); break;
       case "mark-assisted-notified": markAssistedNotified(user, input.ids); break;

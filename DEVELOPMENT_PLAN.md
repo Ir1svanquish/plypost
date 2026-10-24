@@ -64,7 +64,7 @@ Plan 日历现在同时显示模拟任务与人工发布提醒，以 S、M 计�
 
 下一步优先验证常见平台的**官方直发**，再扩展排程体验。竞品能直发的基础是平台接口、用户授权和应用权限：[Meta 的 Instagram 专业账号发布接口](https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api)、[Threads 发布接口](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api)、[LinkedIn Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?view=li-lms-2026-05)及 [TikTok Content Posting API](https://developers.tiktok.com/docs/en/content-posting-api-get-started)都提供了路径，但账号类型、内容格式和审核要求不同。先核对现有 Mastodon 连接在真实测试账号上的授权、发布、结果不明与撤销，再选一个主流平台做最小直发闭环：确认开发者应用条件和权限，接入授权与撤销，限定一种受支持的内容格式，持久记录平台回执，并用测试账号走完发布。正式排程直发还需逐平台处理限流、过期凭证、失败重试和外部发布成功但本地回执丢失的重复风险。
 
-之后的效率改进是「固定时段队列」：由用户为平台设置每周可用时段，先预览空位和冲突，再手动确认生成计划或人工提醒。[Publer 的账号级发帖时段和下一空位](https://publer.com/help/en/article/how-to-automatically-schedule-posts-jj58si/)及 [SocialBee 的分类周时段](https://help.socialbee.com/hc/en-us/articles/29979284763031-Scheduler-What-It-Is-and-How-It-Works)提供了工作流参照。这是功能对照得出的优先级判断，尚未经过 Plypost 用户访谈。实现时须明确时区、夏令时、冲突和浏览器关闭后的本机运行条件；只有已验收的官方连接才可提供真实自动发布。
+之后的效率改进是「固定时段队列」：由用户为平台设置每周可用时段，先预览空位和冲突，再手动确认生成计划或人工提醒。[Publer 的账号级发帖时段和下一空位](https://publer.com/help/en/article/how-to-automatically-schedule-posts-jj58si/)及 [SocialBee 的分类周时段](https://help.socialbee.com/hc/en-us/articles/29979284763031-Scheduler-What-It-Is-and-How-It-Works)提供了工作流参照。这是功能对照得出的优先级判断，尚未经过 Plypost 用户访谈。首版已在人工交接中接入，下面记录验收边界；模拟计划自动填充和真实平台队列仍待后续。只有已验收的官方连接才可提供真实自动发布。
 
 | 阶段 | 交付内容 | 完成标准 | 状态 |
 | --- | --- | --- | --- |
@@ -89,6 +89,12 @@ Plan 日历现在同时显示模拟任务与人工发布提醒，以 S、M 计�
 本地测试覆盖越权请求、账号不符、加密保存、失败授权后的撤销、重复请求、结果不明及用户核查；全套 89 项测试、类型检查、代码检查和正式构建通过。使用隔离账号在本机浏览器检查了未连接状态、明暗主题及模拟/真实入口的区分，**没有**连接真实 Bluesky 账号、发出帖子或完成平台撤销。当前 OAuth 仅支持 `127.0.0.1` 本机回环地址；公网版仍需 HTTPS 客户端元数据、回调和跨进程锁。下一步的通过标准是在经同意的测试账号上实际完成授权、即时发帖、回执读取、结果不明核对和撤销，再决定是否加入图片与真实排程。
 
 依赖检查还有一个上线门槛：`npm audit --omit=dev --audit-level=high` 报告 15 条高危记录，均指向官方 AT Protocol OAuth 客户端依赖链中的同一项 [Zod 内存耗尽公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)。该客户端目前依赖 Zod 3，公告只列出 Zod 4.6.6 修复版，直接强制跨大版本替换尚未验证兼容性。现有入口限制本机单个所有者和请求体大小，但不能据此认定所有远端 OAuth 响应都安全；公开部署前必须等待兼容修复或完成单独的依赖迁移与安全验证。
+
+## 2026-10-24：固定时段预览与人工交接
+
+账号现在可保存最多 56 条“平台、星期、本地时刻”规则及一个 IANA 时区。用户在 Plan 编辑规则，在已保存草稿的 Create 人工交接审核中预览未来八周每个所选平台的下一空位。预览跳过同平台已有的人工提醒、模拟任务及 Mastodon 已确认真实任务；最终建立整批交接时在数据库事务中再次检查，任何一个建议分钟被占用则整批拒绝，避免只建出部分事项。规则不自动创建或发送帖子，也不会修改已排定的任务。
+
+夏令时春季不存在的本地时刻会跳过该周，秋季重复的本地时刻选第一次。新完整备份为版本 3，包含时段规则；旧版完整备份仍可导入，因不含规则会清空现有规则。后续要通过实际手机布局、跨浏览器/时区和多个并行编辑标签页的交互验收，并观察八周搜索范围是否符合真实使用。2026-10-24 查询 npm，`@atproto/oauth-client-node` 最新仍为 0.5.12、其依赖的 OAuth 客户端仍要求 Zod 3，因此上面的公开部署依赖门槛仍未消除。
 
 ## 已完成：草稿库与排程规划
 
