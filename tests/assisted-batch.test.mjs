@@ -74,6 +74,49 @@ test("unmodified platform text uses the same adaptation shown in Create", () => 
   assert.equal(prepared.find((item) => item.destination === "linkedin").text, "First line\nSecond line");
 });
 
+test("reviewed handoffs cover every assisted destination without changing the saved draft", () => {
+  const saved = saveDraft(owner, draft("Source for manual posts", ["bluesky", "mastodon", "linkedin", "threads"], { bluesky: "Saved Bluesky" }));
+  const limited = saveDraft(owner, draft("Limited", ["bluesky", "linkedin"], {}));
+  const batchId = randomUUID();
+  const ids = ["bluesky", "linkedin", "x", "facebook", "instagram", "tiktok", "youtube", "pinterest", "reddit", "mastodon", "threads"];
+  assert.throws(() => prepareAssistedBatch(owner, limited.id, randomUUID(), [
+    { destination: "mastodon", scheduledFor: new Date().toISOString(), text: "Unselected" },
+  ], false, limited.updatedAt), /selected in this saved draft/);
+  const items = ids.map((destination, index) => ({
+    destination, scheduledFor: new Date(Date.now() + 60_000 + index * 60_000).toISOString(),
+    text: `Reviewed for ${destination}`,
+  }));
+  const prepared = prepareAssistedBatch(owner, saved.id, batchId, items, false, saved.updatedAt);
+  assert.equal(prepared.length, 11);
+  assert.deepEqual(prepared.map((item) => item.text), items.map((item) => item.text));
+  assert.ok(prepared.every((item) => item.sourceDraftId === saved.id && item.batchId === batchId));
+  assert.equal(listWorkspace(owner).drafts.find((item) => item.id === saved.id).variants.bluesky, "Saved Bluesky");
+  assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, [...items].reverse(), false, saved.updatedAt).map((item) => item.id),
+    [...prepared].reverse().map((item) => item.id));
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId,
+    [{ ...items[0], text: "Different review" }, ...items.slice(1)], false, saved.updatedAt), /different or partial/);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...items[0], text: " " }], false, saved.updatedAt), /valid text/);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ destination: "x", scheduledFor: items[0].scheduledFor, text: "x".repeat(5001) }], false, saved.updatedAt), /valid text/);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ destination: "bluesky", scheduledFor: items[0].scheduledFor, text: "x".repeat(301) }], false, saved.updatedAt), /Fix the bluesky text/);
+  const changed = saveDraft(owner, { ...saved, source: "Changed elsewhere" }, saved.updatedAt);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...items[0] }], false, saved.updatedAt), /changed or was deleted/);
+  assert.equal(prepareAssistedBatch(owner, saved.id, batchId, items, false, saved.updatedAt).length, 11);
+  assert.notEqual(changed.updatedAt, saved.updatedAt);
+});
+
+test("custom reminders can be confirmed without weekly slots for manual-only platforms", () => {
+  const saved = saveDraft(owner, draft("Manual copy", ["bluesky"], {}));
+  const [prepared] = prepareAssistedBatch(owner, saved.id, randomUUID(), [
+    { destination: "x", scheduledFor: new Date(Date.now() + 60_000).toISOString(), text: "X copy" },
+  ], true, saved.updatedAt);
+  assert.equal(prepared.destination, "x");
+  assert.equal(prepared.text, "X copy");
+});
+
 test("queued handoff descriptions can be corrected without changing the draft or sibling", async () => {
   const image = (await createMedia(owner, {
     name: "detail.png", type: "image/png",
@@ -175,16 +218,17 @@ test("provenance is a valid UUID pair, and manual action cannot forge draft-link
   const read = (item) => parseWorkspace({ version: 3, drafts: [], schedule: [], assisted: [item] })?.assisted;
   assert.deepEqual(read(post), [post]);
   for (const invalid of [{ ...post, sourceDraftId: undefined }, { ...post, batchId: undefined },
-    { ...post, batchId: "bad" }, { ...post, destination: "x" }]) {
+    { ...post, batchId: "bad" }, { ...post, destination: "unknown" }]) {
     assert.deepEqual(read(invalid), []);
   }
+  assert.deepEqual(read({ ...post, destination: "x" }), [{ ...post, destination: "x" }]);
   assert.throws(() => addAssisted(owner, post), /Use batch preparation/);
 });
 
 test("batch route requires owner sign-in and same origin; response includes persisted handoffs", async () => {
   const saved = saveDraft(owner, draft("Route source", ["bluesky"], {}));
-  const body = { action: "prepare-assisted-batch", draftId: saved.id, batchId: randomUUID(),
-    items: [{ destination: "bluesky", scheduledFor: new Date(Date.now() + 60_000).toISOString() }] };
+  const body = { action: "prepare-assisted-batch", draftId: saved.id, expectedUpdatedAt: saved.updatedAt, batchId: randomUUID(),
+    items: [{ destination: "bluesky", scheduledFor: new Date(Date.now() + 60_000).toISOString(), text: "Reviewed route copy" }] };
   const request = (cookie, origin = "http://localhost:3000") => new globalThis.Request("http://localhost:3000/api/workspace", {
     method: "POST", headers: { origin, "content-type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body),
   });
@@ -198,4 +242,12 @@ test("batch route requires owner sign-in and same origin; response includes pers
   assert.ok(state.assisted.some((post) => post.batchId === body.batchId && post.sourceDraftId === saved.id));
   assert.equal((await workspacePost(request(cookie))).status, 200);
   assert.equal(listWorkspace(owner).assisted.filter((post) => post.batchId === body.batchId).length, 1);
+  assert.equal(listWorkspace(owner).assisted.find((post) => post.batchId === body.batchId).text, "Reviewed route copy");
+  saveDraft(owner, { ...saved, source: "Changed in another window" }, saved.updatedAt);
+  const stale = { ...body, batchId: randomUUID() };
+  const staleResponse = await workspacePost(new globalThis.Request("http://localhost:3000/api/workspace", {
+    method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json", cookie }, body: JSON.stringify(stale),
+  }));
+  assert.equal(staleResponse.status, 409);
+  assert.equal((await staleResponse.json()).code, "DRAFT_CONFLICT");
 });

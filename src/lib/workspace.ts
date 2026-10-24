@@ -249,7 +249,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
       !validUtcInstant(value.scheduledFor) || !validDate(value.createdAt) ||
       (value.status !== "queued" && value.status !== "posted")) return null;
   if ((value.sourceDraftId !== undefined || value.batchId !== undefined) &&
-      (!validUuid(value.sourceDraftId) || !validUuid(value.batchId) || !isPlatformId(value.destination))) return null;
+      (!validUuid(value.sourceDraftId) || !validUuid(value.batchId))) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
   if (value.contentEditedAt !== undefined && !validUtcInstant(value.contentEditedAt)) return null;

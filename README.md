@@ -6,7 +6,7 @@ Plypost is a web app that runs on your computer. Write a post, edit versions for
 
 - Draft and preview posts for Bluesky, Mastodon, LinkedIn, and Threads, with up to four images.
 - Save drafts, set reminders, and export a local backup. The calendar can process simulated posts while the worker is running.
-- Prepare text and images for manual posting to X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit, and the four draft platforms. You publish on those sites yourself and record the result in Plypost.
+- Review separate handoffs from a saved draft for X, Facebook Pages, Instagram, TikTok, YouTube, Pinterest, Reddit, and the four draft platforms. Edit each handoff, then publish on those sites yourself and record the result in Plypost.
 - Optionally use Nebius or NVIDIA Nemotron to rewrite drafts or suggest weekly ideas. AI requests are made only when you choose to generate them. Weekly idea generation sends your saved brand brief, not your recorded post results.
 
 The separate Bluesky and Mastodon account features can send confirmed text posts; Mastodon also has a confirmed scheduling queue. **Neither account flow has been tested with a live account yet.** Images are for manual publishing, not these account features. Ordinary reminders and simulated posts never publish to a social platform.

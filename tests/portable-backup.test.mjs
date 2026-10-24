@@ -318,6 +318,7 @@ test("full backup remaps batch handoff origins while preserving snapshots from d
   const items = [
     { destination: "bluesky", scheduledFor: new Date(Date.now() + 60_000).toISOString() },
     { destination: "linkedin", scheduledFor: new Date(Date.now() + 120_000).toISOString() },
+    { destination: "x", scheduledFor: new Date(Date.now() + 180_000).toISOString(), text: "Reviewed X copy" },
   ];
   const original = prepareAssistedBatch(sourceOwner, saved.id, batchId, items);
   const deleted = saveDraft(sourceOwner, draft(randomUUID()));
@@ -335,7 +336,7 @@ test("full backup remaps batch handoff origins while preserving snapshots from d
   const restored = listWorkspace(destinationOwner);
   const linked = restored.assisted.filter((item) => item.batchId === batchId);
   const restoredOrphan = restored.assisted.find((item) => item.batchId === orphanBatchId);
-  assert.equal(linked.length, 2);
+  assert.equal(linked.length, 3);
   assert.ok(linked.every((item) => item.sourceDraftId === restored.drafts[0].id));
   assert.notEqual(restored.drafts[0].id, saved.id);
   assert.deepEqual(linked.map((item) => item.text).sort(), original.map((item) => item.text).sort());

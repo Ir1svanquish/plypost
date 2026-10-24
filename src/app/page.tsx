@@ -22,7 +22,7 @@ import { DraftLibraryPanel } from "@/components/workspace-panels";
 import { ServerSchedulePanel } from "@/components/server-schedule-panel";
 import { StrategyPanel } from "@/components/strategy-panel";
 import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
-import { BatchHandoffPanel, type BatchHandoffItem } from "@/components/batch-handoff-panel";
+import { BatchHandoffPanel, type BatchHandoffItem, type BatchPrepareResult } from "@/components/batch-handoff-panel";
 import { WeeklySlotsPanel } from "@/components/weekly-slots-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
@@ -38,6 +38,8 @@ import { WORKSPACE_KEY, draftTitle, emptyWorkspace, parseWorkspace, type Assiste
 
 const sampleDraft =
   "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.";
+const previousSampleDraft =
+  "A good idea deserves more than a copy-paste post.\n\nShape one message for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
 const legacySampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nSocialFlow helps you shape one draft for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
 const interimSampleDraft =
@@ -338,7 +340,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     });
     const data = await response.json();
     if (!response.ok) {
-      const failure = new Error(data.error || "Could not update workspace.") as Error & { code?: string };
+      const failure = new Error(data.error || "Could not update workspace.") as Error & { code?: string; status?: number };
+      failure.status = response.status;
       if (typeof data.code === "string") failure.code = data.code;
       throw failure;
     }
@@ -370,7 +373,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         if (typeof data.source === "string") {
           const hasCustomVariants = data.variants && typeof data.variants === "object" &&
             Object.values(data.variants).some((value) => typeof value === "string");
-          const isStarterText = data.source === legacySampleDraft || data.source === interimSampleDraft;
+          const isStarterText = data.source === previousSampleDraft || data.source === legacySampleDraft || data.source === interimSampleDraft;
           setSource(isStarterText && !hasCustomVariants && typeof data.currentDraftId !== "string" ? sampleDraft : data.source);
         }
         if (Array.isArray(data.selected)) {
@@ -1083,15 +1086,28 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function prepareAssistedBatch(draftId: string, batchId: string, items: BatchHandoffItem[], requireFreeSlots: boolean): Promise<boolean> {
+  async function prepareAssistedBatch(draftId: string, expectedUpdatedAt: string, batchId: string, items: BatchHandoffItem[], requireFreeSlots: boolean): Promise<BatchPrepareResult> {
     if (editorDirty || currentDraftId !== draftId || mediaBusyRef.current || draftSaveBusyRef.current) {
       setNotice({ kind: "error", text: "Save your latest draft changes before preparing handoffs." });
-      return false;
+      return "rejected";
     }
-    const prepared = await runAssistedAction("prepare-assisted-batch", { draftId, batchId, items, requireFreeSlots },
-      `Prepared ${items.length} manual ${items.length === 1 ? "handoff" : "handoffs"} from your saved draft. Nothing was posted.`);
-    if (prepared) setNow(Date.now());
-    return prepared;
+    if (assistedMutation.current) return "rejected";
+    assistedMutation.current = true;
+    setAssistedBusy(true);
+    try {
+      await changeWorkspace("prepare-assisted-batch", { draftId, expectedUpdatedAt, batchId, items, requireFreeSlots });
+      setNotice({ kind: "success", text: `Prepared ${items.length} manual ${items.length === 1 ? "handoff" : "handoffs"} from your saved draft. Nothing was posted.` });
+      setNow(Date.now());
+      return "prepared";
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not prepare handoffs." });
+      const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+      if (status === 409) void refreshWorkspace().catch(() => undefined);
+      return typeof status === "number" && status >= 400 && status < 500 ? "rejected" : "uncertain";
+    } finally {
+      assistedMutation.current = false;
+      setAssistedBusy(false);
+    }
   }
 
   async function copyAssisted(text: string, destination: AssistedDestinationId) {

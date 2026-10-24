@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
 import { draftTitle, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validMediaAlt, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
-import { adaptDraft, characterCount, isPlatformId, platformIds, type PlatformId } from "../platforms";
+import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
+import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
 import { validatePlatformText } from "../platform-validation";
 import { assertOwnedMedia } from "./media";
 import { slotIsFree } from "./slots";
@@ -122,17 +123,19 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
   return item;
 }
 
-type BatchHandoff = { destination: PlatformId; scheduledFor: string };
+type BatchHandoff = { destination: AssistedDestinationId; scheduledFor: string; text?: string };
 
-/** Snapshot reviewed, saved platform drafts as one atomic manual-publishing handoff. */
+/** Snapshot reviewed manual-publishing handoffs from one saved draft. */
 export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: unknown, items: unknown,
-  requireFreeSlots: unknown = false): AssistedPost[] {
+  requireFreeSlots: unknown = false, expectedUpdatedAt: unknown = undefined): AssistedPost[] {
   if (typeof requireFreeSlots !== "boolean") throw new Error("Invalid weekly slot confirmation.");
+  if (expectedUpdatedAt !== undefined && !validUtcInstant(expectedUpdatedAt)) throw new Error("Invalid saved draft version.");
   if (!validUuid(draftId) || !validUuid(batchId) || !Array.isArray(items) ||
-      items.length < 1 || items.length > 4 || items.some((entry) =>
-        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor") ||
-        !isPlatformId(entry.destination) || !validUtcInstant(entry.scheduledFor))) {
-    throw new Error("Choose a saved draft, a batch ID, and one to four destinations with UTC reminder times.");
+      items.length < 1 || items.length > assistedIds.length || items.some((entry) =>
+        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor" && key !== "text") ||
+        !isAssistedDestinationId(entry.destination) || !validUtcInstant(entry.scheduledFor) ||
+        (entry.text !== undefined && (typeof entry.text !== "string" || !entry.text.trim() || characterCount(entry.text) > 5000)))) {
+    throw new Error("Choose a saved draft and one to eleven destinations with valid text and UTC reminder times.");
   }
   const requested = items as BatchHandoff[];
   if (new Set(requested.map((item) => item.destination)).size !== requested.length) {
@@ -141,8 +144,9 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
   return transaction((db) => {
     // Keep the original request in the local audit log so a retry cannot shrink a
     // batch after one or all handoffs were deleted. Imported backups may lack this log.
-    const manifest = JSON.stringify({ draftId, items: requested
-      .map(({ destination, scheduledFor }) => ({ destination, scheduledFor }))
+    const manifest = JSON.stringify({ draftId, ...(expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : {}), items: requested
+      .map(({ destination, scheduledFor, text }) => ({ destination, scheduledFor,
+        ...(text !== undefined ? { textSha256: createHash("sha256").update(text).digest("hex") } : {}) }))
       .sort((a, b) => a.destination.localeCompare(b.destination)) });
     const recorded = db.prepare("SELECT detail FROM audit WHERE user_id=? AND action='assisted.batch_prepared' AND subject_id=? ORDER BY id LIMIT 1")
       .get(userId, batchId) as { detail: string | null } | undefined;
@@ -166,12 +170,13 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     const row = db.prepare("SELECT payload FROM drafts WHERE id=? AND user_id=?").get(draftId, userId) as DraftRow | undefined;
     const draft = row && validDraft(JSON.parse(row.payload));
     if (!draft || draft.id !== draftId) throw new Error("Saved draft not found.");
-    if (requested.some((item) => !draft.selected.includes(item.destination))) {
+    if (expectedUpdatedAt !== undefined && draft.updatedAt !== expectedUpdatedAt) throw new DraftConflictError();
+    if (requested.some((item) => isPlatformId(item.destination) && !draft.selected.includes(item.destination))) {
       throw new Error("Choose destinations selected in this saved draft.");
     }
     if (requireFreeSlots && requested.some((item) =>
-      Date.parse(item.scheduledFor) < Date.now() + 10_000 ||
-      !slotIsFree(db, userId, item.destination, item.scheduledFor))) {
+      isPlatformId(item.destination) && (Date.parse(item.scheduledFor) < Date.now() + 10_000 ||
+      !slotIsFree(db, userId, item.destination, item.scheduledFor)))) {
       throw new Error("A suggested slot is now occupied or too soon. Preview free slots again.");
     }
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
@@ -179,10 +184,13 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     assertOwnedMedia(userId, draft.mediaIds ?? []);
 
     const now = new Date().toISOString();
-    const prepared = requested.map(({ destination, scheduledFor }): AssistedPost => {
-      const text = draft.variants[destination] ?? adaptDraft(draft.source, destination);
-      if (!validatePlatformText(destination, text).valid) {
-        throw new Error(`Fix the saved ${destination} text before preparing this handoff.`);
+    const prepared = requested.map(({ destination, scheduledFor, text: reviewedText }): AssistedPost => {
+      const text = reviewedText ?? (isPlatformId(destination)
+        ? draft.variants[destination] ?? adaptDraft(draft.source, destination)
+        : draft.source);
+      if (!text.trim() || characterCount(text) > 5000 ||
+          (isPlatformId(destination) && !validatePlatformText(destination, text).valid)) {
+        throw new Error(`Fix the ${reviewedText === undefined ? "saved " : ""}${destination} text before preparing this handoff.`);
       }
       const item: AssistedPost = {
         id: randomUUID(), title: draftTitle(draft.title, draft.source), destination, text,
