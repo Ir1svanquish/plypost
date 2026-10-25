@@ -5,6 +5,7 @@ import { characterCount } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, providerConfig } from "@/lib/server/ai-provider";
 import { aiRateAllowed } from "@/lib/server/workspace";
+import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 
 export const runtime = "nodejs";
 
@@ -12,18 +13,11 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+  const body = await readBoundedJsonObject(request, 16_000);
+  if (body.kind === "too-large") return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+  if (body.kind === "invalid") return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
 
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "A source draft is required." }, { status: 400 });
-  }
-
-  const input = body as Record<string, unknown>;
+  const input = body.value;
   const source = typeof input.source === "string" ? input.source.trim() : "";
   const provider = input.provider;
   if (!source || characterCount(source) > 3000 || (provider !== "nebius" && provider !== "nvidia")) {

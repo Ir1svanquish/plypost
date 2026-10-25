@@ -77,3 +77,40 @@ test("Nebius routes use Nemotron through Token Factory and keep planning input l
     delete process.env.NEBIUS_API_KEY;
   }
 });
+
+test("oversized AI requests stop before model calls or rate-limit charges", async () => {
+  const owner = "bounded-ai@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-nebius-key";
+  const token = createSession(owner);
+  const headers = { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${token}`, "content-type": "application/json" };
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error("Oversized input reached the model"); };
+
+  function oversizedRequest(path, bytes) {
+    const stream = new globalThis.ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(8_000).fill(65));
+        controller.enqueue(new Uint8Array(bytes - 8_000).fill(65));
+        controller.close();
+      },
+    });
+    return new globalThis.Request(`http://localhost:3000${path}`, { method: "POST", headers, body: stream, duplex: "half" });
+  }
+
+  try {
+    const adapt = await adaptPost(oversizedRequest("/api/generate", 16_001));
+    const plan = await strategyPost(oversizedRequest("/api/strategy", 48_001));
+    assert.equal(adapt.status, 413);
+    assert.equal(plan.status, 413);
+    assert.equal(calls, 0);
+    assert.equal(database().prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE user_id=?").get(owner).count, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.NEBIUS_API_KEY;
+  }
+});

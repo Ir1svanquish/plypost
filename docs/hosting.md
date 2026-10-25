@@ -2,6 +2,16 @@
 
 Plypost currently runs on one Node.js process with a local SQLite database. A public judging copy needs its **own** database and owner account. Keep the local `data/` folder and `.env.local` off the host. Use HTTPS, set the Nebius key only in the host's server-side secret settings, and leave Bluesky/Mastodon connection settings unset. Do not run the worker for the judging demo. `GET /api/health` returns `200` only when the app can open its database; it does not reveal credentials or content.
 
+The AI routes require an owner session and allow ten requests per hour. They now stop oversized request bodies while reading them, before charging that allowance or calling the model. This limits accidental abuse of a shared judging login; it is not a spending cap for the Nebius account.
+
+## Using your own VPS
+
+A VPS can replace Render. It needs a stable public address, enough memory to build and run Node.js 24, persistent storage, and inbound ports 80/443. You do not need to buy a domain: a free DNS name such as a [DuckDNS subdomain](https://www.duckdns.org/) can point at the VPS. Prefer a stable name with automatically renewed HTTPS over publishing a bare HTTP IP address; production login cookies require HTTPS. The supplied Render Blueprint is not used on the VPS.
+
+Run one `next start` process bound to loopback behind an HTTPS reverse proxy, and keep it running with the VPS service manager. Next.js [recommends a reverse proxy](https://nextjs.org/docs/app/guides/self-hosting); [Caddy](https://caddyserver.com/docs/automatic-https) can manage certificates for a public DNS name. Use a dedicated service account, a separate SQLite path on persistent storage, a fresh owner password hash, and server-only Nebius credentials. Keep `.env.local`, the database and judge login details out of Git. Do not start the publishing worker for the judging copy. Download a full backup through Plypost before deployment changes; images and videos are stored in its SQLite database. Then verify `/api/health`, login, an AI call and data after a restart from outside the VPS.
+
+The exact install commands depend on the VPS operating system, memory, and whether it already runs a proxy. No VPS has been accessed or deployed by this project. A local production-server check accepted an HTTPS `Origin` forwarded through an HTTP proxy path and rejected a different origin; this is not a substitute for checking the actual VPS proxy.
+
 ## Low-cost choices
 
 Prices and limits checked 2026-10-25; confirm them in the provider dashboard before creating a service.

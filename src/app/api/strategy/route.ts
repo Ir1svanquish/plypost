@@ -8,6 +8,7 @@ import {
   saveBrandBrief, updateStrategyIdea,
 } from "@/lib/server/strategy";
 import { aiRateAllowed } from "@/lib/server/workspace";
+import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 
 export const runtime = "nodejs";
 
@@ -76,16 +77,10 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let input: Record<string, unknown>;
-  try {
-    const raw = await request.text();
-    if (raw.length > 16_000) return NextResponse.json({ error: "Request is too large." }, { status: 413 });
-    const value: unknown = JSON.parse(raw);
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid request.");
-    input = value as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+  const body = await readBoundedJsonObject(request, 48_000, 16_000);
+  if (body.kind === "too-large") return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+  if (body.kind === "invalid") return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  const input = body.value;
   try {
     switch (input.action) {
       case "save-brief":
