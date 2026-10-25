@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
+import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus, setDraftTargetDate, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
+const MAX_WORKSPACE_REQUEST_BYTES = 16 * 1024 * 1024;
 
 export async function GET(request: Request) {
   const user = currentUser(request);
@@ -14,8 +16,10 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; expectedScheduledFor?: unknown; expectedText?: unknown; text?: unknown; expectedMediaIds?: unknown; mediaIds?: unknown; expectedMediaAlt?: unknown; mediaAlt?: unknown; expectedVideoId?: unknown; videoId?: unknown; plannedDate?: unknown; timezone?: unknown; backup?: unknown; expectedUpdatedAt?: unknown };
-  try { input = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
+  const body = await readBoundedJsonObject(request, MAX_WORKSPACE_REQUEST_BYTES);
+  if (body.kind === "too-large") return NextResponse.json({ error: "Workspace request is too large." }, { status: 413 });
+  if (body.kind === "invalid") return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
+  const input = body.value;
   let assistedMigration: "imported" | "skipped" | undefined;
   let savedDraftResult: ReturnType<typeof saveDraft> | undefined;
   try {

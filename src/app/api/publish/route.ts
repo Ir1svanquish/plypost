@@ -4,6 +4,7 @@ import { validatePlatformText } from "@/lib/platform-validation";
 import { publishers } from "@/lib/publishers";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { audit } from "@/lib/server/db";
+import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 
 export const runtime = "nodejs";
 
@@ -11,12 +12,10 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+  const parsed = await readBoundedJsonObject(request, 48 * 1024);
+  if (parsed.kind === "too-large") return NextResponse.json({ error: "Publishing request is too large." }, { status: 413 });
+  if (parsed.kind === "invalid") return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  const body = parsed.value;
 
   if (!body || typeof body !== "object" || !("posts" in body)) {
     return NextResponse.json({ error: "Posts are required." }, { status: 400 });
