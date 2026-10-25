@@ -2,11 +2,11 @@
 
 import { useState, type FormEvent } from "react";
 import { CalendarClock, ChevronLeft, ChevronRight, RotateCcw, Trash2 } from "lucide-react";
-import { assistedState, hasManualReminder, localDateTimeValue, scheduleState, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { assistedState, hasManualReminder, localDateTimeValue, scheduleState, validCalendarDate, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 import { platformDisplayIds, platforms } from "@/lib/platforms";
 import { agendaForMonth, buildPlanAgenda, localAgendaDay, matchesPlanAgendaFilter, realMastodonNeedsAttention, type PlanAgendaFilter, type PlanAgendaItem, type RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations } from "@/lib/assisted";
-import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
+import { formatLocalDateTime, isValidLocalDateTime, LocalDateField, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 
 type Props = {
@@ -18,6 +18,7 @@ type Props = {
   onOpenAssisted: (item: AssistedPost) => void;
   onOpenDraft: (draft: SavedDraft) => void;
   onPrepareDraft: (draft: SavedDraft) => void;
+  onSetDraftTargetDate: (draft: SavedDraft, plannedDate: string | null) => Promise<void>;
   onOpenRealMastodon: (item: RealMastodonSchedule) => void;
   onPrepareManual: (localTime: string) => void;
 };
@@ -72,7 +73,21 @@ function nextManualTimeOnDay(day: string, now: number): string | null {
   return localAgendaDay(nextQuarter) === day ? localDateTimeValue(nextQuarter) : null;
 }
 
-export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, showRealMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onRescheduleAssisted, onOpenAssisted, onOpenDraft, onPrepareDraft, onOpenRealMastodon, onPrepareManual }: Props) {
+function DraftTargetForm({ draft, value, error, saving, onChange, onCancel, onSubmit }: {
+  draft: SavedDraft; value: string; error: string; saving: boolean;
+  onChange: (value: string) => void; onCancel: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return <form onSubmit={onSubmit} className="mt-3 rounded-xl border border-[var(--accent-border)] bg-[var(--surface-muted)] p-4">
+    <LocalDateField id={`target-date-${draft.id}`} label="Target day" value={value} onChange={onChange} />
+    {error && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{error}</p>}
+    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+      <button type="button" onClick={onCancel} disabled={saving} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Cancel</button>
+      <button type="submit" disabled={saving || (value ? !validCalendarDate(value) : !draft.plannedDate)} className="gradient-button rounded-lg px-3 py-2 text-[12px] font-bold text-white disabled:opacity-50">{saving ? "Saving…" : value ? "Save target day" : "Remove target day"}</button>
+    </div>
+  </form>;
+}
+
+export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, showRealMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onRescheduleAssisted, onOpenAssisted, onOpenDraft, onPrepareDraft, onSetDraftTargetDate, onOpenRealMastodon, onPrepareManual }: Props) {
   const [month, setMonth] = useState<Month>(() => {
     const today = new Date(now || Date.now());
     return { year: today.getFullYear(), index: today.getMonth() };
@@ -85,9 +100,16 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
   const [editValue, setEditValue] = useState("");
   const [editError, setEditError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showAllUndated, setShowAllUndated] = useState(false);
+  const [targetDraftId, setTargetDraftId] = useState<string | null>(null);
+  const [targetDate, setTargetDate] = useState("");
+  const [targetError, setTargetError] = useState("");
+  const [targetSaving, setTargetSaving] = useState(false);
   const queuedCount = schedule.filter((post) => post.status === "queued").length;
   const manualReminderCount = assisted.filter((post) => post.status === "queued" && hasManualReminder(post)).length;
   const datedDraftCount = drafts.filter((draft) => draft.plannedDate).length;
+  const undatedDrafts = drafts.filter((draft) => !draft.plannedDate).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const visibleUndated = showAllUndated ? undatedDrafts : undatedDrafts.slice(0, 5);
   const undatedChecklist = assisted.filter((post) => post.status === "queued" && !hasManualReminder(post));
   const realQueuedCount = realMastodon.filter((post) => post.status === "queued").length;
   const hasRealMastodon = showRealMastodon || realMastodon.length > 0;
@@ -150,6 +172,45 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
     window.requestAnimationFrame(() => document.getElementById("plan-agenda")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
+  function beginTargetDate(draft: SavedDraft) {
+    setTargetDraftId(draft.id);
+    setTargetDate(draft.plannedDate ?? selectedDay ?? "");
+    setTargetError("");
+  }
+
+  async function saveTargetDate(event: FormEvent<HTMLFormElement>, draft: SavedDraft) {
+    event.preventDefault();
+    if (targetDate && !validCalendarDate(targetDate)) {
+      setTargetError("Enter a real date as YYYY-MM-DD.");
+      return;
+    }
+    if (!targetDate && !draft.plannedDate) return;
+    if (targetDate === (draft.plannedDate ?? "")) {
+      setTargetDraftId(null);
+      return;
+    }
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      await onSetDraftTargetDate(draft, targetDate || null);
+      setTargetDraftId(null);
+      if (targetDate) {
+        const next = new Date(`${targetDate}T12:00:00`);
+        setMonth({ year: next.getFullYear(), index: next.getMonth() });
+        setSelectedDay(targetDate);
+        setFilter("all");
+        setShowAllDates(false);
+        window.requestAnimationFrame(() => document.getElementById("plan-agenda")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      } else {
+        window.requestAnimationFrame(() => document.getElementById("undated-drafts-heading")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }
+    } catch (cause) {
+      setTargetError(cause instanceof Error ? cause.message : "Could not update this draft's target date.");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
+
   function beginReschedule(post: ScheduledPost) {
     setEditingId(post.id);
     setEditValue(localDateTimeValue(new Date(post.scheduledFor)));
@@ -205,6 +266,14 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
       <div><h2 id="schedule-heading" className="text-[17px] font-bold">Content calendar</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Draft target dates, manual reminders{hasRealMastodon ? ", real Mastodon posts" : ""} and simulations in one place.</p></div>
       <div className="flex flex-wrap gap-2">{hasRealMastodon && <span className="rounded-full bg-[var(--positive-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--positive)]">{realQueuedCount} real Mastodon queued</span>}<button type="button" onClick={showDraftTargets} disabled={datedDraftCount === 0} className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:cursor-default">{datedDraftCount} dated drafts</button><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--accent-text)]">{queuedCount} simulated queued</span><span className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--warning)]">{manualReminderCount} manual reminders</span>{undatedChecklist.length > 0 && <button type="button" onClick={() => onOpenAssisted(undatedChecklist[0])} className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{undatedChecklist.length} undated {undatedChecklist.length === 1 ? "checklist item" : "checklist items"}</button>}</div>
     </div>
+    {undatedDrafts.length > 0 && <div className="border-t border-[var(--line)] px-6 py-5 sm:px-7" aria-labelledby="undated-drafts-heading">
+      <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 id="undated-drafts-heading" className="text-[15px] font-bold text-[var(--text)]">Drafts without a target day</h3><p className="mt-1 text-[12px] text-[var(--text-muted)]">Place an idea on the calendar when you know when to work on it. A target day does not set a reminder or publish it.</p></div><span className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[11px] font-bold text-[var(--text-secondary)]">{undatedDrafts.length} to plan</span></div>
+      <div className="mt-4 divide-y divide-[var(--line)] overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">{visibleUndated.map((draft) => <div key={draft.id} className="px-4 py-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="break-words text-[13px] font-bold text-[var(--text-secondary)]">{draft.title}</p>{draft.source.trim() && <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-[12px] text-[var(--text-muted)]">{draft.source}</p>}<p className="mt-1 text-[11px] text-[var(--text-soft)]">Updated {new Date(draft.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p></div><div className="flex shrink-0 flex-wrap gap-2"><button type="button" onClick={() => onOpenDraft(draft)} className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Open</button><button type="button" onClick={() => beginTargetDate(draft)} disabled={targetSaving} aria-expanded={targetDraftId === draft.id} className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-50">Set target day</button></div></div>
+        {targetDraftId === draft.id && <DraftTargetForm draft={draft} value={targetDate} error={targetError} saving={targetSaving} onChange={(next) => { setTargetDate(next); setTargetError(""); }} onCancel={() => setTargetDraftId(null)} onSubmit={(event) => void saveTargetDate(event, draft)} />}
+      </div>)}</div>
+      {undatedDrafts.length > 5 && <button type="button" onClick={() => setShowAllUndated((current) => !current)} aria-expanded={showAllUndated} className="mt-3 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">{showAllUndated ? "Show fewer" : `Show all ${undatedDrafts.length} drafts`}</button>}
+    </div>}
     <details className="border-t border-[var(--line)] px-6 py-4 sm:px-7">
       <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Demo simulation · optional</summary>
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -295,8 +364,9 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
                 {draft.source.trim() && <p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] text-[var(--text-secondary)]">{draft.source}</p>}
                 {linkedHandoffs.length > 0 && <p className="mt-2 text-[11px] text-[var(--text-muted)]">{linkedHandoffs.length} manual {linkedHandoffs.length === 1 ? "handoff" : "handoffs"} linked to this draft · {linkedHandoffs.filter((post) => post.status === "posted").length} marked posted by you</p>}
               </div>
-              <div className="flex flex-wrap gap-2 sm:justify-end"><button type="button" onClick={() => onOpenDraft(draft)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Open draft</button><button type="button" onClick={() => onPrepareDraft(draft)} className="self-start rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--surface-hover)]">Prepare handoffs</button></div>
+              <div className="flex flex-wrap gap-2 sm:justify-end"><button type="button" onClick={() => onOpenDraft(draft)} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Open draft</button><button type="button" onClick={() => beginTargetDate(draft)} disabled={targetSaving} aria-expanded={targetDraftId === draft.id} className="self-start rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Move target</button><button type="button" onClick={() => onPrepareDraft(draft)} className="self-start rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--surface-hover)]">Prepare handoffs</button></div>
             </div>
+            {targetDraftId === draft.id && <DraftTargetForm draft={draft} value={targetDate} error={targetError} saving={targetSaving} onChange={(next) => { setTargetDate(next); setTargetError(""); }} onCancel={() => setTargetDraftId(null)} onSubmit={(event) => void saveTargetDate(event, draft)} />}
           </article>;
         }
         if (item.kind === "real-mastodon") {

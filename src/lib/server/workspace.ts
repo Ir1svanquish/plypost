@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validMediaAlt, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
 import { validatePlatformText } from "../platform-validation";
@@ -494,6 +494,27 @@ export function saveDraft(userId: string, value: unknown, expectedUpdatedAt: unk
     Object.assign(draft, normalized);
   });
   return draft;
+}
+
+export function setDraftTargetDate(userId: string, id: unknown, expectedUpdatedAt: unknown, plannedDate: unknown): SavedDraft {
+  if (typeof id !== "string" || !validUuid(id) || typeof expectedUpdatedAt !== "string" ||
+      (plannedDate !== null && !validCalendarDate(plannedDate))) {
+    throw new Error("Choose a real target date or clear it.");
+  }
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM drafts WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
+    if (!row) throw new DraftConflictError("This draft was deleted or is no longer available. Refresh your drafts before planning it.");
+    const previous = JSON.parse(row.payload) as SavedDraft;
+    if (previous.updatedAt !== expectedUpdatedAt) throw new DraftConflictError();
+    const updatedAt = new Date(Math.max(Date.now(), Date.parse(previous.updatedAt) + 1)).toISOString();
+    const updated: SavedDraft = { ...previous, updatedAt };
+    if (plannedDate === null) delete updated.plannedDate;
+    else updated.plannedDate = plannedDate as string;
+    db.prepare("UPDATE drafts SET payload=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(JSON.stringify(updated), updatedAt, id, userId);
+    audit(userId, "draft.target_date_changed", id);
+    return updated;
+  });
 }
 
 export function deleteDraft(userId: string, id: string, expectedUpdatedAt: unknown) {

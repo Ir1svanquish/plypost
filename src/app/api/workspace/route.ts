@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "@/lib/server/workspace";
+import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus, setDraftTargetDate, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 
@@ -14,13 +14,14 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
-  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; expectedScheduledFor?: unknown; expectedText?: unknown; text?: unknown; expectedMediaIds?: unknown; mediaIds?: unknown; expectedMediaAlt?: unknown; mediaAlt?: unknown; expectedVideoId?: unknown; videoId?: unknown; timezone?: unknown; backup?: unknown; expectedUpdatedAt?: unknown };
+  let input: { action?: string; item?: unknown; id?: unknown; ids?: unknown; draftId?: unknown; batchId?: unknown; status?: unknown; postUrl?: unknown; outcome?: unknown; items?: unknown; requireFreeSlots?: unknown; scheduledFor?: unknown; expectedScheduledFor?: unknown; expectedText?: unknown; text?: unknown; expectedMediaIds?: unknown; mediaIds?: unknown; expectedMediaAlt?: unknown; mediaAlt?: unknown; expectedVideoId?: unknown; videoId?: unknown; plannedDate?: unknown; timezone?: unknown; backup?: unknown; expectedUpdatedAt?: unknown };
   try { input = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
   let assistedMigration: "imported" | "skipped" | undefined;
   let savedDraftResult: ReturnType<typeof saveDraft> | undefined;
   try {
     switch (input.action) {
       case "save-draft": savedDraftResult = saveDraft(user, input.item, input.expectedUpdatedAt); break;
+      case "set-draft-target-date": savedDraftResult = setDraftTargetDate(user, input.id, input.expectedUpdatedAt, input.plannedDate); break;
       case "delete-draft": if (typeof input.id !== "string" || !deleteDraft(user, input.id, input.expectedUpdatedAt)) throw new Error("Draft not found."); break;
       case "add-assisted": addAssisted(user, input.item); break;
       case "prepare-assisted-batch": prepareAssistedBatch(user, input.draftId, input.batchId, input.items, input.requireFreeSlots, input.expectedUpdatedAt); break;

@@ -158,6 +158,27 @@ test("stale draft saves return a conflict instead of overwriting newer content",
   assert.equal((await loaded.json()).drafts.find((item) => item.id === draft.id).source, "Newer");
 });
 
+test("calendar target changes preserve saved text and require the current draft version", async () => {
+  const stamp = new Date().toISOString();
+  const draft = { id: randomUUID(), title: "Calendar idea", source: "Keep this text", selected: ["bluesky"], variants: { bluesky: "Keep this version" }, createdAt: stamp, updatedAt: stamp };
+  const created = await post("/api/workspace", { action: "save-draft", item: draft, expectedUpdatedAt: null });
+  assert.equal(created.status, 200);
+  const first = (await created.json()).savedDraft;
+  const request = { action: "set-draft-target-date", id: draft.id, expectedUpdatedAt: first.updatedAt, plannedDate: "2026-11-04" };
+  assert.equal((await post("/api/workspace", request, false)).status, 401);
+  const changed = await post("/api/workspace", request);
+  assert.equal(changed.status, 200);
+  const saved = (await changed.json()).savedDraft;
+  assert.equal(saved.plannedDate, "2026-11-04");
+  assert.equal(saved.source, draft.source);
+  assert.deepEqual(saved.variants, draft.variants);
+  assert.equal((await post("/api/workspace", request)).status, 409);
+  assert.equal((await post("/api/workspace", { ...request, expectedUpdatedAt: saved.updatedAt, plannedDate: "2026-11-31" })).status, 400);
+  const cleared = await post("/api/workspace", { ...request, expectedUpdatedAt: saved.updatedAt, plannedDate: null });
+  assert.equal(cleared.status, 200);
+  assert.equal((await cleared.json()).savedDraft.plannedDate, undefined);
+});
+
 test("reschedule route requires the owner session and validates UTC time and timezone", async () => {
   const original = new Date(Date.now() + 60_000);
   const moved = new Date(Date.now() + 180_000);

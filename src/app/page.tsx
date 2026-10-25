@@ -228,6 +228,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt, videoId, plannedDate };
   const editorContentRef = useRef(editorContent);
   editorContentRef.current = editorContent;
+  const currentDraftIdRef = useRef(currentDraftId);
+  currentDraftIdRef.current = currentDraftId;
   const canSaveEditor = hasDraftContent(editorContent) && (!plannedDate || validCalendarDate(plannedDate));
   const editorDirty = hasUnsavedEditorChanges(editorContent, currentDraftId, drafts, editorOrigin);
   const currentSavedDraft = currentDraftId ? drafts.find((draft) => draft.id === currentDraftId) ?? null : null;
@@ -916,6 +918,37 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
+  async function setDraftTargetDate(draft: SavedDraft, nextDate: string | null): Promise<void> {
+    if (draftSaveBusyRef.current || restoringBackupRef.current) throw new Error("Wait for the current save or backup restore to finish.");
+    if (nextDate !== null && !validCalendarDate(nextDate)) throw new Error("Enter a real target date as YYYY-MM-DD.");
+    const editingThisDraft = currentDraftIdRef.current === draft.id;
+    if (editingThisDraft && (editorDirty || needsDraftRecovery)) throw new Error("Save or resolve the open draft's changes before changing its target day here.");
+    const revisionAtStart = editorRevision.current;
+    try {
+      const data = await changeWorkspace("set-draft-target-date", { id: draft.id, expectedUpdatedAt: draft.updatedAt, plannedDate: nextDate });
+      const saved = data.savedDraft as SavedDraft | undefined;
+      if (!saved || saved.id !== draft.id) throw new Error("The target day changed, but its saved version could not be confirmed. Reload before editing this draft.");
+      if (editingThisDraft && currentDraftIdRef.current === draft.id) {
+        if (editorRevision.current === revisionAtStart) {
+          setPlannedDate(saved.plannedDate ?? "");
+          setCurrentDraftVersion(saved.updatedAt);
+          setNotice({ kind: "success", text: nextDate ? "Draft target day saved. No reminder or post was created." : "Draft target day removed." });
+        } else {
+          setDraftConflict(true);
+          setNotice({ kind: "error", text: "Target day saved, but the editor changed while saving. Review those edits before updating this draft again." });
+        }
+      } else {
+        setNotice({ kind: "success", text: nextDate ? "Draft target day saved. No reminder or post was created." : "Draft target day removed." });
+      }
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "DRAFT_CONFLICT") {
+        void refreshWorkspace().catch(() => {});
+      }
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not update this draft's target day." });
+      throw error;
+    }
+  }
+
   async function addToPlan() {
     if (mediaBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the image operation to finish before adding this plan item." });
@@ -1536,7 +1569,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           <div hidden={view !== "schedule"}>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">{showMastodonQueue ? "See real Mastodon posts, simulations and manual handoffs together." : "Plan drafts, simulations and manual handoffs in one place."}</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{canSaveEditor ? draftTitle(title, source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "") : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
-            <ServerSchedulePanel drafts={drafts} schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenDraft={loadDraft} onPrepareDraft={prepareDraftHandoffs} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
+            <ServerSchedulePanel drafts={drafts} schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenDraft={loadDraft} onPrepareDraft={prepareDraftHandoffs} onSetDraftTargetDate={setDraftTargetDate} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
             <PostingResultsPanel posts={assisted} onOpenRecord={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onReuseText={(item) => requestEditorSwitch({ kind: "assisted", post: item })} />
             <details className="mt-6"><summary className="cursor-pointer rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] font-bold text-[var(--text-secondary)]">Weekly posting slots · set recurring times for manual handoffs</summary><div className="mt-3"><WeeklySlotsPanel key={slotsRefreshEpoch} /></div></details>
             <div hidden={!showMastodonQueue}><MastodonSchedulePanel items={realMastodonSchedules} onItemsChange={setRealMastodonSchedules} onLoadErrorChange={setRealMastodonQueueError} connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected={selected.includes("mastodon")} text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} now={now} visible={view === "schedule"} workerLastSeen={workerLastSeen} onOpenAccount={() => openView("account")} onOpenEditor={() => openView("compose")} /></div>

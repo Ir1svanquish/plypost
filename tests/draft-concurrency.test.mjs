@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase } from "../src/lib/server/db.ts";
-import { deleteDraft, DraftConflictError, importLibrary, listWorkspace, saveDraft } from "../src/lib/server/workspace.ts";
+import { deleteDraft, DraftConflictError, importLibrary, listWorkspace, saveDraft, setDraftTargetDate } from "../src/lib/server/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-draft-concurrency-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "drafts.sqlite");
@@ -55,6 +55,27 @@ test("draft target dates persist, can move or clear, and never create jobs", () 
   delete withoutDate.plannedDate;
   const cleared = saveDraft(owner, withoutDate, moved.updatedAt);
   assert.equal(cleared.plannedDate, undefined);
+  assert.equal(listWorkspace(owner).schedule.length, 0);
+});
+
+test("planning a saved draft changes only its target day and rejects stale or foreign edits", () => {
+  const saved = saveDraft(owner, { ...initial("A reusable idea"), variants: { bluesky: "Version for Bluesky" } });
+  const planned = setDraftTargetDate(owner, saved.id, saved.updatedAt, "2026-11-04");
+  assert.equal(planned.plannedDate, "2026-11-04");
+  assert.equal(planned.source, saved.source);
+  assert.deepEqual(planned.variants, saved.variants);
+  assert.equal(planned.createdAt, saved.createdAt);
+  assert.ok(planned.updatedAt > saved.updatedAt);
+  assert.equal(listWorkspace(owner).schedule.length, 0);
+
+  assert.throws(() => setDraftTargetDate(owner, saved.id, saved.updatedAt, "2026-11-05"), DraftConflictError);
+  assert.throws(() => setDraftTargetDate("another-owner@example.test", saved.id, planned.updatedAt, "2026-11-05"), DraftConflictError);
+  assert.throws(() => setDraftTargetDate(owner, saved.id, planned.updatedAt, "2026-11-31"), /real target date/);
+  assert.equal(listWorkspace(owner).drafts.find((draft) => draft.id === saved.id)?.plannedDate, "2026-11-04");
+
+  const cleared = setDraftTargetDate(owner, saved.id, planned.updatedAt, null);
+  assert.equal(cleared.plannedDate, undefined);
+  assert.equal(cleared.source, saved.source);
   assert.equal(listWorkspace(owner).schedule.length, 0);
 });
 
