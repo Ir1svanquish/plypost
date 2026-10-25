@@ -2,9 +2,9 @@
 
 拟参加 [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/rules) 的 **Best Apps and Agents** 赛道。截止时间为 2026 年 10 月 30 日 10:00 PDT。官方规则要求应用运行时调用 Nebius Token Factory 或部署在 Nebius AI Cloud，并使用至少一个 NVIDIA 开源模型。
 
-Plypost 的默认 AI 路径是服务端请求 Nebius Token Factory 的 `/v1/chat/completions`，模型为 NVIDIA Nemotron 3 Super（`nvidia/nemotron-3-super-120b-a12b`）。用户明确点击后，应用才发送当前草稿用于逐平台改写，或发送已保存的品牌资料用于一周选题；生成内容必须由用户检查、修改和确认。AI 不负责自动向社交平台发帖。
+Plypost 在服务端请求 Nebius Token Factory 的 `/v1/chat/completions`。文字改写、旧帖风格提炼、参考结构提炼和一周选题使用 NVIDIA Nemotron 3 Super（`nvidia/nemotron-3-super-120b-a12b`）；看图起稿使用 NVIDIA Nemotron 3.5 Super VL（`nvidia/Nemotron-3.5-Super-VL`）。旧帖、图片、当前草稿或品牌资料分别只在用户点击对应生成操作时发送。旧帖原文不保存；提炼出的个人风格指南保存在用户工作区及完整备份中。图片起稿先展示视觉观察与可编辑文案；AI 不自动向社交平台发帖。
 
-本机验证记录（2026-10-25）：Token Factory 模型列表包含该模型；用固定样例文案与虚构品牌资料分别调用 Nemotron 3 Super，返回四个平台的可解析文案与一周选题。另从本机生产构建的 HTTP 接口完成登录、文案生成、品牌资料保存及周计划生成，结果写入隔离的测试数据库。`npm run typecheck`、`npm run lint`、158 项测试和 `npm run build` 通过；独立演示进程的开发模式与生产构建模式都完成登录及草稿、人工待办、排程的 HTTP 读取。计划页的新日期操作在生产构建的隔离演示账号下完成了清除、重新设定及手机宽度检查。写帖页的空白起点和逐平台预览在 390px 手机视图检查过。生产构建的 `/api/health` 返回 200，且数据库无法打开时返回 503。密钥只在本机被 Git 忽略的 `.env.local` 中使用；仓库不包含密钥。以上仍不能代替公开演示或正式提交。
+本机验证记录（2026-10-25）：Token Factory 模型列表显示文字模型和视觉模型可用；用固定样例文案与虚构品牌资料分别调用 Nemotron 3 Super，返回四个平台的可解析文案与一周选题。另用程序生成的纯色图片调用 Nemotron 3.5 Super VL，返回可解析的视觉观察与文案。本机生产构建的 HTTP 接口完成过登录、文案生成、品牌资料保存及周计划生成，结果写入隔离的测试数据库。自动测试覆盖手动选样、账号隔离、图片传输格式、风格指南备份与恢复。密钥只在本机被 Git 忽略的 `.env.local` 中使用；仓库不包含密钥。公开演示仍需部署本次更新并在 Render 实例验收；本机验证不能代替正式提交。
 
 现有[本机演示流程](demo.md)使用独立的虚构品牌、草稿、排程和人工发布待办。它只是可复现的本机样例；标记为“已发布”的样例没有向平台发帖，预填内容也不是模型生成。现场 AI 演示须配置 Nebius 密钥并由演示者点击生成。
 

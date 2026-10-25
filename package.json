@@ -16,6 +16,7 @@
     "demo:test-build": "node --import=tsx scripts/demo.ts --production",
     "worker": "tsx scripts/worker.ts",
     "smoke:nebius": "node --env-file=.env.local --import=tsx scripts/smoke-nebius.ts",
+    "smoke:vision": "node --env-file=.env.local --import=tsx scripts/smoke-vision.ts",
     "hash-password": "tsx scripts/hash-password.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

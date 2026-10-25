@@ -7,6 +7,7 @@ import { listVideos, MAX_OWNER_VIDEO_BYTES, MAX_OWNER_VIDEO_COUNT, MAX_VIDEO_BYT
 import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { parseBrandBrief, parseWeeklyPlan, type BrandBrief, type WeeklyPlan } from "../strategy";
 import { parseSlotSettings, type SlotSettings } from "../slot-settings";
+import { parseVoiceProfile, type VoiceProfile } from "../ai-studio";
 
 export const MAX_PORTABLE_BACKUP_BYTES = 192 * 1024 * 1024;
 
@@ -51,7 +52,7 @@ type PortableVideo = {
 };
 export type PortableBackup = {
   format: "plypost-portable";
-  version: 4;
+  version: 5;
   exportedAt: string;
   drafts: SavedDraft[];
   jobs: PortableJob[];
@@ -59,6 +60,7 @@ export type PortableBackup = {
   media: PortableMedia[];
   videos: PortableVideo[];
   brandBrief: BrandBrief | null;
+  voiceProfile: VoiceProfile | null;
   weeklyPlans: WeeklyPlan[];
   slotSettings: SlotSettings | null;
 };
@@ -243,6 +245,14 @@ function validateSlots(raw: Record<string, unknown>): SlotSettings | null {
   return settings;
 }
 
+function validateVoiceProfile(raw: Record<string, unknown>): VoiceProfile | null {
+  if (raw.version !== 5) return null;
+  if (raw.voiceProfile === null) return null;
+  const profile = parseVoiceProfile(raw.voiceProfile);
+  if (!profile || !isDeepStrictEqual(profile, raw.voiceProfile)) invalid("Backup contains an invalid writing style guide.");
+  return profile;
+}
+
 function assertUniqueIds(items: { id: string }[]) {
   if (new Set(items.map((item) => item.id)).size !== items.length) invalid("Backup contains duplicate IDs.");
 }
@@ -378,6 +388,7 @@ function ownerDataFingerprint(db: ReturnType<typeof database>, userId: string): 
     "SELECT id,sha256,byte_size FROM media WHERE user_id=? ORDER BY id",
     "SELECT id,sha256,byte_size FROM videos WHERE user_id=? ORDER BY id",
     "SELECT user_id,payload FROM brand_briefs WHERE user_id=?",
+    "SELECT user_id,guide,updated_at FROM voice_profiles WHERE user_id=?",
     "SELECT id,payload,created_at FROM weekly_plans WHERE user_id=? ORDER BY id",
     "SELECT user_id,payload,updated_at FROM slot_settings WHERE user_id=?",
   ];
@@ -418,17 +429,20 @@ export function exportPortableBackup(userId: string): string {
     const briefRow = db.prepare("SELECT payload FROM brand_briefs WHERE user_id=?")
       .get(userId) as { payload: string } | undefined;
     const brandBrief = briefRow ? JSON.parse(briefRow.payload) as BrandBrief : null;
+    const voiceRow = db.prepare("SELECT guide,updated_at FROM voice_profiles WHERE user_id=?")
+      .get(userId) as { guide: string; updated_at: string } | undefined;
+    const voiceProfile = voiceRow ? { guide: voiceRow.guide, updatedAt: voiceRow.updated_at } : null;
     const weeklyPlans = db.prepare("SELECT payload FROM weekly_plans WHERE user_id=? ORDER BY created_at DESC,id")
       .all(userId).map((row) => JSON.parse((row as { payload: string }).payload) as WeeklyPlan);
     const slotRow = db.prepare("SELECT payload FROM slot_settings WHERE user_id=?")
       .get(userId) as { payload: string } | undefined;
     const slotSettings = slotRow ? JSON.parse(slotRow.payload) as SlotSettings : null;
-    return { drafts, assisted, jobs, media, videos, brandBrief, weeklyPlans, slotSettings };
+    return { drafts, assisted, jobs, media, videos, brandBrief, voiceProfile, weeklyPlans, slotSettings };
   });
   const archive: PortableBackup = {
-    format: "plypost-portable", version: 4, exportedAt: new Date().toISOString(),
+    format: "plypost-portable", version: 5, exportedAt: new Date().toISOString(),
     drafts: snapshot.drafts, jobs: snapshot.jobs, assisted: snapshot.assisted,
-    brandBrief: snapshot.brandBrief, weeklyPlans: snapshot.weeklyPlans,
+    brandBrief: snapshot.brandBrief, voiceProfile: snapshot.voiceProfile, weeklyPlans: snapshot.weeklyPlans,
     slotSettings: snapshot.slotSettings,
     media: snapshot.media.map((row) => {
       const body = Buffer.from(row.body);
@@ -453,6 +467,7 @@ export function exportPortableBackup(userId: string): string {
   };
   const validated = validateWorkspace(archive);
   validateStrategy(archive);
+  validateVoiceProfile(archive);
   validateSlots(archive);
   if (archive.videos.length > MAX_OWNER_VIDEO_COUNT ||
       archive.videos.reduce((total, item) => total + item.sizeBytes, 0) > MAX_OWNER_VIDEO_BYTES) {
@@ -483,18 +498,19 @@ export function exportPortableBackup(userId: string): string {
 }
 
 export async function importPortableBackup(userId: string, raw: unknown) {
-  if (!isRecord(raw) || raw.format !== "plypost-portable" || (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4) ||
+  if (!isRecord(raw) || raw.format !== "plypost-portable" || (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4 && raw.version !== 5) ||
       !validInstant(raw.exportedAt)) invalid("This is not a supported Plypost portable backup.");
   const workspace = validateWorkspace(raw);
-  if (raw.version !== 4 && [...workspace.drafts, ...workspace.assisted].some((item) => item.videoId)) invalid("Backup references videos without including their files.");
+  if (raw.version !== 4 && raw.version !== 5 && [...workspace.drafts, ...workspace.assisted].some((item) => item.videoId)) invalid("Backup references videos without including their files.");
   const strategy = validateStrategy(raw);
+  const voiceProfile = validateVoiceProfile(raw);
   const slotSettings = validateSlots(raw);
   listMedia(userId);
   listVideos(userId);
   // Reject a restore if another tab or request changes this account while assets are prepared.
   const startingData = transaction((db) => ownerDataFingerprint(db, userId));
   const media = await prepareMedia(raw.media);
-  const videos = prepareVideos(raw.version === 4 ? raw.videos : []);
+  const videos = prepareVideos(raw.version === 4 || raw.version === 5 ? raw.videos : []);
   const allIds = [
     ...workspace.drafts.map((item) => item.id), ...workspace.jobs.map((item) => item.post.id),
     ...workspace.assisted.map((item) => item.id), ...media.map((item) => item.oldId), ...videos.map((item) => item.oldId),
@@ -540,6 +556,7 @@ export async function importPortableBackup(userId: string, raw: unknown) {
     db.prepare("DELETE FROM jobs WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM assisted WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM brand_briefs WHERE user_id=?").run(userId);
+    db.prepare("DELETE FROM voice_profiles WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM weekly_plans WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM slot_settings WHERE user_id=?").run(userId);
     db.prepare("DELETE FROM media WHERE user_id=?").run(userId);
@@ -570,6 +587,10 @@ export async function importPortableBackup(userId: string, raw: unknown) {
     if (strategy.brandBrief) {
       db.prepare("INSERT INTO brand_briefs(user_id,payload) VALUES (?,?)")
         .run(userId, JSON.stringify(strategy.brandBrief));
+    }
+    if (voiceProfile) {
+      db.prepare("INSERT INTO voice_profiles(user_id,guide,updated_at) VALUES (?,?,?)")
+        .run(userId, voiceProfile.guide, voiceProfile.updatedAt);
     }
     for (const plan of weeklyPlans) {
       db.prepare("INSERT INTO weekly_plans(id,user_id,payload,created_at) VALUES (?,?,?,?)")

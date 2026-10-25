@@ -63,7 +63,7 @@ test("portable backup restores image pixels and saved records in a fresh databas
   const exported = exportPortableBackup(owner);
   const archive = JSON.parse(exported);
   assert.equal(archive.format, "plypost-portable");
-  assert.equal(archive.version, 4);
+  assert.equal(archive.version, 5);
   assert.deepEqual(archive.videos, []);
   assert.deepEqual(archive.slotSettings, weeklySlots);
   assert.equal(archive.brandBrief, null);
@@ -317,7 +317,7 @@ test("full backup preserves brand details, reviewed ideas, and their remapped dr
   }]);
   const originalDraft = approveStrategyIdea(sourceOwner, plan.id, plan.ideas[0].id);
   const archive = JSON.parse(exportPortableBackup(sourceOwner));
-  assert.equal(archive.version, 4);
+  assert.equal(archive.version, 5);
   assert.equal(archive.brandBrief.brandName, "Plypost");
   assert.equal(archive.weeklyPlans[0].ideas[0].draftId, originalDraft.id);
 

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { parseGeneratedVariants } from "@/lib/generated-variants";
+import { parseGuide } from "@/lib/ai-studio";
 import { variantMessages } from "@/lib/ai-prompts";
 import { characterCount } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import { reserveAiRequest } from "@/lib/server/workspace";
+import { loadVoiceProfile } from "@/lib/server/voice-profile";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 
 export const runtime = "nodejs";
@@ -19,12 +21,17 @@ export async function POST(request: Request) {
 
   const input = body.value;
   const source = typeof input.source === "string" ? input.source.trim() : "";
-  if (!source || characterCount(source) > 3000 || (input.provider !== undefined && input.provider !== "nebius")) {
+  const referenceGuide = input.referenceGuide === undefined || input.referenceGuide === "" ? null : parseGuide(input.referenceGuide);
+  if (!source || characterCount(source) > 3000 || (input.provider !== undefined && input.provider !== "nebius") ||
+      (input.useVoice !== undefined && typeof input.useVoice !== "boolean") ||
+      (input.referenceGuide !== undefined && input.referenceGuide !== "" && !referenceGuide)) {
     return NextResponse.json(
       { error: "Enter up to 3,000 characters. Nebius Token Factory is the only AI provider." },
       { status: 400 },
     );
   }
+  const voice = input.useVoice ? loadVoiceProfile(user)?.guide : undefined;
+  if (input.useVoice && !voice) return NextResponse.json({ error: "Analyze your writing style first, or turn off the voice guide." }, { status: 400 });
 
   const config = nebiusConfig();
   if (!config.key) {
@@ -46,7 +53,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: config.model,
-        messages: variantMessages(source),
+        messages: variantMessages(source, { voice, reference: referenceGuide ?? undefined }),
         temperature: 0.2,
         max_tokens: 1200,
         stream: false,

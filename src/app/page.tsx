@@ -13,7 +13,6 @@ import {
   RotateCcw,
   Send,
   UserRound,
-  WandSparkles,
 } from "lucide-react";
 import { adaptDraft, characterCount, isPlatformId, platformDisplayIds, platformIds, platforms, type PlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
@@ -27,6 +26,7 @@ import { WeeklySlotsPanel } from "@/components/weekly-slots-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
 import { AIReviewPanel } from "@/components/ai-review-panel";
+import { AIWritingPanel } from "@/components/ai-writing-panel";
 import { PlatformPreview } from "@/components/platform-preview";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
@@ -651,7 +651,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setNotice(null);
   }
 
-  async function generateVariants() {
+  async function generateVariants(useVoice = false, referenceGuide: string | null = null) {
     if (!source.trim()) {
       setNotice({ kind: "error", text: "Add a source draft before asking AI to adapt it." });
       return;
@@ -664,7 +664,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source }),
+        body: JSON.stringify({ source, useVoice, referenceGuide: referenceGuide ?? "" }),
       });
       const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: OverLimitVariant[] } = await response.json();
       if (!response.ok) throw new Error(data.error || "AI adaptation failed.");
@@ -1589,9 +1589,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                       </div>
                     </div>
                   </div>
-                  <details className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
-                    <summary className="cursor-pointer text-[13px] font-bold text-[var(--text-secondary)]">Adapt with AI <span className="ml-1 text-[11px] font-normal text-[var(--text-soft)]">Optional · Nemotron</span></summary>
-                    <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-[12px] leading-5 text-[var(--text-muted)]">Nebius Token Factory · NVIDIA Nemotron 3 Super. Only this draft text is sent when you click Generate.</p><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : aiReview ? "Regenerate suggestions" : "Generate variants"}</button></div>
+                  <AIWritingPanel source={source} mediaIds={mediaIds} generating={generating} hasReview={Boolean(aiReview)}
+                    onGenerate={(useVoice, referenceGuide) => { void generateVariants(useVoice, referenceGuide); }}
+                    onInsertCaption={(caption) => { editorRevision.current += 1; setSource((current) => current.trim() ? `${current.trim()}\n\n${caption}` : caption); setAiReview(null); setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." }); }} />
                     {aiReview && <AIReviewPanel
                       source={aiReview.source}
                       original={aiReview.original}
@@ -1608,7 +1608,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                       onDiscard={() => { setAiReview(null); setNotice(null); }}
                     />}
                     {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setAiReview(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
-                  </details>
                   <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3" open={plannedDate ? true : undefined}>
                     <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Draft target date · {plannedDate || "optional"}</summary>
                     <div className="mt-3"><LocalDateField id="draft-planned-date" label="Target day" value={plannedDate} onChange={(next) => { editorRevision.current += 1; setPlannedDate(next); }} /></div>
