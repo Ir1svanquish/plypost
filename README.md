@@ -2,9 +2,11 @@
 
 [MIT License](LICENSE)
 
-Plypost 是一个本机运行的多平台发帖工作台。写一份草稿，再按平台改文案、存图片、设提醒。它目前没有云端服务。
+Plypost 是一个多平台发帖工作台。写一份草稿，再按平台改文案、存图片、设提醒。可在本机运行；[公开演示站](https://plypost.onrender.com/)由单实例 Render 服务托管，GitHub 更新需要手动部署。
 
 新草稿从空白开始，不预选平台。先写想法或只存标题，再选择要预览的平台；旧版示例文案只有在完全未改动时才会从浏览器编辑缓存中清除。演示模拟入口收在写帖页的次要选项里。
+
+桌面端点击侧栏里的 Plypost 标识可收起或展开导航；窄屏点击页首标识可打开导航抽屉。
 
 ## 现在能做什么
 
@@ -17,7 +19,7 @@ Plypost 是一个本机运行的多平台发帖工作台。写一份草稿，再
 - 在日历中的草稿可以直接进入逐平台人工发布准备。日历会显示同一草稿已有多少条人工待办，以及目标日是否已经过去；点击“Prepare handoffs”仍需逐平台检查并确认，不会直接发帖。
 - 批量准备时若不填写提醒时间，待办只留在 Assisted 清单，不会被计入到期提醒或出现在日期日历。旧版已保存的待办仍按其原记录显示，可逐条移除不需要的提醒。
 - 发布后可手动记录浏览量、点赞、回复和备注。计划页汇总最近录入的单篇结果，可打开原记录，或从已发布文案开始一篇未保存的新草稿。指标和备注由你录入，Plypost 不验证、不用于 AI 周计划，也不跨平台排名；若后来对草稿手动点击 AI 文案改写，草稿文字会按该功能的提示发送。
-- 配置 Nebius Token Factory 后，可用其托管的 NVIDIA Nemotron 3 Super 手动生成逐平台文案和一周选题；NVIDIA API 仍可作为另一种配置。不配置也能使用草稿和人工发布功能。逐平台文案会先标出有无改动，展开后标出替换与新增的片段；只有勾选并应用的版本才替换编辑器内容。一周选题也须经人审阅后才能变成草稿。
+- 配置 Nebius Token Factory 后，可用其托管的 NVIDIA Nemotron 3 Super 手动生成逐平台文案和一周选题。不配置也能使用草稿和人工发布功能。逐平台文案会先标出有无改动，展开后标出替换与新增的片段；只有勾选并应用的版本才替换编辑器内容。一周选题也须经人审阅后才能变成草稿。
 
 另有 Bluesky 和 Mastodon 的纯文字发帖入口，以及 Mastodon 的本机定时队列。这些入口**尚未经过真实账号验收**。定时队列依赖本机 worker；电脑休眠或进程关闭时不会准时执行。图片目前只用于人工发布。
 
@@ -43,7 +45,7 @@ npm run hash-password
 
 | 功能 | 配置 |
 | --- | --- |
-| AI 文案与选题 | 默认使用 Nebius Token Factory 上的 `nvidia/nemotron-3-super-120b-a12b`；在 `.env.local` 中填写 `NEBIUS_API_KEY` 即可。可用 `NEBIUS_MODEL` 覆盖模型；若要走 NVIDIA 的独立接口，则另填 `NVIDIA_API_KEY` 并在界面选择。点击文案改写会发送当前草稿文字；点击生成周计划只发送已保存的品牌资料，不发送发帖结果。 |
+| AI 文案与选题 | 仅使用 Nebius Token Factory 上的 `nvidia/nemotron-3-super-120b-a12b`；在 `.env.local` 或服务器的密钥设置中填写 `NEBIUS_API_KEY`。点击文案改写会发送当前草稿文字；点击生成周计划只发送已保存的品牌资料，不发送发帖结果。 |
 | AI 调用额度 | 每个账号每小时最多请求 10 次，两种 AI 功能共用额度，记录存在 SQLite 中。公开演示可额外设置 `PLYPOST_AI_DAILY_LIMIT`（1–240）限制滚动 24 小时内的总请求；留空则只用每小时限制。这不是 Nebius 账户的费用上限。 |
 | Bluesky 账号 | 填写 `PLYPOST_BLUESKY_ORIGIN` 和 `PLYPOST_BLUESKY_SECRET`，然后在 **Account** 中连接。浏览器地址须与配置一致。 |
 | Mastodon 账号 | 有账号时再填写 `PLYPOST_MASTODON_INSTANCE`、`PLYPOST_PUBLIC_ORIGIN` 和 `PLYPOST_MASTODON_SECRET`。可用 `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` 暂停新的定时任务和后续派发，改动后须重启应用与 worker。 |
@@ -63,8 +65,8 @@ npm test
 npm run build
 ```
 
-当前只有本机构建，没有线上部署。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-25，`npm audit --omit=dev --audit-level=high` 报出 15 条高危依赖路径，均关联 Bluesky OAuth 依赖所用的 Zod 3 与[这项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开启用 Bluesky 登录前须重新评估或等待兼容修复。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
+公开演示站的首页和 `/api/health` 已从外部网络返回 200；登录、AI 调用及重启后的持久保存仍需在该实例上验收。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-25，`npm audit --omit=dev --audit-level=high` 报出 15 条高危依赖路径，均关联 Bluesky OAuth 依赖所用的 Zod 3 与[这项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开启用 Bluesky 登录前须重新评估或等待兼容修复。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
 
-评委可访问的演示还需独立托管；低成本主机、持久存储和上线验收步骤见[托管方案](docs/hosting.md)。
+演示站的持久存储和上线验收步骤见[托管方案](docs/hosting.md)。
 
-仓库另备有可选的 [Render Blueprint](render.yaml)，用于单实例、持久磁盘的评委演示。它只是一份部署配置；使用时会创建付费服务，目前尚未在 Render 建立或验证。
+仓库另备有可选的 [Render Blueprint](render.yaml)，用于重建单实例、持久磁盘的评委演示。当前线上服务是手动创建的，尚未通过该 Blueprint 重建。

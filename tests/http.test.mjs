@@ -43,7 +43,7 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
   server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", String(port)], {
     cwd: process.cwd(),
-    env: { ...process.env, NVIDIA_API_KEY: "", NEBIUS_API_KEY: "", NEBIUS_MODEL: "", PLYPOST_OWNER_EMAIL: ownerEmail, PLYPOST_OWNER_PASSWORD_HASH: passwordHash(ownerPassword), PLYPOST_DB_PATH: dbPath },
+    env: { ...process.env, NEBIUS_API_KEY: "", PLYPOST_OWNER_EMAIL: ownerEmail, PLYPOST_OWNER_PASSWORD_HASH: passwordHash(ownerPassword), PLYPOST_DB_PATH: dbPath },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
@@ -112,10 +112,10 @@ test("Bluesky simulation and planning apply grapheme and UTF-8 byte limits consi
 });
 
 test("AI endpoint explains missing server key without exposing one", async () => {
-  const response = await post("/api/generate", { source: "A new product idea", provider: "nvidia" });
+  const response = await post("/api/generate", { source: "A new product idea" });
   assert.equal(response.status, 503);
   const data = await response.json();
-  assert.match(data.error, /NVIDIA_API_KEY/);
+  assert.match(data.error, /NEBIUS_API_KEY/);
   assert.doesNotMatch(JSON.stringify(data), /Bearer /);
 });
 

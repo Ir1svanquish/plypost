@@ -35,8 +35,6 @@ test("demo creates isolated synthetic content and never overwrites an existing d
   assert.equal(env.PLYPOST_LOCAL_DEMO_HTTP, "true");
   assert.equal(env.PLYPOST_BLUESKY_SECRET, "");
   assert.equal(env.PLYPOST_MASTODON_SECRET, "");
-  assert.equal(env.NVIDIA_API_KEY, "");
-  assert.equal(env.NEBIUS_MODEL, "nvidia/nemotron-3-super-120b-a12b");
 
   process.env.PLYPOST_DB_PATH = env.PLYPOST_DB_PATH;
   const workspace = listWorkspace(config.email);

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { planMessages } from "@/lib/ai-prompts";
-import { parseGeneratedIdeas, validWeekStart, type StrategyProvider } from "@/lib/strategy";
+import { parseGeneratedIdeas, validWeekStart } from "@/lib/strategy";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { modelRequestOptions, providerConfig } from "@/lib/server/ai-provider";
+import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import {
   approveStrategyIdea, createWeeklyPlan, dismissStrategyIdea, listStrategy, loadBrandBrief,
   saveBrandBrief, updateStrategyIdea,
@@ -14,16 +14,16 @@ export const runtime = "nodejs";
 
 const responseHeaders = { "Cache-Control": "no-store" };
 
-async function generate(user: string, provider: StrategyProvider, weekStart: string) {
-  if ((provider !== "nebius" && provider !== "nvidia") || !validWeekStart(weekStart)) {
-    return NextResponse.json({ error: "Choose a provider and a valid Monday date." }, { status: 400 });
+async function generate(user: string, weekStart: string) {
+  if (!validWeekStart(weekStart)) {
+    return NextResponse.json({ error: "Choose a valid Monday date." }, { status: 400 });
   }
   const brief = loadBrandBrief(user);
   if (!brief) return NextResponse.json({ error: "Save a brand brief before generating a weekly plan." }, { status: 400 });
-  const config = providerConfig(provider);
+  const config = nebiusConfig();
   if (!config.key) {
     return NextResponse.json({
-      error: `Configure ${provider === "nebius" ? "NEBIUS_API_KEY" : "NVIDIA_API_KEY"} in .env.local to enable AI planning.`,
+      error: "Set NEBIUS_API_KEY on the server to enable AI planning.",
     }, { status: 503 });
   }
   const quota = reserveAiRequest(user);
@@ -52,14 +52,14 @@ async function generate(user: string, provider: StrategyProvider, weekStart: str
     });
     if (!response.ok) {
       return NextResponse.json({
-        error: `The ${provider === "nebius" ? "Nebius" : "NVIDIA"} request failed (HTTP ${response.status}). Check the key, model and quota.`,
+        error: `The Nebius request failed (HTTP ${response.status}). Check the key, model and quota.`,
       }, { status: 502 });
     }
     const data: unknown = await response.json();
     const content = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content;
     const ideas = typeof content === "string" ? parseGeneratedIdeas(content, brief.platforms) : null;
     if (!ideas) return NextResponse.json({ error: "The model did not return a usable plan. Please try again." }, { status: 502 });
-    createWeeklyPlan(user, brief, provider, weekStart, ideas);
+    createWeeklyPlan(user, brief, "nebius", weekStart, ideas);
     return NextResponse.json(listStrategy(user), { headers: responseHeaders });
   } catch {
     return NextResponse.json({ error: "The model request timed out or could not be completed." }, { status: 502 });
@@ -96,7 +96,10 @@ export async function POST(request: Request) {
         dismissStrategyIdea(user, input.planId, input.ideaId);
         break;
       case "generate":
-        return generate(user, input.provider as StrategyProvider, input.weekStart as string);
+        if (input.provider !== undefined && input.provider !== "nebius") {
+          return NextResponse.json({ error: "Nebius Token Factory is the only AI provider." }, { status: 400 });
+        }
+        return generate(user, input.weekStart as string);
       default:
         throw new Error("Unknown strategy action.");
     }

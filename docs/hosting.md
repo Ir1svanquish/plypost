@@ -23,7 +23,9 @@ Prices and limits checked 2026-10-25; confirm them in the provider dashboard bef
 
 Render's free web service cannot attach a persistent disk and can restart with an empty filesystem, so it is unsuitable for an editable demo that must survive until judging ends. See [Render's free-service limits](https://render.com/docs/free). These are hosting options, not services already created or paid for.
 
-## Prepared Render setup
+## Render demo
+
+The owner manually created [https://plypost.onrender.com/](https://plypost.onrender.com/) with a Starter Node web service, a 1 GB disk mounted at `/opt/render/project/src/storage`, `PLYPOST_DB_PATH` beneath that mount, `/api/health`, and manual deployments. On 2026-10-25, external requests to the homepage and health endpoint returned HTTP 200, and health returned `{"status":"ok"}`. This proves the app starts and can open its database; login, AI requests, disk persistence across a restart, and sustained memory use have not yet been checked on Render. Since deployments are manual, the hosted app can lag behind GitHub.
 
 The repository includes [`render.yaml`](../render.yaml) for an optional judging copy. It specifies one Starter web service in Singapore, a 1 GB persistent disk for SQLite, `/api/health`, and manual deploys after the first deployment. The service uses `npm ci && npm run build` and `npm start`; Next.js reads Render's `PORT` environment variable. The Node engine range is limited to Node 24 so a future major release cannot be selected silently.
 
@@ -37,6 +39,6 @@ Local checks on 2026-10-25: `render.yaml` passes [Render's published JSON Schema
 2. Use Node.js 24.14.x or newer within major version 24, `npm ci` and `npm run build`. Start one instance with `next start` listening on `0.0.0.0` and the host's `PORT`. Set health check path to `/api/health`.
 3. Attach persistent storage before first start. Set `PLYPOST_DB_PATH` to a file inside that mount. On Render's native Node runtime, a disk mounted at `/opt/render/project/src/storage` can use `/opt/render/project/src/storage/plypost.sqlite`; on Railway, a volume mounted at `/app/data` can use `/app/data/plypost.sqlite`.
 4. Set a dedicated `PLYPOST_OWNER_EMAIL`, a fresh `PLYPOST_OWNER_PASSWORD_HASH` and `NEBIUS_API_KEY` as server-side secrets. The random local demo password in `data/demo/login.txt` is not a hosted credential. Do not set `PLYPOST_LOCAL_DEMO_HTTP` on the host. Use the HTTPS address in judging instructions and provide the dedicated login details there.
-5. Start without the background worker or social account keys. Create or import only fictional sample content, then check login, editing, Nebius generation, persistence after restart, mobile layout and `/api/health` from a network outside the host. Record the public URL only after these checks pass.
+5. Start without the background worker or social account keys. Create or import only fictional sample content, then check login, editing, Nebius generation, persistence after restart, mobile layout and `/api/health` from a network outside the host.
 
-No cloud service or public URL has been created yet. Provider account connection, payment choice and public repository visibility remain owner decisions. The owner selected MIT for the source license.
+The repository remains private as of this update. The owner selected MIT for the source license; public visibility and the competition submission still need separate review.

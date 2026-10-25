@@ -18,7 +18,6 @@ test("Nebius routes use Nemotron through Token Factory and keep planning input l
   process.env.PLYPOST_OWNER_EMAIL = owner;
   process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
   process.env.NEBIUS_API_KEY = "test-only-nebius-key";
-  delete process.env.NEBIUS_MODEL;
   const token = createSession(owner);
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -46,7 +45,7 @@ test("Nebius routes use Nemotron through Token Factory and keep planning input l
     const headers = { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${token}`, "content-type": "application/json" };
     const adapt = await adaptPost(new globalThis.Request("http://localhost:3000/api/generate", {
       method: "POST", headers,
-      body: JSON.stringify({ provider: "nebius", source: "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop." }),
+      body: JSON.stringify({ source: "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop." }),
     }));
     assert.equal(adapt.status, 200);
     assert.deepEqual((await adapt.json()).variants, variants);
@@ -54,7 +53,7 @@ test("Nebius routes use Nemotron through Token Factory and keep planning input l
     saveBrandBrief(owner, brief);
     const plan = await strategyPost(new globalThis.Request("http://localhost:3000/api/strategy", {
       method: "POST", headers,
-      body: JSON.stringify({ action: "generate", provider: "nebius", weekStart: "2026-10-26" }),
+      body: JSON.stringify({ action: "generate", weekStart: "2026-10-26" }),
     }));
     assert.equal(plan.status, 200);
     assert.equal((await plan.json()).plans[0].provider, "nebius");
@@ -70,6 +69,35 @@ test("Nebius routes use Nemotron through Token Factory and keep planning input l
     assert.deepEqual(JSON.parse(calls[1].body.messages[1].content), brief);
     assert.equal(JSON.stringify(calls[1].body).includes("weekStart"), false);
     assert.equal(database().prepare("SELECT COUNT(*) AS count FROM jobs WHERE user_id=?").get(owner).count, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.NEBIUS_API_KEY;
+  }
+});
+
+test("AI routes refuse the removed direct NVIDIA provider", async () => {
+  const owner = "single-provider@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-nebius-key";
+  const token = createSession(owner);
+  const headers = { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${token}`, "content-type": "application/json" };
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; throw new Error("Removed provider reached the model"); };
+  try {
+    const adapt = await adaptPost(new globalThis.Request("http://localhost:3000/api/generate", {
+      method: "POST", headers, body: JSON.stringify({ source: "A draft", provider: "nvidia" }),
+    }));
+    const plan = await strategyPost(new globalThis.Request("http://localhost:3000/api/strategy", {
+      method: "POST", headers, body: JSON.stringify({ action: "generate", weekStart: "2026-10-26", provider: "nvidia" }),
+    }));
+    assert.equal(adapt.status, 400);
+    assert.equal(plan.status, 400);
+    assert.equal(calls, 0);
+    assert.equal(database().prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE user_id=?").get(owner).count, 0);
   } finally {
     globalThis.fetch = originalFetch;
     delete process.env.PLYPOST_OWNER_EMAIL;
@@ -138,11 +166,11 @@ test("adaptation and weekly planning share the optional daily cap before calling
   try {
     const headers = { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${token}`, "content-type": "application/json" };
     const adapted = await adaptPost(new globalThis.Request("http://localhost:3000/api/generate", {
-      method: "POST", headers, body: JSON.stringify({ provider: "nebius", source: "A useful workshop update" }),
+      method: "POST", headers, body: JSON.stringify({ source: "A useful workshop update" }),
     }));
     assert.equal(adapted.status, 200);
     const planned = await strategyPost(new globalThis.Request("http://localhost:3000/api/strategy", {
-      method: "POST", headers, body: JSON.stringify({ action: "generate", provider: "nebius", weekStart: "2026-10-26" }),
+      method: "POST", headers, body: JSON.stringify({ action: "generate", weekStart: "2026-10-26" }),
     }));
     assert.equal(planned.status, 429);
     assert.match((await planned.json()).error, /1 requests per 24 hours/);

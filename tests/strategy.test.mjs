@@ -90,12 +90,12 @@ test("plan retention keeps the latest twelve plans and does not delete approved 
 test("generation sends only approved brief fields and saves proposals without publishing", async () => {
   process.env.PLYPOST_OWNER_EMAIL = owner;
   process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
-  process.env.NVIDIA_API_KEY = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-placeholder";
   const session = createSession(owner);
   const originalFetch = globalThis.fetch;
   let sent;
   globalThis.fetch = async (url, options) => {
-    assert.equal(url, "https://integrate.api.nvidia.com/v1/chat/completions");
+    assert.equal(url, "https://api.tokenfactory.nebius.com/v1/chat/completions");
     sent = JSON.parse(options.body);
     return globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({ ideas: [proposals[0]] }) } }] });
   };
@@ -103,7 +103,7 @@ test("generation sends only approved brief fields and saves proposals without pu
     const request = new globalThis.Request("http://localhost:3000/api/strategy", {
       method: "POST",
       headers: { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${session}`, "content-type": "application/json" },
-      body: JSON.stringify({ action: "generate", provider: "nvidia", weekStart: "2026-10-26" }),
+      body: JSON.stringify({ action: "generate", weekStart: "2026-10-26" }),
     });
     const response = await strategyPost(request);
     assert.equal(response.status, 200);
@@ -117,7 +117,7 @@ test("generation sends only approved brief fields and saves proposals without pu
     assert.equal(database().prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(owner).count, 0);
   } finally {
     globalThis.fetch = originalFetch;
-    delete process.env.NVIDIA_API_KEY;
+    delete process.env.NEBIUS_API_KEY;
     delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
     delete process.env.PLYPOST_OWNER_EMAIL;
   }

@@ -95,8 +95,6 @@ export function demoEnvironment(directory: string, config: DemoConfig): NodeJS.P
     PLYPOST_MASTODON_SECRET: "",
     PLYPOST_MASTODON_SCHEDULE_ENABLED: "false",
     PLYPOST_LOCAL_DEMO_HTTP: "true",
-    NVIDIA_API_KEY: "",
-    NEBIUS_MODEL: "nvidia/nemotron-3-super-120b-a12b",
   };
 }
 

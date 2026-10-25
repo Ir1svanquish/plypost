@@ -1,9 +1,9 @@
 import { parseGeneratedVariants } from "../src/lib/generated-variants";
 import { planMessages, variantMessages } from "../src/lib/ai-prompts";
-import { modelRequestOptions, providerConfig } from "../src/lib/server/ai-provider";
+import { modelRequestOptions, nebiusConfig } from "../src/lib/server/ai-provider";
 import { parseGeneratedIdeas } from "../src/lib/strategy";
 
-const config = providerConfig("nebius");
+const config = nebiusConfig();
 if (!config.key) {
   console.error("Set NEBIUS_API_KEY in .env.local before running the Nebius smoke check.");
   process.exitCode = 1;

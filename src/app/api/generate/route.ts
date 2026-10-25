@@ -3,7 +3,7 @@ import { parseGeneratedVariants } from "@/lib/generated-variants";
 import { variantMessages } from "@/lib/ai-prompts";
 import { characterCount } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { modelRequestOptions, providerConfig } from "@/lib/server/ai-provider";
+import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import { reserveAiRequest } from "@/lib/server/workspace";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 
@@ -19,18 +19,17 @@ export async function POST(request: Request) {
 
   const input = body.value;
   const source = typeof input.source === "string" ? input.source.trim() : "";
-  const provider = input.provider;
-  if (!source || characterCount(source) > 3000 || (provider !== "nebius" && provider !== "nvidia")) {
+  if (!source || characterCount(source) > 3000 || (input.provider !== undefined && input.provider !== "nebius")) {
     return NextResponse.json(
-      { error: "Enter up to 3,000 characters and choose Nebius or NVIDIA." },
+      { error: "Enter up to 3,000 characters. Nebius Token Factory is the only AI provider." },
       { status: 400 },
     );
   }
 
-  const config = providerConfig(provider);
+  const config = nebiusConfig();
   if (!config.key) {
     return NextResponse.json(
-      { error: `Configure ${provider === "nebius" ? "NEBIUS_API_KEY" : "NVIDIA_API_KEY"} in .env.local to enable AI adaptation.` },
+      { error: "Set NEBIUS_API_KEY on the server to enable AI adaptation." },
       { status: 503 },
     );
   }
@@ -59,7 +58,7 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       return NextResponse.json(
-        { error: `The ${provider === "nebius" ? "Nebius" : "NVIDIA"} request failed (HTTP ${response.status}). Check your key, model and quota.` },
+        { error: `The Nebius request failed (HTTP ${response.status}). Check your key, model and quota.` },
         { status: 502 },
       );
     }
@@ -75,7 +74,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { provider, ...parsed },
+      { provider: "nebius", ...parsed },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {

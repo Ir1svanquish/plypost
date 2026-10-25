@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Check,
   CheckCheck,
-  ChevronDown,
   CircleAlert,
   Clock3,
   Copy,
@@ -50,7 +49,6 @@ const legacySampleDraft =
 const interimSampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nsoflow helps you shape one draft for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
 
-type Provider = "nvidia" | "nebius";
 type AIReview = {
   source: string;
   original: Partial<Record<PlatformId, string>>;
@@ -62,6 +60,37 @@ type WorkspaceView = "compose" | "drafts" | "schedule" | "assisted" | "account";
 const viewLabels: Record<WorkspaceView, string> = {
   compose: "Create", drafts: "Drafts", schedule: "Plan", assisted: "Assisted", account: "Account",
 };
+
+const sidebarItems = [
+  { id: "compose", label: "Create", icon: FilePenLine },
+  { id: "drafts", label: "Drafts", icon: FilePenLine },
+  { id: "schedule", label: "Plan", icon: Clock3 },
+  { id: "assisted", label: "Assisted", icon: Copy },
+  { id: "account", label: "Account", icon: UserRound },
+] as const;
+
+function SidebarNavigation({ view, draftCount, collapsed, onNavigate }: {
+  view: WorkspaceView;
+  draftCount: number;
+  collapsed: boolean;
+  onNavigate: (next: WorkspaceView) => void;
+}) {
+  return <nav className={`mt-4 space-y-1 ${collapsed ? "lg:mt-12" : ""}`} aria-label="Main navigation">
+    {sidebarItems.map(({ id, label, icon: Icon }) => <a
+      key={id}
+      href={`#${id}`}
+      onClick={(event) => { event.preventDefault(); onNavigate(id); }}
+      aria-label={label}
+      title={collapsed ? label : undefined}
+      aria-current={view === id ? "page" : undefined}
+      className={`sidebar-link sidebar-subtle flex min-h-10 items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition ${collapsed ? "lg:justify-center lg:px-0" : ""}`}
+    >
+      <Icon size={18} className="shrink-0" aria-hidden="true" />
+      <span className={collapsed ? "lg:hidden" : ""}>{label}</span>
+      {id === "drafts" && <span className={`ml-auto text-[11px] tabular-nums opacity-70 ${collapsed ? "lg:hidden" : ""}`}>{draftCount}</span>}
+    </a>)}
+  </nav>;
+}
 
 function viewFromHash(): WorkspaceView {
   const hash = window.location.hash.slice(1);
@@ -144,6 +173,11 @@ function PlatformMark({ id, size = "normal" }: { id: PlatformId; size?: "small" 
 
 function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void }) {
   const [view, setView] = useState<WorkspaceView>("compose");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const mobileSidebarRef = useRef<HTMLElement>(null);
+  const mobileSidebarCloseRef = useRef<HTMLButtonElement>(null);
+  const mobileHeaderToggleRef = useRef<HTMLButtonElement>(null);
   const [source, setSource] = useState("");
   const [selected, setSelected] = useState<PlatformId[]>([]);
   const [active, setActive] = useState<PlatformId>(platformDisplayIds[0]);
@@ -162,7 +196,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [aiReview, setAiReview] = useState<AIReview | null>(null);
   const [aiApplyIds, setAiApplyIds] = useState<PlatformId[]>([]);
   const editorRevision = useRef(0);
-  const [provider, setProvider] = useState<Provider>("nebius");
   const [notice, setNotice] = useState<Notice>(null);
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -267,6 +300,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       const next = viewFromHash();
       if (next !== "assisted") { setOpenAssistedComposer(false); setOpenAssistedVideoGroup(false); }
       setView(next);
+      setMobileSidebarOpen(false);
     };
     syncView();
     window.addEventListener("hashchange", syncView);
@@ -277,8 +311,37 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     };
   }, []);
 
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const closeOnDesktop = () => { if (desktop.matches) setMobileSidebarOpen(false); };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    mobileSidebarCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileSidebarOpen(false);
+        window.requestAnimationFrame(() => mobileHeaderToggleRef.current?.focus());
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = mobileSidebarRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), a[href]");
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileSidebarOpen]);
+
   function openView(next: WorkspaceView, scrollTop = true) {
     if (next !== "assisted") { setOpenAssistedComposer(false); setOpenAssistedVideoGroup(false); }
+    setMobileSidebarOpen(false);
     setView(next);
     if (window.location.hash !== `#${next}`) window.history.pushState(null, "", `#${next}`);
     if (scrollTop) window.scrollTo({ top: 0, behavior: "smooth" });
@@ -414,7 +477,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           source?: unknown;
           selected?: unknown;
           variants?: unknown;
-          provider?: unknown;
           activity?: unknown;
           title?: unknown;
           currentDraftId?: unknown;
@@ -441,7 +503,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           }
           setVariants(safe);
         }
-        if (data.provider === "nvidia" || data.provider === "nebius") setProvider(data.provider);
         if (Array.isArray(data.activity)) setActivity(data.activity.slice(0, 12));
         if (typeof data.title === "string") setTitle(data.title.slice(0, 120));
         if (typeof data.currentDraftId === "string") {
@@ -498,12 +559,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   useEffect(() => {
     if (!hydrated) return;
     try {
-      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId, plannedDate, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
+      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId, plannedDate, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, provider, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
+  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -603,7 +664,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, provider }),
+        body: JSON.stringify({ source }),
       });
       const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: OverLimitVariant[] } = await response.json();
       if (!response.ok) throw new Error(data.error || "AI adaptation failed.");
@@ -1438,37 +1499,35 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   return (
     <>
     <div inert={restoringBackup} className="app-shell min-h-screen lg:flex">
-      <aside className="app-sidebar sidebar-glow hidden w-[232px] shrink-0 flex-col border-r px-4 py-7 lg:sticky lg:top-0 lg:flex lg:h-screen">
-        <a href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} className="flex items-center gap-3 px-2" aria-label="Plypost home">
+      <aside id="desktop-sidebar" className={`app-sidebar sidebar-glow sticky top-0 hidden h-screen shrink-0 flex-col border-r py-7 transition-[width,padding] duration-200 lg:flex ${sidebarCollapsed ? "w-[72px] px-3" : "w-[232px] px-4"}`}>
+        <button type="button" onClick={() => setSidebarCollapsed((current) => !current)} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed} className={`flex w-full items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${sidebarCollapsed ? "justify-center" : "gap-3 px-2"}`} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
           <Image src="/plypost-mark.svg" alt="" width={40} height={40} className="h-10 w-10 shrink-0" />
-          <span className="text-[21px] font-bold tracking-[-0.055em]">Plypost<span className="sidebar-accent">.</span></span>
-        </a>
-        <div className="sidebar-muted mt-12 px-3 text-[11px] font-bold uppercase tracking-[0.17em]">Workspace</div>
-        <nav className="mt-4 space-y-1" aria-label="Main navigation">
-          <a href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} aria-current={view === "compose" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Create</a>
-          <a href="#drafts" onClick={(event) => { event.preventDefault(); openView("drafts"); }} aria-current={view === "drafts" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><FilePenLine size={18} /> Drafts <span className="ml-auto text-[11px] tabular-nums opacity-70">{drafts.length}</span></a>
-          <a href="#schedule" onClick={(event) => { event.preventDefault(); openView("schedule"); }} aria-current={view === "schedule" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Clock3 size={18} /> Plan</a>
-          <a href="#assisted" onClick={(event) => { event.preventDefault(); setFocusedAssistedId(null); openView("assisted"); }} aria-current={view === "assisted" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><Copy size={18} /> Assisted</a>
-          <a href="#account" onClick={(event) => { event.preventDefault(); openView("account"); }} aria-current={view === "account" ? "page" : undefined} className="sidebar-link sidebar-subtle flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition"><UserRound size={18} /> Account</a>
-        </nav>
-        <div className="sidebar-footer mt-auto border-t px-3 pt-5">
-          <p className="sidebar-muted text-[12px] leading-5">Drafts and reminders stay on this computer.</p>
-        </div>
+          {!sidebarCollapsed && <span className="text-[21px] font-bold tracking-[-0.055em]">Plypost<span className="sidebar-accent">.</span></span>}
+        </button>
+        {!sidebarCollapsed && <div className="sidebar-muted mt-12 px-3 text-[11px] font-bold uppercase tracking-[0.17em]">Workspace</div>}
+        <SidebarNavigation view={view} draftCount={drafts.length} collapsed={sidebarCollapsed} onNavigate={(next) => { if (next === "assisted") setFocusedAssistedId(null); openView(next); }} />
+        {!sidebarCollapsed && <div className="sidebar-footer mt-auto border-t px-3 pt-5"><p className="sidebar-muted text-[12px] leading-5">Drafts and reminders are saved in your workspace.</p></div>}
       </aside>
 
-      <div className="min-w-0 flex-1">
+      {mobileSidebarOpen && <>
+        <button type="button" aria-label="Close navigation" onClick={() => { setMobileSidebarOpen(false); window.requestAnimationFrame(() => mobileHeaderToggleRef.current?.focus()); }} className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" />
+        <aside ref={mobileSidebarRef} id="mobile-sidebar" role="dialog" aria-modal="true" aria-label="Navigation" className="app-sidebar sidebar-glow fixed inset-y-0 left-0 z-50 flex w-[min(82vw,280px)] flex-col overflow-y-auto border-r px-4 py-7 shadow-2xl lg:hidden">
+          <button ref={mobileSidebarCloseRef} type="button" onClick={() => { setMobileSidebarOpen(false); window.requestAnimationFrame(() => mobileHeaderToggleRef.current?.focus()); }} aria-label="Close sidebar" className="flex items-center gap-3 rounded-lg px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">
+            <Image src="/plypost-mark.svg" alt="" width={40} height={40} className="h-10 w-10 shrink-0" />
+            <span className="text-[21px] font-bold tracking-[-0.055em]">Plypost<span className="sidebar-accent">.</span></span>
+          </button>
+          <div className="sidebar-muted mt-12 px-3 text-[11px] font-bold uppercase tracking-[0.17em]">Workspace</div>
+          <SidebarNavigation view={view} draftCount={drafts.length} collapsed={false} onNavigate={(next) => { if (next === "assisted") setFocusedAssistedId(null); openView(next); }} />
+          <div className="sidebar-footer mt-auto border-t px-3 pt-5"><p className="sidebar-muted text-[12px] leading-5">Drafts and reminders are saved in your workspace.</p></div>
+        </aside>
+      </>}
+
+      <div inert={mobileSidebarOpen} className="min-w-0 flex-1">
         <header className="app-header sticky top-0 z-30 flex min-h-[66px] items-center justify-between gap-3 border-b px-5 sm:px-8 lg:px-10">
-          <div className="flex items-center gap-2.5 lg:hidden"><Image src="/plypost-mark.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" /><span className="text-[18px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
+          <button ref={mobileHeaderToggleRef} type="button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open sidebar" aria-expanded={mobileSidebarOpen} className="flex items-center gap-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] lg:hidden"><Image src="/plypost-mark.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" /><span className="text-[18px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></button>
           <div className="hidden items-center gap-2 text-[13px] text-[var(--text-muted)] lg:flex"><span>Workspace</span><span>/</span><span className="font-semibold text-[var(--text)]">{viewLabels[view]}</span></div>
           <div className="ml-auto flex items-center gap-3"><ThemeSwitcher /><button type="button" onClick={() => openView("account")} aria-label="Open account" className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] text-[var(--text-secondary)]"><UserRound size={17} /></button></div>
         </header>
-        <nav className="mobile-nav app-header sticky top-[66px] z-20 flex gap-5 overflow-x-auto border-b px-5 text-[12px] font-semibold text-[var(--text-secondary)] sm:px-8 lg:hidden" aria-label="Mobile navigation">
-          <a className="shrink-0 py-3" href="#compose" onClick={(event) => { event.preventDefault(); openView("compose"); }} aria-current={view === "compose" ? "page" : undefined}>Create</a>
-          <a className="shrink-0 py-3" href="#drafts" onClick={(event) => { event.preventDefault(); openView("drafts"); }} aria-current={view === "drafts" ? "page" : undefined}>Drafts</a>
-          <a className="shrink-0 py-3" href="#schedule" onClick={(event) => { event.preventDefault(); openView("schedule"); }} aria-current={view === "schedule" ? "page" : undefined}>Plan</a>
-          <a className="shrink-0 py-3" href="#assisted" onClick={(event) => { event.preventDefault(); setFocusedAssistedId(null); openView("assisted"); }} aria-current={view === "assisted" ? "page" : undefined}>Assisted</a>
-          <a className="shrink-0 py-3" href="#account" onClick={(event) => { event.preventDefault(); openView("account"); }} aria-current={view === "account" ? "page" : undefined}>Account</a>
-        </nav>
 
         <main className="app-main mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
           {view === "schedule" && schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Start <code>npm run worker</code> on this computer to process scheduled items.</div>}
@@ -1532,7 +1591,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   </div>
                   <details className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
                     <summary className="cursor-pointer text-[13px] font-bold text-[var(--text-secondary)]">Adapt with AI <span className="ml-1 text-[11px] font-normal text-[var(--text-soft)]">Optional · Nemotron</span></summary>
-                    <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nebius">Nebius Token Factory · Nemotron</option><option value="nvidia">NVIDIA API · separate key</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : aiReview ? "Regenerate suggestions" : "Generate variants"}</button></div>
+                    <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-[12px] leading-5 text-[var(--text-muted)]">Nebius Token Factory · NVIDIA Nemotron 3 Super. Only this draft text is sent when you click Generate.</p><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : aiReview ? "Regenerate suggestions" : "Generate variants"}</button></div>
                     {aiReview && <AIReviewPanel
                       source={aiReview.source}
                       original={aiReview.original}
