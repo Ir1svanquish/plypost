@@ -1,0 +1,16 @@
+# Nebius × NVIDIA 大赛准备
+
+拟参加 [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/rules) 的 **Best Apps and Agents** 赛道。截止时间为 2026 年 10 月 30 日 10:00 PDT。官方规则要求应用运行时调用 Nebius Token Factory 或部署在 Nebius AI Cloud，并使用至少一个 NVIDIA 开源模型。
+
+Plypost 的默认 AI 路径是服务端请求 Nebius Token Factory 的 `/v1/chat/completions`，模型为 NVIDIA Nemotron 3 Super（`nvidia/nemotron-3-super-120b-a12b`）。用户明确点击后，应用才发送当前草稿用于逐平台改写，或发送已保存的品牌资料用于一周选题；生成内容必须由用户检查、修改和确认。AI 不负责自动向社交平台发帖。
+
+本机验证记录（2026-10-25）：Token Factory 模型列表包含该模型；用固定样例文案与虚构品牌资料分别调用 Nemotron 3 Super，返回四个平台的可解析文案与一周选题。另从本机生产构建的 HTTP 接口完成登录、文案生成、品牌资料保存及周计划生成，结果写入隔离的测试数据库。`npm run typecheck`、`npm run lint`、144 项测试和 `npm run build` 通过。密钥只在本机被 Git 忽略的 `.env.local` 中使用；仓库不包含密钥。以上仍不能代替公开演示或正式提交。
+
+根据[官方提交规则](https://nebiusglobalaihackathon.devpost.com/rules)，还需要：
+
+1. 可让评委访问的运行中演示、托管应用或测试构建，以及测试说明。当前没有公开部署。
+2. 公开的源码仓库和显眼的开源许可证。当前 GitHub 仓库是私有的，许可证尚未确定；公开前须检查第三方素材、依赖和敏感文件。
+3. 公开上传到 YouTube、少于三分钟且展示实际运行的演示视频。尚未录制或上传。
+4. 英文功能描述、所选赛道、Nebius/NVIDIA 使用说明与反馈，以及 Devpost 提交。尚未提交。
+
+公开仓库、选择许可证、上线演示和上传视频都应在技术与素材检查完成后由项目所有者确认。不要把本机通过构建或一次 API 调用写成已满足全部参赛条件。

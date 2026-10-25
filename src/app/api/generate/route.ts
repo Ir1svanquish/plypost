@@ -1,27 +1,12 @@
 import { NextResponse } from "next/server";
 import { parseGeneratedVariants } from "@/lib/generated-variants";
-import { characterCount, platforms } from "@/lib/platforms";
+import { variantMessages } from "@/lib/ai-prompts";
+import { characterCount } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
+import { modelRequestOptions, providerConfig } from "@/lib/server/ai-provider";
 import { aiRateAllowed } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
-
-type Provider = "nebius" | "nvidia";
-
-function providerConfig(provider: Provider) {
-  if (provider === "nebius") {
-    return {
-      key: process.env.NEBIUS_API_KEY,
-      model: process.env.NEBIUS_MODEL,
-      url: "https://api.tokenfactory.nebius.com/v1/chat/completions",
-    };
-  }
-  return {
-    key: process.env.NVIDIA_API_KEY,
-    model: process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b",
-    url: "https://integrate.api.nvidia.com/v1/chat/completions",
-  };
-}
 
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
@@ -49,9 +34,9 @@ export async function POST(request: Request) {
   }
 
   const config = providerConfig(provider);
-  if (!config.key || !config.model) {
+  if (!config.key) {
     return NextResponse.json(
-      { error: `Configure ${provider === "nebius" ? "NEBIUS_API_KEY and NEBIUS_MODEL" : "NVIDIA_API_KEY"} in .env.local to enable AI adaptation.` },
+      { error: `Configure ${provider === "nebius" ? "NEBIUS_API_KEY" : "NVIDIA_API_KEY"} in .env.local to enable AI adaptation.` },
       { status: 503 },
     );
   }
@@ -69,17 +54,11 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: config.model,
-        messages: [
-          {
-            role: "system",
-            content: `You are a social media editor. Rewrite the user's draft into four distinct platform-native posts. Preserve facts, claims, URLs and intent. Do not invent details. Return ONLY a JSON object with string keys bluesky, mastodon, linkedin and threads. Bluesky: concise, at most ${platforms.bluesky.limit} grapheme clusters and 3,000 UTF-8 bytes. Mastodon: clear context, at most ${platforms.mastodon.limit} characters for the default composer (instance limits may differ). LinkedIn: professional and readable, at most ${platforms.linkedin.limit} characters. Threads: conversational, at most ${platforms.threads.limit} characters. Do not add markdown fences.`,
-          },
-          { role: "user", content: source },
-        ],
-        temperature: 0.6,
+        messages: variantMessages(source),
+        temperature: 0.2,
         max_tokens: 1200,
         stream: false,
-        ...(provider === "nvidia" ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+        ...modelRequestOptions(config.model),
       }),
       signal: AbortSignal.timeout(30000),
       cache: "no-store",

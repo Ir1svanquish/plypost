@@ -13,7 +13,7 @@ Plypost 是一个本机运行的多平台发帖工作台。写一份草稿，再
 - 在日历中的草稿可以直接进入逐平台人工发布准备。日历会显示同一草稿已有多少条人工待办，以及目标日是否已经过去；点击“Prepare handoffs”仍需逐平台检查并确认，不会直接发帖。
 - 批量准备时若不填写提醒时间，待办只留在 Assisted 清单，不会被计入到期提醒或出现在日期日历。旧版已保存的待办仍按其原记录显示，可逐条移除不需要的提醒。
 - 发布后可手动记录浏览量、点赞、回复和备注。计划页汇总最近录入的单篇结果，可打开原记录，或从已发布文案开始一篇未保存的新草稿。指标和备注由你录入，Plypost 不验证、不用于 AI 周计划，也不跨平台排名；若后来对草稿手动点击 AI 文案改写，草稿文字会按该功能的提示发送。
-- 配置 Nebius 或 NVIDIA 后，手动生成文案改写或一周选题。不配置也能使用草稿和人工发布功能。
+- 配置 Nebius Token Factory 后，可用其托管的 NVIDIA Nemotron 3 Super 手动生成逐平台文案和一周选题；NVIDIA API 仍可作为另一种配置。不配置也能使用草稿和人工发布功能。生成的内容须经人审阅才会进入草稿或人工发布清单。
 
 另有 Bluesky 和 Mastodon 的纯文字发帖入口，以及 Mastodon 的本机定时队列。这些入口**尚未经过真实账号验收**。定时队列依赖本机 worker；电脑休眠或进程关闭时不会准时执行。图片目前只用于人工发布。
 
@@ -27,7 +27,7 @@ Plypost 是一个本机运行的多平台发帖工作台。写一份草稿，再
 
 ```powershell
 npm install
-Copy-Item .env.example .env.local
+if (!(Test-Path .env.local)) { Copy-Item .env.example .env.local }
 npm run hash-password
 ```
 
@@ -39,11 +39,13 @@ npm run hash-password
 
 | 功能 | 配置 |
 | --- | --- |
-| AI 文案与选题 | 在 `.env.local` 中填写 `NVIDIA_API_KEY` 或 `NEBIUS_API_KEY`。只有点击生成时才会请求服务；周计划只发送品牌资料，不发送发帖结果。 |
+| AI 文案与选题 | 默认使用 Nebius Token Factory 上的 `nvidia/nemotron-3-super-120b-a12b`；在 `.env.local` 中填写 `NEBIUS_API_KEY` 即可。可用 `NEBIUS_MODEL` 覆盖模型；若要走 NVIDIA 的独立接口，则另填 `NVIDIA_API_KEY` 并在界面选择。点击文案改写会发送当前草稿文字；点击生成周计划只发送已保存的品牌资料，不发送发帖结果。 |
 | Bluesky 账号 | 填写 `PLYPOST_BLUESKY_ORIGIN` 和 `PLYPOST_BLUESKY_SECRET`，然后在 **Account** 中连接。浏览器地址须与配置一致。 |
 | Mastodon 账号 | 有账号时再填写 `PLYPOST_MASTODON_INSTANCE`、`PLYPOST_PUBLIC_ORIGIN` 和 `PLYPOST_MASTODON_SECRET`。可用 `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` 暂停新的定时任务和后续派发，改动后须重启应用与 worker。 |
 
 两个 `*_SECRET` 应分别使用独立的 32 字节随机密钥。具体格式见 [.env.example](.env.example)。恢复备份不会取消本机已经排入真实发布队列的 Mastodon 帖子。
+
+配置好 Nebius 密钥后，可选运行 `npm run smoke:nebius`：它用固定样例文案和虚构品牌资料做两次模型调用，检查四个平台版本和周计划，不会读取本机草稿或品牌资料。密钥和输出不会写入仓库。
 
 ## 检查
 
@@ -54,4 +56,4 @@ npm test
 npm run build
 ```
 
-当前只有本机构建，没有线上部署。Bluesky OAuth 依赖链仍有高危审计项；公开提供登录前，请运行 `npm audit --omit=dev --audit-level=high` 并处理结果。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
+当前只有本机构建，没有线上部署。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。Bluesky OAuth 依赖链仍有高危审计项；公开提供登录前，请运行 `npm audit --omit=dev --audit-level=high` 并处理结果。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
