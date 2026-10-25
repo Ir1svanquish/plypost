@@ -94,6 +94,7 @@ export function demoEnvironment(directory: string, config: DemoConfig): NodeJS.P
     PLYPOST_PUBLIC_ORIGIN: "",
     PLYPOST_MASTODON_SECRET: "",
     PLYPOST_MASTODON_SCHEDULE_ENABLED: "false",
+    PLYPOST_LOCAL_DEMO_HTTP: "true",
     NVIDIA_API_KEY: "",
     NEBIUS_MODEL: "nvidia/nemotron-3-super-120b-a12b",
   };
@@ -113,12 +114,17 @@ function loadDemoConfig(directory: string): DemoConfig {
 async function main() {
   const args = process.argv.slice(2);
   const seedOnly = args.length === 1 && args[0] === "--seed-only";
-  const customPort = args.length === 2 && args[0] === "--port" && /^\d{1,5}$/.test(args[1]);
-  if (args.length > 0 && !seedOnly && !customPort) {
-    throw new Error("Usage: npm run demo [-- --port 3201], or npm run demo:seed");
+  const production = args[0] === "--production";
+  const portArgs = production ? args.slice(1) : args;
+  const customPort = portArgs.length === 2 && portArgs[0] === "--port" && /^\d{1,5}$/.test(portArgs[1]);
+  if (!seedOnly && portArgs.length > 0 && !customPort) {
+    throw new Error("Usage: npm run demo [-- --port 3201], npm run demo:seed, or npm run demo:test-build");
   }
-  const port = customPort ? Number(args[1]) : 3187;
+  const port = customPort ? Number(portArgs[1]) : 3187;
   if (port < 1 || port > 65535) throw new Error("Choose a port from 1 to 65535.");
+  if (production && !existsSync(resolve(".next/BUILD_ID"))) {
+    throw new Error("No production build found. Run npm run build first.");
+  }
 
   if (!existsSync(defaultDemoDir)) {
     createDemoAt(defaultDemoDir);
@@ -129,8 +135,9 @@ async function main() {
   if (seedOnly) return;
 
   const nextCli = resolve("node_modules/next/dist/bin/next");
-  const child = spawn(process.execPath, [nextCli, "dev", "--webpack", "--hostname", "127.0.0.1", "--port", String(port)], {
-    cwd: process.cwd(), env: demoEnvironment(defaultDemoDir, config), stdio: "inherit",
+  const nextArgs = production ? ["start"] : ["dev", "--webpack"];
+  const child = spawn(process.execPath, [nextCli, ...nextArgs, "--hostname", "127.0.0.1", "--port", String(port)], {
+    cwd: process.cwd(), env: { ...demoEnvironment(defaultDemoDir, config), NODE_ENV: production ? "production" : "development" }, stdio: "inherit",
   });
   child.on("error", (error) => { console.error("Could not start Next.js:", error.message); process.exitCode = 1; });
   child.on("exit", (code, signal) => { process.exitCode = signal ? 1 : (code ?? 1); });

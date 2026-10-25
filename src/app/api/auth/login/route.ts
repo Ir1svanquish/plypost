@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   const token = createSession(configured);
   audit(configured, "session.login");
   const response = NextResponse.json({ email: configured });
-  response.cookies.set(SESSION_COOKIE, token, cookieOptions());
+  response.cookies.set(SESSION_COOKIE, token, cookieOptions(request));
   response.headers.set("Cache-Control", "no-store");
   return response;
 }

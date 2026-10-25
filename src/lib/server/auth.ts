@@ -64,8 +64,14 @@ export function sameOrigin(request: Request): boolean {
   }
 }
 
-export function cookieOptions() {
-  return { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict" as const, path: "/", maxAge: SESSION_SECONDS };
+export function cookieOptions(request: Request) {
+  const host = request.headers.get("host") || "";
+  const url = new URL(request.url);
+  const localHttpDemo = process.env.PLYPOST_LOCAL_DEMO_HTTP === "true" && url.protocol === "http:" &&
+    /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i.test(host) &&
+    ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  return { httpOnly: true, secure: process.env.NODE_ENV === "production" && !localHttpDemo,
+    sameSite: "strict" as const, path: "/", maxAge: SESSION_SECONDS };
 }
 
 export function loginAllowed(key: string): boolean {

@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createDemoAt, demoEnvironment } from "../scripts/demo.ts";
-import { verifyPassword } from "../src/lib/server/auth.ts";
+import { cookieOptions, verifyPassword } from "../src/lib/server/auth.ts";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { listWorkspace } from "../src/lib/server/workspace.ts";
 import { listStrategy } from "../src/lib/server/strategy.ts";
@@ -32,6 +32,7 @@ test("demo creates isolated synthetic content and never overwrites an existing d
   const env = demoEnvironment(directory, config);
   assert.equal(env.PLYPOST_DB_PATH, join(directory, "plypost.sqlite"));
   assert.equal(env.PLYPOST_MASTODON_SCHEDULE_ENABLED, "false");
+  assert.equal(env.PLYPOST_LOCAL_DEMO_HTTP, "true");
   assert.equal(env.PLYPOST_BLUESKY_SECRET, "");
   assert.equal(env.PLYPOST_MASTODON_SECRET, "");
   assert.equal(env.NVIDIA_API_KEY, "");
@@ -51,4 +52,26 @@ test("demo creates isolated synthetic content and never overwrites an existing d
   closeDatabase();
   if (previousDbPath === undefined) delete process.env.PLYPOST_DB_PATH;
   else process.env.PLYPOST_DB_PATH = previousDbPath;
+});
+
+test("HTTP cookies are limited to the script's local demo origin", () => {
+  const oldNodeEnv = process.env.NODE_ENV;
+  const oldDemoFlag = process.env.PLYPOST_LOCAL_DEMO_HTTP;
+  try {
+    process.env.NODE_ENV = "production";
+    process.env.PLYPOST_LOCAL_DEMO_HTTP = "true";
+    const local = new globalThis.Request("http://127.0.0.1:3187/api/auth/login", { headers: { host: "127.0.0.1:3187" } });
+    const publicHost = new globalThis.Request("https://example.com/api/auth/login", { headers: { host: "example.com" } });
+    const spoofedHost = new globalThis.Request("http://example.com/api/auth/login", { headers: { host: "127.0.0.1:3187" } });
+    assert.equal(cookieOptions(local).secure, false);
+    assert.equal(cookieOptions(publicHost).secure, true);
+    assert.equal(cookieOptions(spoofedHost).secure, true);
+    delete process.env.PLYPOST_LOCAL_DEMO_HTTP;
+    assert.equal(cookieOptions(local).secure, true);
+  } finally {
+    if (oldNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = oldNodeEnv;
+    if (oldDemoFlag === undefined) delete process.env.PLYPOST_LOCAL_DEMO_HTTP;
+    else process.env.PLYPOST_LOCAL_DEMO_HTTP = oldDemoFlag;
+  }
 });
