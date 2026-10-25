@@ -70,6 +70,10 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const invalidReminders = destinations.filter((id) => slotApplied && isPlatformId(id)
     ? !slotTimes[id] || Date.parse(slotTimes[id]!) < currentTime + 10_000
     : reminders[id] && !isValidLocalDateTime(reminders[id]!, currentTime));
+  const mediaGaps = destinations.flatMap((id) => {
+    const kind = missingHandoffMedia(id, draft.mediaIds?.length ?? 0, Boolean(videoId));
+    return kind ? [{ id, kind }] : [];
+  });
   const canPrepare = !editorDirty && !busy && !mediaBusy && !videoBusy && !submitting && !prepared &&
     (attempted ? Boolean(attemptedItemsRef.current) :
       destinations.length > 0 && invalidText.length === 0 && invalidReminders.length === 0);
@@ -224,6 +228,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
             return <button key={id} type="button" aria-pressed={active} aria-controls="batch-active-editor" onClick={() => setFocusedDestination(id)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-semibold transition ${active ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--accent-border)]"}`}>
               {assistedDestinations[id].name}
               <span className={`text-[10px] ${needsEdit ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{needsEdit ? "Fix" : texts[id] !== undefined ? "Edited" : "Draft"}</span>
+              {mediaGaps.some((gap) => gap.id === id) && <span className="text-[10px] text-[var(--warning)]">Media later</span>}
               {(reminders[id] || (slotApplied && isPlatformId(id) && slotTimes[id])) && <span className="text-[10px] text-[var(--accent-text)]">Time set</span>}
             </button>;
           })}
@@ -252,6 +257,13 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         <p className="font-semibold">Fix these posts before confirming:</p>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
           {destinations.filter((id) => invalidText.includes(id) || invalidReminders.includes(id)).map((id) => <button key={id} type="button" onClick={() => focusDestination(id)} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name} · {invalidText.includes(id) ? "text" : ""}{invalidText.includes(id) && invalidReminders.includes(id) ? " and " : ""}{invalidReminders.includes(id) ? "reminder" : ""}</button>)}
+        </div>
+      </div>}
+      {!attempted && mediaGaps.length > 0 && <div role="status" className="rounded-lg bg-[var(--warning-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--warning)]">
+        <p className="font-semibold">Media to bring before posting</p>
+        <p>These handoffs can be saved now. Add media in Assisted or bring it directly to the platform before you publish:</p>
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+          {mediaGaps.map(({ id, kind }) => <button key={id} type="button" onClick={() => focusDestination(id)} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name} · {kind === "video" ? "video" : "photo or video"}</button>)}
         </div>
       </div>}
       {duplicateDestinations.length > 0 && <p role="status" className="rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[11px] leading-5 text-[var(--warning)]">{duplicateDestinations.map((id) => assistedDestinations[id].name).join(", ")} already {duplicateDestinations.length === 1 ? "has a handoff" : "have handoffs"} from this draft. Confirming will add another item for each selected platform.</p>}
