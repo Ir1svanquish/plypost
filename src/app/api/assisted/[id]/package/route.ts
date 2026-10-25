@@ -1,5 +1,5 @@
 import { currentUser } from "@/lib/server/auth";
-import { buildHandoffPackage, HandoffPackageError } from "@/lib/server/handoff-package";
+import { streamHandoffPackage, HandoffPackageError } from "@/lib/server/handoff-package";
 
 export const runtime = "nodejs";
 
@@ -17,12 +17,11 @@ export async function GET(request: Request, context: Context) {
   if (!user) return Response.json({ error: "Sign in to continue." }, { status: 401, headers: privateHeaders });
   const { id } = await context.params;
   try {
-    const { bytes, filename } = buildHandoffPackage(user, id);
-    return new Response(bytes as Uint8Array<ArrayBuffer>, {
+    const { stream, filename } = streamHandoffPackage(user, id);
+    return new Response(stream, {
       headers: {
         ...privateHeaders,
         "Content-Type": "application/zip",
-        "Content-Length": String(bytes.length),
         "Content-Disposition": `attachment; filename="${filename}"`,
       },
     });

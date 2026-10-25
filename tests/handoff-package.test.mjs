@@ -54,7 +54,7 @@ test("handoff ZIP includes exact caption, ordered images, descriptions, and priv
   assert.match(response.headers.get("cache-control"), /private, no-store/);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   const bytes = new Uint8Array(await response.arrayBuffer());
-  assert.equal(Number(response.headers.get("content-length")), bytes.length);
+  assert.equal(response.headers.get("content-length"), null);
   const files = unzipSync(bytes);
   assert.deepEqual(Object.keys(files).sort(), ["caption.txt", "handoff.txt", "images/01.png", "images/02.jpg"]);
   assert.equal(strFromU8(files["caption.txt"]), `${saved.text}\n`);
