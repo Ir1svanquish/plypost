@@ -3,13 +3,16 @@
 import { useRef, useState } from "react";
 import { Download, FilePlus2, FolderOpen, Search, Trash2, Upload } from "lucide-react";
 import { platformDisplayIds, platforms, type PlatformId } from "@/lib/platforms";
-import { type SavedDraft } from "@/lib/workspace";
+import { type AssistedPost, type SavedDraft } from "@/lib/workspace";
 
 type DraftLibraryProps = {
   drafts: SavedDraft[];
+  assisted: AssistedPost[];
   currentDraftId: string | null;
   onNew: () => void;
   onLoad: (draft: SavedDraft) => void;
+  onPrepare: (draft: SavedDraft) => void;
+  onOpenAssisted: (item: AssistedPost) => void;
   onDelete: (id: string, updatedAt: string) => void;
   onExport: () => void;
   onImport: (file: File) => void;
@@ -24,7 +27,35 @@ function draftPreview(draft: SavedDraft): string {
       draft.videoId ? "Saved video · add a caption later" : "Caption to add later");
 }
 
-export function DraftLibraryPanel({ drafts, currentDraftId, onNew, onLoad, onDelete, onExport, onImport, onFullExport, onFullImport, backupBusy }: DraftLibraryProps) {
+function DraftCard({ draft, currentDraftId, handoffs, onLoad, onPrepare, onOpenAssisted, onDelete }: {
+  draft: SavedDraft;
+  currentDraftId: string | null;
+  handoffs: AssistedPost[];
+  onLoad: (draft: SavedDraft) => void;
+  onPrepare: (draft: SavedDraft) => void;
+  onOpenAssisted: (item: AssistedPost) => void;
+  onDelete: (id: string, updatedAt: string) => void;
+}) {
+  const queued = handoffs.filter((item) => item.status === "queued");
+  const postedCount = handoffs.length - queued.length;
+  const nextHandoff = queued[0] ?? handoffs[0];
+  return <article className={`rounded-2xl border p-4 ${currentDraftId === draft.id ? "border-[var(--accent-border)] bg-[var(--accent-soft)]" : "border-[var(--line)]"}`}>
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0"><h3 className="truncate text-[14px] font-bold text-[var(--text)]">{draft.title}</h3><p className="mt-1 text-[11px] text-[var(--text-soft)]">Updated {new Date(draft.updatedAt).toLocaleString("en-US")}</p>{draft.plannedDate && <p className="mt-1 text-[11px] font-semibold text-[var(--accent-text)]">Target {draft.plannedDate} · draft only</p>}</div>
+      <button type="button" aria-label={`Delete ${draft.title}`} onClick={() => onDelete(draft.id, draft.updatedAt)} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash2 size={14} /></button>
+    </div>
+    <p className="mt-3 line-clamp-2 min-h-[36px] text-[12px] leading-[18px] text-[var(--text-muted)]">{draftPreview(draft)}</p>
+    <p className="mt-2 text-[11px] font-semibold text-[var(--text-secondary)]">{handoffs.length === 0 ? "No manual posts prepared" : [queued.length && `${queued.length} to post`, postedCount && `${postedCount} marked posted`].filter(Boolean).join(" · ")}</p>
+    <p className="mt-2 truncate text-[11px] text-[var(--text-soft)]">{[...platformDisplayIds.filter((id) => draft.selected.includes(id)).map((id) => platforms[id].name), ...(draft.videoId ? ["Video"] : [])].join(" · ") || "No preview platforms"}</p>
+    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+      <button type="button" onClick={() => onLoad(draft)} className="text-[12px] font-bold text-[var(--accent-text)]">Open draft →</button>
+      <button type="button" onClick={() => onPrepare(draft)} className="text-[12px] font-bold text-[var(--accent-text)]">Prepare posts →</button>
+      {nextHandoff && <button type="button" onClick={() => onOpenAssisted(nextHandoff)} className="text-[12px] font-bold text-[var(--accent-text)]">View handoffs →</button>}
+    </div>
+  </article>;
+}
+
+export function DraftLibraryPanel({ drafts, assisted, currentDraftId, onNew, onLoad, onPrepare, onOpenAssisted, onDelete, onExport, onImport, onFullExport, onFullImport, backupBusy }: DraftLibraryProps) {
   const fullInput = useRef<HTMLInputElement>(null);
   const textInput = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -83,7 +114,7 @@ export function DraftLibraryPanel({ drafts, currentDraftId, onNew, onLoad, onDel
       </details>
       {drafts.length === 0 ? <div className="flex flex-col items-center border-t border-[var(--line)] px-6 py-9 text-center"><FolderOpen size={22} className="text-[var(--accent-text)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No saved drafts yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Write a post in Create, then save it there.</p></div> : <div className="border-t border-[var(--line)] p-6 sm:p-7">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[var(--text-muted)]"><p role="status">{visibleDrafts.length} of {drafts.length} drafts</p>{hasFilters && <button type="button" onClick={() => { setQuery(""); setShow("all"); setSort("updated"); }} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Clear filters</button>}</div>
-        {visibleDrafts.length === 0 ? <div className="flex flex-col items-center rounded-xl border border-dashed border-[var(--line)] px-6 py-9 text-center"><Search size={21} className="text-[var(--text-soft)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No drafts match</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Try a different search or platform.</p></div> : <div className="grid gap-3 sm:grid-cols-2">{visibleDrafts.map((draft) => <article key={draft.id} className={`rounded-2xl border p-4 ${currentDraftId === draft.id ? "border-[var(--accent-border)] bg-[var(--accent-soft)]" : "border-[var(--line)]"}`}><div className="flex items-start justify-between gap-2"><div className="min-w-0"><h3 className="truncate text-[14px] font-bold text-[var(--text)]">{draft.title}</h3><p className="mt-1 text-[11px] text-[var(--text-soft)]">Updated {new Date(draft.updatedAt).toLocaleString("en-US")}</p>{draft.plannedDate && <p className="mt-1 text-[11px] font-semibold text-[var(--accent-text)]">Target {draft.plannedDate} · draft only</p>}</div><button type="button" aria-label={`Delete ${draft.title}`} onClick={() => onDelete(draft.id, draft.updatedAt)} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash2 size={14} /></button></div><p className="mt-3 line-clamp-2 min-h-[36px] text-[12px] leading-[18px] text-[var(--text-muted)]">{draftPreview(draft)}</p><div className="mt-4 flex items-center justify-between gap-2"><span className="truncate text-[11px] text-[var(--text-soft)]">{[...platformDisplayIds.filter((id) => draft.selected.includes(id)).map((id) => platforms[id].name), ...(draft.videoId ? ["Video"] : [])].join(" · ") || "No preview platforms"}</span><button type="button" onClick={() => onLoad(draft)} className="shrink-0 text-[12px] font-bold text-[var(--accent-text)]">Open draft →</button></div></article>)}</div>}
+        {visibleDrafts.length === 0 ? <div className="flex flex-col items-center rounded-xl border border-dashed border-[var(--line)] px-6 py-9 text-center"><Search size={21} className="text-[var(--text-soft)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No drafts match</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Try a different search or platform.</p></div> : <div className="grid gap-3 sm:grid-cols-2">{visibleDrafts.map((draft) => <DraftCard key={draft.id} draft={draft} currentDraftId={currentDraftId} handoffs={assisted.filter((item) => item.sourceDraftId === draft.id)} onLoad={onLoad} onPrepare={onPrepare} onOpenAssisted={onOpenAssisted} onDelete={onDelete} />)}</div>}
       </div>}
     </section>
   );
