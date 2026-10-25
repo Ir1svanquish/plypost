@@ -35,7 +35,7 @@ import { MastodonLivePanel, isMastodonConnection, type MastodonConnection } from
 import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@/components/bluesky-live-panel";
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
-import { assistedDestinations, assistedOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
+import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -1427,11 +1427,16 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   </details>
                   <div className="mt-6 border-t border-[var(--line)] pt-5">
                     <div className="mb-3 flex items-center justify-between"><h3 className="text-[13px] font-bold text-[var(--text)]">Photo &amp; text-first</h3><span className="text-[12px] text-[var(--text-muted)]">{selected.length} previews selected</span></div>
-                    <div role="group" aria-label="Destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                    <p className="mb-2 text-[11px] font-semibold text-[var(--text-muted)]">Edit a preview for each platform</p>
+                    <div role="group" aria-label="Editable photo and text destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                       {platformDisplayIds.map((id) => {
                         const isSelected = selected.includes(id);
                         return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition sm:gap-2 sm:px-3 ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" /><span className="min-w-0 truncate">{platforms[id].name}</span><span className={`ml-auto hidden h-4 w-4 shrink-0 items-center justify-center rounded border sm:flex ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
                       })}
+                    </div>
+                    <p className="mb-2 mt-4 text-[11px] font-semibold text-[var(--text-muted)]">More platforms · prepare a manual post</p>
+                    <div role="group" aria-label="Manual photo and text destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                      {assistedTextImageOnlyDisplayIds.map((id) => <button key={id} type="button" onClick={() => openManualComposer(id)} aria-label={`Prepare a manual post for ${assistedDestinations[id].name}`} className="inline-flex min-w-0 items-center justify-between gap-1.5 rounded-xl border border-[var(--line)] bg-[var(--field)] px-2 py-2 text-[11px] font-semibold text-[var(--text-secondary)] transition hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] sm:px-3 sm:text-[12px]"><span className="truncate">{id === "facebook" ? "Facebook" : assistedDestinations[id].name}</span><ArrowRight size={13} className="shrink-0" aria-hidden="true" /></button>)}
                     </div>
                     <div className="mt-4 border-t border-[var(--line)] pt-4">
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="text-[13px] font-bold text-[var(--text)]">Video-first</h3><span className="text-[11px] text-[var(--text-muted)]">Manual post preparation</span></div>
