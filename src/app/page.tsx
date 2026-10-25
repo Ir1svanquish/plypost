@@ -1656,7 +1656,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
                 <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-4 sm:px-7">
                   <h2 id="draft-heading" className="text-[14px] font-bold text-[var(--text)]">{currentDraftId ? "Edit draft" : "New post"}</h2>
-                  <div className="flex shrink-0 items-center gap-3">{editorDirty && <span role="status" className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--warning)]">Unsaved changes</span>}<button type="button" onClick={newDraft} className="text-[12px] font-semibold text-[var(--accent-text)]">New draft</button></div>
+                  <div className="flex shrink-0 items-center gap-3">{(editorDirty || pendingDraftSave) && <span role="status" className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--warning)]">{pendingDraftSave ? "Save unconfirmed" : "Unsaved changes"}</span>}<button type="button" onClick={newDraft} className="text-[12px] font-semibold text-[var(--accent-text)]">New draft</button></div>
                 </div>
                 <div className="px-5 pb-5 pt-6 sm:px-7 sm:pb-7">
                   <label htmlFor="source-draft" className="sr-only">Your message</label>
@@ -1821,7 +1821,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       </div>
     </dialog>}
     {pendingEditorSwitch && <dialog ref={switchDialogRef} onCancel={(event) => { event.preventDefault(); if (!switchSaving) setPendingEditorSwitch(null); }} aria-labelledby="unsaved-editor-title" aria-describedby="unsaved-editor-description" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
-      <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">Unsaved changes</h2>
+      <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">{pendingDraftSave ? "Check this save" : "Unsaved changes"}</h2>
       <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">{pendingDraftSave ? "The last save has not been confirmed. Check it before" : "Your current text, platform versions, and image choices have changed. Save your edits before"} {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : pendingEditorSwitch.kind === "planned" ? "opening a copy of this planned post" : "starting a draft from a posted handoff"}. {pendingDraftSave ? "Discarding here also clears the pending check." : needsDraftRecovery ? "If the saved draft changed elsewhere, save your edits as a new draft." : ""}</p>
       {!canSaveEditor && <p className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Add a title, caption, platform text or image before saving.</p>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
