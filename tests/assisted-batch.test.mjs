@@ -40,7 +40,7 @@ test("batch handoffs snapshot saved platform versions and media, while repeat re
     name: "cover.png", type: "image/png",
     bytes: await sharp({ create: { width: 4, height: 4, channels: 3, background: "#3366cc" } }).png().toBuffer(),
   })).media;
-  const saved = saveDraft(owner, { ...draft("Saved source", undefined, undefined, [image.id]), mediaAlt: ["Blue cover image"] });
+  const saved = saveDraft(owner, { ...draft("Saved source", undefined, undefined, [image.id]), mediaAlt: ["Blue cover image"], placeLabel: "Central, Hong Kong" });
   const batchId = randomUUID();
   const items = handoffs();
   const first = prepareAssistedBatch(owner, saved.id, batchId, items);
@@ -49,6 +49,7 @@ test("batch handoffs snapshot saved platform versions and media, while repeat re
   assert.deepEqual(first.map((item) => item.destination), ["bluesky", "linkedin"]);
   assert.ok(first.every((item) => item.sourceDraftId === saved.id && item.batchId === batchId && item.status === "queued"));
   assert.ok(first.every((item) => item.title === saved.title && item.mediaIds[0] === image.id && item.mediaAlt[0] === "Blue cover image"));
+  assert.ok(first.every((item) => item.placeLabel === "Central, Hong Kong"));
   assert.equal(listWorkspace(owner).log.find((entry) => entry.action === "assisted.batch_prepared").detail, "2 manual handoffs");
   closeDatabase();
   assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, [...items].reverse()), [...first].reverse());

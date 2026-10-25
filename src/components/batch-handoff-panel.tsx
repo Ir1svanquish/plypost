@@ -13,6 +13,7 @@ import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
 import { AiLiteralNotice } from "@/components/ai-literal-notice";
 import { isManualAiDestination } from "@/lib/ai-handoff";
 import type { PreflightReport } from "@/lib/ai-preflight";
+import { imageLimitWarning } from "@/lib/media-policy";
 
 export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; reminderEnabled?: false; videoId?: string };
 export type BatchPrepareResult = "prepared" | "rejected" | "uncertain";
@@ -279,6 +280,8 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           <p className={`mt-1 text-[11px] ${valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}`}>{check ? `${check.count} / ${check.limit} ${id === "bluesky" ? "graphemes" : "characters"}` : `${characterCount(text)} / 5,000 characters`}{check?.byteCount !== undefined ? ` · ${check.byteCount} / ${check.byteLimit} UTF-8 bytes` : ""}{!valid ? " · Edit this text before confirming" : ""}</p>
           {draft.source.trim() && <AiLiteralNotice source={draft.source} suggestion={text} />}
           {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{missingMedia === "video" ? " No video is attached here; bring one when posting." : missingMedia ? " No photo or video is attached here; bring one when posting." : ""}</p>}
+          {imageLimitWarning(id, draft.mediaIds?.length ?? 0) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(id, draft.mediaIds?.length ?? 0)}</p>}
+          {draft.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {draft.placeLabel} · add on the platform yourself</p>}
           <div className="mt-3 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div><p className="text-[13px] font-bold text-[var(--text)]">AI post check</p><p className="mt-0.5 text-[12px] leading-5 text-[var(--text-muted)]">Check this post against the saved draft before publishing.</p></div>

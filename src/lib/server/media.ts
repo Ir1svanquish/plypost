@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { audit, database, transaction } from "./db";
+import { MAX_POST_IMAGES } from "../media-policy";
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const MAX_IMAGE_PIXELS = 20_000_000;
@@ -94,9 +95,9 @@ export function getMedia(userId: string, id: string): { media: MediaItem; bytes:
 }
 
 export function assertOwnedMedia(userId: string, mediaIds: unknown): asserts mediaIds is string[] {
-  if (!Array.isArray(mediaIds) || mediaIds.length > 4 || new Set(mediaIds).size !== mediaIds.length ||
+  if (!Array.isArray(mediaIds) || mediaIds.length > MAX_POST_IMAGES || new Set(mediaIds).size !== mediaIds.length ||
       mediaIds.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id))) {
-    throw new MediaError("Choose up to four distinct images from your media library.");
+    throw new MediaError(`Choose up to ${MAX_POST_IMAGES} distinct images from your media library.`);
   }
   const db = mediaDatabase();
   for (const id of mediaIds) {

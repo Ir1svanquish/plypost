@@ -207,6 +207,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
         id: randomUUID(), title: draftTitle(draft.title, draft.source), destination, text,
         ...(draft.mediaIds !== undefined ? { mediaIds: [...draft.mediaIds] } : {}),
         ...(draft.mediaAlt !== undefined ? { mediaAlt: [...draft.mediaAlt] } : {}),
+        ...(draft.placeLabel ? { placeLabel: draft.placeLabel } : {}),
         ...(videoId !== undefined ? { videoId } : {}),
         sourceDraftId: draft.id, batchId, scheduledFor,
         ...(reminderEnabled !== undefined ? { reminderEnabled } : {}),
@@ -316,7 +317,7 @@ export function updateAssistedVideo(userId: string, id: string, expectedVideoId:
 /** Change one queued handoff's images without altering its source draft or sibling handoffs. */
 export function updateAssistedImages(userId: string, id: string, expectedMediaIds: unknown, expectedMediaAlt: unknown, mediaIds: unknown, mediaAlt: unknown): boolean {
   if (!validId(id) || !validMediaAlt(expectedMediaAlt, expectedMediaIds) || !validMediaAlt(mediaAlt, mediaIds)) {
-    throw new Error("Choose up to four distinct images and provide a description for each selection.");
+    throw new Error("Choose up to 20 distinct images and provide a description for each selection.");
   }
   const previousIds = expectedMediaIds as string[];
   const nextIds = mediaIds as string[];

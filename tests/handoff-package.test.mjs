@@ -26,11 +26,11 @@ const context = (id) => ({ params: Promise.resolve({ id }) });
 
 after(() => { closeDatabase(); if (temporary.startsWith(tmpdir())) rmSync(temporary, { recursive: true, force: true }); });
 
-function handoff(destination, mediaIds = [], mediaAlt = []) {
+function handoff(destination, mediaIds = [], mediaAlt = [], placeLabel) {
   const stamp = new Date().toISOString();
   return addAssisted(owner, {
     id: randomUUID(), title: "Autumn workshop", destination, text: "Doors open at 1:30.\nBring a laptop.",
-    mediaIds, mediaAlt, scheduledFor: stamp, createdAt: stamp, status: "queued",
+    mediaIds, mediaAlt, ...(placeLabel ? { placeLabel } : {}), scheduledFor: stamp, createdAt: stamp, status: "queued",
   });
 }
 
@@ -39,7 +39,7 @@ test("handoff ZIP includes exact caption, ordered images, descriptions, and priv
   const secondBytes = await sharp({ create: { width: 4, height: 3, channels: 3, background: "#344556" } }).jpeg().toBuffer();
   const first = (await createMedia(owner, { name: "../private/flyer.png", type: "image/png", bytes: firstBytes })).media;
   const second = (await createMedia(owner, { name: "portrait.jpg", type: "image/jpeg", bytes: secondBytes })).media;
-  const saved = handoff("instagram", [first.id, second.id], ["Event flyer", "Speaker portrait"]);
+  const saved = handoff("instagram", [first.id, second.id], ["Event flyer", "Speaker portrait"], "Central, Hong Kong");
   const url = `${base}/${saved.id}/package`;
 
   assert.equal((await GET(new globalThis.Request(url), context(saved.id))).status, 401);
@@ -62,6 +62,7 @@ test("handoff ZIP includes exact caption, ordered images, descriptions, and priv
   assert.deepEqual(files["images/02.jpg"], new Uint8Array(getMedia(owner, second.id).bytes));
   const notes = strFromU8(files["handoff.txt"]);
   assert.match(notes, /Platform: Instagram/);
+  assert.match(notes, /Place note: Central, Hong Kong/);
   assert.match(notes, /Image 1: images\/01\.png\nDescription: Event flyer/);
   assert.match(notes, /Image 2: images\/02\.jpg\nDescription: Speaker portrait/);
   assert.doesNotMatch(notes, /private\/flyer/);

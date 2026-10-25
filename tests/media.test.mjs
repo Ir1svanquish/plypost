@@ -71,7 +71,7 @@ test("draft attachment ownership and deletion conflict are enforced in the datab
   const ownerImage = (await createMedia(owner, { name: "draft.png", type: "image/png", bytes: png })).media;
   assert.doesNotThrow(() => assertOwnedMedia(owner, [ownerImage.id]));
   assert.throws(() => assertOwnedMedia(other, [ownerImage.id]), /missing from your media library/);
-  assert.throws(() => assertOwnedMedia(owner, [ownerImage.id, ownerImage.id]), /four distinct images/);
+  assert.throws(() => assertOwnedMedia(owner, [ownerImage.id, ownerImage.id]), /20 distinct images/);
   assert.throws(() => assertOwnedMedia(owner, [randomUUID()]), /missing from your media library/);
   const draftId = randomUUID();
   database().prepare("INSERT INTO drafts(id,user_id,payload,updated_at) VALUES (?,?,?,?)")
@@ -80,6 +80,22 @@ test("draft attachment ownership and deletion conflict are enforced in the datab
   assert.ok(getMedia(owner, ownerImage.id));
   database().prepare("DELETE FROM drafts WHERE id=? AND user_id=?").run(draftId, owner);
   assert.equal(deleteMedia(owner, ownerImage.id), true);
+});
+
+test("a draft can keep more than four owned images without dropping their order", async () => {
+  const imageIds = [];
+  for (let index = 0; index < 5; index += 1) {
+    const bytes = await sharp({ create: { width: 3, height: 3, channels: 3, background: `#${(index + 1).toString(16).padStart(6, "0")}` } }).png().toBuffer();
+    imageIds.push((await createMedia(owner, { name: `gallery-${index}.png`, type: "image/png", bytes })).media.id);
+  }
+  const stamp = new Date().toISOString();
+  const draft = saveDraft(owner, {
+    id: randomUUID(), title: "Gallery", source: "Five photos", selected: ["linkedin"], variants: {},
+    mediaIds: imageIds, mediaAlt: imageIds.map(() => ""), placeLabel: "Central, Hong Kong",
+    createdAt: stamp, updatedAt: stamp,
+  });
+  assert.deepEqual(draft.mediaIds, imageIds);
+  assert.equal(draft.placeLabel, "Central, Hong Kong");
 });
 
 test("saved drafts and imports reject image IDs that the account does not own", async () => {

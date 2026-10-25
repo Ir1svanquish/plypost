@@ -32,6 +32,7 @@ test("comparison covers destinations and attachments, while ignoring server time
   const saved = draft();
   assert.equal(sameDraftPayload(saved, { ...saved, updatedAt: new Date(Date.now() + 1000).toISOString() }), true);
   assert.equal(sameDraftPayload(saved, { ...saved, mediaIds: [randomUUID()], mediaAlt: ["photo"] }), false);
+  assert.equal(sameDraftPayload(saved, { ...saved, placeLabel: "Central" }), false);
   assert.equal(sameDraftPayload(saved, { ...saved, selected: ["threads"] }), false);
   assert.equal(sameDraftPayload({ ...saved, selected: ["threads", "bluesky"] },
     { ...saved, selected: ["bluesky", "threads"] }), false);

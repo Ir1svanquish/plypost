@@ -19,7 +19,8 @@ export function sameDraftPayload(left: SavedDraft, right: SavedDraft): boolean {
     sameList(left.mediaAlt ?? (left.mediaIds ?? []).map(() => ""),
       right.mediaAlt ?? (right.mediaIds ?? []).map(() => "")) &&
     (left.videoId ?? null) === (right.videoId ?? null) &&
-    (left.plannedDate ?? "") === (right.plannedDate ?? "");
+    (left.plannedDate ?? "") === (right.plannedDate ?? "") &&
+    (left.placeLabel ?? "") === (right.placeLabel ?? "");
 }
 
 export function inspectPendingDraftSave(

@@ -30,6 +30,7 @@ export function buildHandoffPackage(userId: string, id: string): { bytes: Uint8A
     `Platform: ${assistedDestinations[item.destination].name}`,
     `Title: ${item.title}`,
     hasManualReminder(item) ? `Reminder (UTC): ${item.scheduledFor}` : "Reminder: none",
+    ...(item.placeLabel ? [`Place note: ${item.placeLabel}`, "Add this as a location only if the destination supports it; Plypost does not tag a location for you."] : []),
     "",
     "Copy caption.txt into the destination platform. Publish from your own account.",
   ];

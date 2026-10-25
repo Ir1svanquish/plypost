@@ -8,6 +8,7 @@ import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost 
 import { parseBrandBrief, parseWeeklyPlan, type BrandBrief, type WeeklyPlan } from "../strategy";
 import { parseSlotSettings, type SlotSettings } from "../slot-settings";
 import { parseVoiceProfile, type VoiceProfile } from "../ai-studio";
+import { MAX_POST_IMAGES } from "../media-policy";
 
 export const MAX_PORTABLE_BACKUP_BYTES = 192 * 1024 * 1024;
 
@@ -110,7 +111,7 @@ function safeName(value: string): string {
 
 function mediaReferences(value: unknown): string[] {
   if (!isRecord(value) || value.mediaIds === undefined) return [];
-  if (!Array.isArray(value.mediaIds) || value.mediaIds.length > 4 ||
+  if (!Array.isArray(value.mediaIds) || value.mediaIds.length > MAX_POST_IMAGES ||
       new Set(value.mediaIds).size !== value.mediaIds.length || !value.mediaIds.every(validId)) {
     invalid("Backup contains invalid image references.");
   }

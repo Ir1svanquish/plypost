@@ -13,6 +13,7 @@ import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { PrivateVideoPreview, VideoAttachmentPicker } from "@/components/video-attachment-picker";
 import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
 import { isManualAiDestination } from "@/lib/ai-handoff";
+import { imageLimitWarning } from "@/lib/media-policy";
 
 type Props = {
   items: AssistedPost[];
@@ -361,6 +362,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
           {!isPlatformId(destination) && isManualAiDestination(destination) && <AIHandoffAssistant key={`ai-${destination}`} destination={destination} source={text} disabled={busy} onApply={onTextChange} />}
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
           <p className="mt-2 text-[12px] text-[var(--text-secondary)]">{imageCount ? `${imageCount} ${imageCount === 1 ? "image" : "images"} from the current draft will be saved with this handoff.` : "No images selected in the current draft."} <button type="button" onClick={onEditImages} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit images in Create</button></p>
+          {imageLimitWarning(destination, imageCount) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(destination, imageCount)}</p>}
           <details key={`video-${destination}`} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
           {selected.needsMedia && <p className={`mt-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${missingComposerMedia ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{missingComposerMedia === "video" ? "No video attached here. Attach one or bring a video when you publish on YouTube." : missingComposerMedia ? "No photo or video attached here. Bring one when you publish." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
@@ -460,6 +462,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
                   <button type="button" onClick={() => closeTextEditor(item.id)} disabled={busy || textSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                 </div>
               </div>}
+              {item.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {item.placeLabel} <span className="text-[var(--text-soft)]">(add on the platform yourself)</span></p>}
+              {imageLimitWarning(item.destination, item.mediaIds?.length ?? 0) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(item.destination, item.mediaIds?.length ?? 0)}</p>}
               {!editingImages && <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expected, next) => onUpdateDescriptions(item.id, expected, next) : undefined} />}
               {item.status === "queued" && !editingImages && <button type="button" onClick={() => startImageEdit(item)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedImageIds.length ? "Change images for this handoff" : "Attach images to this handoff"}</button>}
               {item.status === "queued" && editingImages && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">

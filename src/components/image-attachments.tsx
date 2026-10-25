@@ -4,8 +4,9 @@ import Image from "next/image";
 import { useEffect, useId, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Download, ImagePlus, LoaderCircle, Trash2, X } from "lucide-react";
 import { MAX_IMAGE_ALT_CHARS } from "@/lib/workspace";
+import { MAX_POST_IMAGES } from "@/lib/media-policy";
 
-const MAX_IMAGES = 4;
+const MAX_IMAGES = MAX_POST_IMAGES;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -107,7 +108,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
     const remaining = MAX_IMAGES - selectedRef.current.length;
     const picked = Array.from(files);
     if (remaining <= 0) {
-      setError(`A ${subject} can use up to four images. Remove one before adding another.`);
+      setError(`A ${subject} can use up to ${MAX_IMAGES} images. Remove one before adding another.`);
       return;
     }
     if (picked.length > remaining) {
@@ -160,7 +161,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
     } else if (selectedRef.current.length < MAX_IMAGES) {
       setSelection([...selectedRef.current, id]);
     } else {
-      setError(`A ${subject} can use up to four images. Remove one before adding another.`);
+      setError(`A ${subject} can use up to ${MAX_IMAGES} images. Remove one before adding another.`);
     }
   }
 
@@ -201,7 +202,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 id={`${inputId}-heading`} className="text-[13px] font-bold text-[var(--text)]">Images <span className="font-medium text-[var(--text-soft)]">· {selectedIds.length}/{MAX_IMAGES}</span></h3>
-          <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">JPEG, PNG or WebP · up to 5 MB each. Images are kept privately in Plypost.</p>
+          <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">JPEG, PNG or WebP · up to 5 MB each. Keep up to 20 in a draft; the platform may allow fewer.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input ref={inputRef} id={inputId} type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={disabled || uploading || deletingId !== null || selectedIds.length >= MAX_IMAGES} onChange={(event) => { void uploadFiles(event.target.files); event.target.value = ""; }} />
@@ -215,7 +216,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
 
       {error && <p role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</p>}
       {missingCount > 0 && libraryLoaded && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><p role="status">{missingCount} saved {missingCount === 1 ? "image is" : "images are"} unavailable.</p><button type="button" onClick={() => setSelection(selected.map((item) => item.id))} disabled={disabled || uploading || deletingId !== null} className="font-semibold underline underline-offset-2 disabled:opacity-50">Remove unavailable</button></div>}
-      {selected.length > 0 && <ul className="mt-4 grid gap-3 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+      {selected.length > 0 && <ul className="mt-4 grid max-h-[430px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
         <div className="flex min-w-0 gap-3">
           <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={descriptions[item.id] || item.name} fill sizes="80px" className="object-cover" /></div>
           <div className="flex min-w-0 flex-1 flex-col justify-between">

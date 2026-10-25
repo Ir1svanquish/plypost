@@ -10,6 +10,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 import { platforms, type PlatformId } from "@/lib/platforms";
+import { imageLimits } from "@/lib/media-policy";
 
 type Props = {
   platform: PlatformId;
@@ -120,16 +121,18 @@ function ThreadsPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds: 
 
 /** An illustrative post card; no account data or live metrics are implied. */
 export function PlatformPreview({ platform, text, count, limit, mediaIds = [], mediaAlt = [] }: Props) {
+  const shownIds = mediaIds.slice(0, imageLimits[platform]);
+  const shownAlt = mediaAlt.slice(0, shownIds.length);
   return (
     <figure className="mx-auto w-full max-w-[520px]">
       <div aria-label={`${platforms[platform].name} example post`} className="overflow-hidden rounded-[18px] border border-[var(--line)] bg-[var(--surface)] shadow-sm">
-        {platform === "bluesky" && <BlueskyPreview text={text} mediaIds={mediaIds} mediaAlt={mediaAlt} />}
-        {platform === "mastodon" && <MastodonPreview text={text} mediaIds={mediaIds} mediaAlt={mediaAlt} />}
-        {platform === "linkedin" && <LinkedInPreview text={text} mediaIds={mediaIds} mediaAlt={mediaAlt} />}
-        {platform === "threads" && <ThreadsPreview text={text} mediaIds={mediaIds} mediaAlt={mediaAlt} />}
+        {platform === "bluesky" && <BlueskyPreview text={text} mediaIds={shownIds} mediaAlt={shownAlt} />}
+        {platform === "mastodon" && <MastodonPreview text={text} mediaIds={shownIds} mediaAlt={shownAlt} />}
+        {platform === "linkedin" && <LinkedInPreview text={text} mediaIds={shownIds} mediaAlt={shownAlt} />}
+        {platform === "threads" && <ThreadsPreview text={text} mediaIds={shownIds} mediaAlt={shownAlt} />}
       </div>
       <figcaption className="mt-3 flex flex-wrap items-center justify-center gap-x-2 text-center text-[11px] text-[var(--text-soft)]">
-        <span>Illustrative preview{mediaIds.length > 0 ? " · Images are local; upload them yourself" : " · No live platform data"}</span>
+        <span>Illustrative preview{mediaIds.length > 0 ? ` · ${shownIds.length} of ${mediaIds.length} local images shown` : " · No live platform data"}</span>
         {typeof count === "number" && typeof limit === "number" && <span className="tabular-nums">· {count} / {limit} {platform === "bluesky" ? "graphemes" : "characters"}</span>}
       </figcaption>
     </figure>

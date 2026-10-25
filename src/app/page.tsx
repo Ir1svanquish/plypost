@@ -9,10 +9,13 @@ import {
   CircleAlert,
   Clock3,
   Copy,
+  Hash,
   FilePenLine,
+  MapPin,
   Plus,
   RotateCcw,
   Send,
+  Smile,
   UserRound,
   Video,
   X,
@@ -43,6 +46,7 @@ import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisp
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { MAX_POST_IMAGES, imageLimitWarning } from "@/lib/media-policy";
 
 const sampleDraft =
   "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.";
@@ -118,6 +122,7 @@ type EditorContent = {
   mediaAlt: readonly string[];
   videoId: string | null;
   plannedDate: string;
+  placeLabel: string;
 };
 type EditorOrigin = "starter" | "new" | "planned";
 type EditorSwitch = { kind: "new" } | { kind: "draft"; draft: SavedDraft; prepareHandoffs?: boolean } | { kind: "planned"; post: ScheduledPost } | { kind: "assisted"; post: AssistedPost };
@@ -139,6 +144,7 @@ function sameEditorContent(left: EditorContent, right: EditorContent | SavedDraf
     samePlatforms(left.selected, right.selected) && sameItems(left.mediaIds, right.mediaIds ?? []) &&
     left.videoId === (right.videoId ?? null) &&
     left.plannedDate === (right.plannedDate ?? "") &&
+    left.placeLabel.trim() === (right.placeLabel ?? "") &&
     sameItems(left.mediaAlt.map((value) => value.trim()), (right.mediaAlt ?? (right.mediaIds ?? []).map(() => "")).map((value) => value.trim())) &&
     platformIds.every((id) => left.variants[id] === right.variants[id]);
 }
@@ -151,7 +157,7 @@ function hasUnsavedEditorChanges(editor: EditorContent, currentDraftId: string |
   if (origin === "planned") return true;
   return !sameEditorContent(editor, {
     title: "", source: "",
-    selected: [], variants: {}, mediaIds: [], mediaAlt: [], videoId: null, plannedDate: "",
+    selected: [], variants: {}, mediaIds: [], mediaAlt: [], videoId: null, plannedDate: "", placeLabel: "",
   });
 }
 
@@ -195,6 +201,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [mediaAltById, setMediaAltById] = useState<Record<string, string>>({});
   const [videoId, setVideoId] = useState<string | null>(null);
   const [plannedDate, setPlannedDate] = useState("");
+  const [placeLabel, setPlaceLabel] = useState("");
+  const [showPlaceField, setShowPlaceField] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const sourceInputRef = useRef<HTMLTextAreaElement>(null);
+  const draftDetailsRef = useRef<HTMLDetailsElement>(null);
   const videoBusyRef = useRef(false);
   const [videoBusy, setVideoBusy] = useState(false);
   const [mediaPickerEpoch, setMediaPickerEpoch] = useState(0);
@@ -268,7 +279,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [blueskyLoading, setBlueskyLoading] = useState(true);
   const [blueskyError, setBlueskyError] = useState<string | null>(null);
   const mediaAlt = mediaIds.map((id) => mediaAltById[id] ?? "");
-  const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt, videoId, plannedDate };
+  const editorContent: EditorContent = { title, source, selected, variants, mediaIds, mediaAlt, videoId, plannedDate, placeLabel };
   const editorContentRef = useRef(editorContent);
   editorContentRef.current = editorContent;
   const currentDraftIdRef = useRef(currentDraftId);
@@ -508,6 +519,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           mediaAlt?: unknown;
           videoId?: unknown;
           plannedDate?: unknown;
+          placeLabel?: unknown;
           editorOrigin?: unknown;
           pendingDraftSave?: unknown;
         };
@@ -535,7 +547,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           if (typeof data.currentDraftVersion === "string") setCurrentDraftVersion(data.currentDraftVersion);
           else if (!pending) setDraftConflict(true);
         }
-        if (Array.isArray(data.mediaIds) && data.mediaIds.length <= 4 && data.mediaIds.every((id) => typeof id === "string")) {
+        if (Array.isArray(data.mediaIds) && data.mediaIds.length <= MAX_POST_IMAGES && data.mediaIds.every((id) => typeof id === "string")) {
           setMediaIds(data.mediaIds);
           const cachedAlt = data.mediaAlt;
           if (Array.isArray(cachedAlt) && cachedAlt.length === data.mediaIds.length &&
@@ -546,6 +558,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         }
         if (typeof data.videoId === "string" && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(data.videoId)) setVideoId(data.videoId);
         if (typeof data.plannedDate === "string" && data.plannedDate.length <= 10 && /^[\d-]*$/.test(data.plannedDate)) setPlannedDate(data.plannedDate);
+        if (typeof data.placeLabel === "string" && data.placeLabel.length <= 120 && Array.from(data.placeLabel).every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127)) setPlaceLabel(data.placeLabel);
         if (data.editorOrigin === "starter" || data.editorOrigin === "new" || data.editorOrigin === "planned") setEditorOrigin(data.editorOrigin);
         if (pending && (data.currentDraftId === null || data.currentDraftId === undefined ||
             pending.snapshot.id === data.currentDraftId || pending.asCopy)) setPendingDraftSave(pending);
@@ -585,7 +598,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   function persistEditorCache(pending: PendingDraftSave | null) {
     writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId,
-      plannedDate, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave: pending }));
+      plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave: pending }));
   }
 
   useEffect(() => {
@@ -596,7 +609,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave, hydrated, email]);
+  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -808,6 +821,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       source, selected: [...selected], variants: { ...variants },
       mediaIds: [...mediaIds], mediaAlt: mediaAlt.map((value) => value.trim()),
       ...(videoId ? { videoId } : {}), ...(plannedDate ? { plannedDate } : {}),
+      ...(placeLabel.trim() ? { placeLabel: placeLabel.trim() } : {}),
       createdAt: !copyMode && existing ? existing.createdAt : stamp, updatedAt: stamp,
     };
     const revisionAtStart = editorRevision.current;
@@ -973,6 +987,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById({});
       setVideoId(null);
       setPlannedDate("");
+      setPlaceLabel("");
       setSelected([]);
       setActive(platformDisplayIds[0]);
       setNotice(null);
@@ -990,6 +1005,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById(Object.fromEntries((draft.mediaIds ?? []).map((id, index) => [id, draft.mediaAlt?.[index] ?? ""])));
       setVideoId(draft.videoId ?? null);
       setPlannedDate(draft.plannedDate ?? "");
+      setPlaceLabel(draft.placeLabel ?? "");
       setActive(platformDisplayIds.find((id) => draft.selected.includes(id)) ?? platformDisplayIds[0]);
       setNotice({ kind: "success", text: `Opened “${draft.title}”. Changes will be saved when you click Update draft.` });
     } else if (next.kind === "planned") {
@@ -1006,6 +1022,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById(Object.fromEntries((post.mediaIds ?? []).map((id, index) => [id, post.mediaAlt?.[index] ?? ""])));
       setVideoId(null);
       setPlannedDate("");
+      setPlaceLabel(post.placeLabel ?? "");
       setActive(platformDisplayIds.find((id) => post.posts[id] !== undefined) ?? platformDisplayIds[0]);
       setNotice({ kind: "success", text: "Opened a copy of the planned post. The plan snapshot is unchanged." });
     } else {
@@ -1022,6 +1039,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById({});
       setVideoId(null);
       setPlannedDate("");
+      setPlaceLabel(post.placeLabel ?? "");
       setActive(isPlatformId(post.destination) ? post.destination : platformDisplayIds[0]);
       setNotice({ kind: "success", text: "Started an unsaved draft from your posted text. Review and rewrite it before sharing; media was not copied." });
     }
@@ -1171,6 +1189,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       posts: Object.fromEntries(selected.map((id) => [id, textFor(id)])),
       mediaIds: [...mediaIds],
       mediaAlt: mediaAlt.map((value) => value.trim()),
+      ...(placeLabel.trim() ? { placeLabel: placeLabel.trim() } : {}),
       scheduledFor: scheduledFor.toISOString(),
       createdAt: new Date().toISOString(),
       status: "queued",
@@ -1337,6 +1356,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById({});
       setVideoId(null);
       setPlannedDate("");
+      setPlaceLabel("");
       resetMediaPicker();
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
@@ -1390,6 +1410,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById({});
       setVideoId(null);
       setPlannedDate("");
+      setPlaceLabel("");
       resetMediaPicker();
       setStrategyRefreshEpoch((epoch) => epoch + 1);
       setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts. AI weekly plans were cleared; your saved brand profile remains.` });
@@ -1486,6 +1507,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       text,
       mediaIds: [...mediaIds],
       mediaAlt: mediaAlt.map((value) => value.trim()),
+      ...(placeLabel.trim() ? { placeLabel: placeLabel.trim() } : {}),
       ...(videoId ? { videoId } : {}),
       scheduledFor: scheduledFor.toISOString(),
       ...(!assistTime ? { reminderEnabled: false } : {}),
@@ -1689,10 +1711,18 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                 <div className="px-5 pb-5 pt-6 sm:px-7 sm:pb-7">
                   <label htmlFor="source-draft" className="sr-only">Your message</label>
                   <div className="relative">
-                    <textarea id="source-draft" value={source} onChange={(event) => { const nextSource = event.target.value; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(nextSource, variants))); setSource(nextSource); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[190px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 pb-16 pt-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                    <textarea ref={sourceInputRef} id="source-draft" value={source} onChange={(event) => { const nextSource = event.target.value; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(nextSource, variants))); setSource(nextSource); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[190px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 pb-16 pt-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
                     <button type="button" aria-expanded={showAttachments} aria-controls="draft-media-panel" onClick={() => setShowAttachments((open) => !open)} className="absolute bottom-4 left-3 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 text-[12px] font-semibold text-[var(--text-secondary)] shadow-sm hover:bg-[var(--surface-hover)]"><Plus size={16} aria-hidden="true" />{mediaIds.length || videoId ? `${mediaIds.length} ${mediaIds.length === 1 ? "photo" : "photos"}${videoId ? " · 1 video" : ""}` : "Add photo or video"}</button>
                   </div>
                   <div className="mt-2 flex justify-end text-[12px] text-[var(--text-soft)]"><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1 border-b border-[var(--line)] pb-3" role="toolbar" aria-label="Post extras">
+                    <button type="button" onClick={() => setShowEmojiPicker((open) => !open)} aria-label="Insert emoji" aria-expanded={showEmojiPicker} className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--accent-text)]"><Smile size={19} aria-hidden="true" /></button>
+                    <button type="button" onClick={() => setShowPlaceField((open) => !open)} aria-label="Add place note" aria-expanded={showPlaceField || Boolean(placeLabel)} className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--accent-text)]"><MapPin size={19} aria-hidden="true" /></button>
+                    <button type="button" onClick={() => { if (draftDetailsRef.current) { draftDetailsRef.current.open = true; draftDetailsRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" }); } }} aria-label="Set target day" className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--accent-text)]"><Clock3 size={19} aria-hidden="true" /></button>
+                    <button type="button" onClick={() => { const input = sourceInputRef.current; const start = input?.selectionStart ?? source.length; const end = input?.selectionEnd ?? start; const next = `${source.slice(0, start)}#${source.slice(end)}`; if (characterCount(next) > 3000) return; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(next, variants))); setSource(next); requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(start + 1, start + 1); }); }} aria-label="Insert hashtag" className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--accent-text)]"><Hash size={19} aria-hidden="true" /></button>
+                  </div>
+                  {showEmojiPicker && <div className="mt-2 flex flex-wrap gap-1 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-2" aria-label="Choose an emoji">{["😀", "😂", "😍", "🙌", "👏", "❤️", "🔥", "✨", "🎉", "💡", "📣", "📍", "✅", "🚀", "👀", "🤝"].map((emoji) => <button key={emoji} type="button" onClick={() => { const input = sourceInputRef.current; const start = input?.selectionStart ?? source.length; const end = input?.selectionEnd ?? start; const next = `${source.slice(0, start)}${emoji}${source.slice(end)}`; if (characterCount(next) > 3000) return; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(next, variants))); setSource(next); setShowEmojiPicker(false); requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(start + emoji.length, start + emoji.length); }); }} aria-label={`Insert ${emoji}`} className="rounded-lg px-2 py-1.5 text-[20px] hover:bg-[var(--surface-hover)]">{emoji}</button>)}</div>}
+                  {(showPlaceField || placeLabel) && <div className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><label htmlFor="draft-place" className="block text-[12px] font-semibold text-[var(--text-secondary)]">Place note <span className="font-normal text-[var(--text-soft)]">· optional</span></label><input id="draft-place" value={placeLabel} onChange={(event) => { editorRevision.current += 1; setPlaceLabel(Array.from(event.target.value).filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127).join("")); }} maxLength={120} placeholder="e.g. Central, Hong Kong" className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--accent-border)]" /><p className="mt-1.5 text-[11px] text-[var(--text-soft)]">Saved as a reminder for manual publishing. No location is read from your device or tagged automatically.</p></div>}
                   {(mediaIds.length > 0 || videoId) && <ul aria-label="Attached media" className="mt-2 flex flex-wrap gap-2">
                     {mediaIds.map((id, index) => <li key={id} className="relative h-16 w-16 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface-muted)]">
                       <Image unoptimized src={`/api/media/${encodeURIComponent(id)}?thumb=1`} alt={`Attached photo ${index + 1}`} fill sizes="64px" className="object-cover" />
@@ -1758,6 +1788,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                         return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition sm:gap-2 sm:px-3 ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" /><span className="min-w-0 truncate">{platforms[id].name}</span><span className={`ml-auto hidden h-4 w-4 shrink-0 items-center justify-center rounded border sm:flex ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
                       })}
                     </div>
+                    {selected.map((id) => imageLimitWarning(id, mediaIds.length)).filter((warning): warning is string => Boolean(warning)).map((warning) => <p key={warning} role="status" className="mt-2 flex items-start gap-1.5 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]"><CircleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />{warning}</p>)}
                     <details className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
                       <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Other networks · manual posting</summary>
                       <p className="mb-2 mt-4 text-[11px] font-semibold text-[var(--text-muted)]">Photo and text</p>
@@ -1772,7 +1803,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     </div>
                     </details>
                   </div>
-                  <details className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
+                  <details ref={draftDetailsRef} className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
                     <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Draft details{plannedDate ? ` · ${plannedDate}` : ""}</summary>
                     <label htmlFor="draft-name" className="mb-2 mt-4 block text-[12px] font-bold text-[var(--text-secondary)]">Draft name <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
                     <input id="draft-name" value={title} onChange={(event) => { editorRevision.current += 1; setTitle(event.target.value); }} maxLength={120} placeholder="Give this idea a name" className="w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" />

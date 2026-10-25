@@ -1,6 +1,7 @@
 import { characterCount, isPlatformId, platformIds, platforms, type PlatformId } from "./platforms.ts";
 import { validatePlatformText } from "./platform-validation.ts";
 import { isAssistedDestinationId, type AssistedDestinationId } from "./assisted.ts";
+import { MAX_POST_IMAGES } from "./media-policy.ts";
 
 export const WORKSPACE_KEY = "socialflow-workspace-v2";
 
@@ -13,6 +14,8 @@ export type SavedDraft = {
   mediaIds?: string[];
   /** Optional image descriptions, in the same order as mediaIds. */
   mediaAlt?: string[];
+  /** Optional place reminder for manual publishing; never a geotag. */
+  placeLabel?: string;
   /** A private clip for manual handoffs; simulated and live text publishers ignore it. */
   videoId?: string;
   /** A local calendar day for planning this draft; it never queues a post or reminder. */
@@ -28,6 +31,7 @@ export type ScheduledPost = {
   posts: Partial<Record<PlatformId, string>>;
   mediaIds?: string[];
   mediaAlt?: string[];
+  placeLabel?: string;
   scheduledFor: string;
   createdAt: string;
   status: "queued" | "running" | "simulated" | "failed";
@@ -45,6 +49,7 @@ export type AssistedPost = {
   text: string;
   mediaIds?: string[];
   mediaAlt?: string[];
+  placeLabel?: string;
   /** A private clip for manual handoff; publishing adapters never upload it. */
   videoId?: string;
   /** Present together for handoffs prepared from a saved draft. */
@@ -76,6 +81,7 @@ export type AssistedOutcome = AssistedOutcomeInput & { recordedAt: string };
 export const MAX_ASSISTED_OUTCOME_COUNT = 1_000_000_000;
 export const MAX_ASSISTED_OUTCOME_NOTES = 500;
 export const MAX_IMAGE_ALT_CHARS = 500;
+export const MAX_PLACE_LABEL_CHARS = 120;
 
 export type Workspace = {
   version: 3;
@@ -162,7 +168,7 @@ export function normalizePublicPostUrl(value: unknown): string | null {
 }
 
 function validMediaIds(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length <= 4 && new Set(value).size === value.length &&
+  return Array.isArray(value) && value.length <= MAX_POST_IMAGES && new Set(value).size === value.length &&
     value.every((id) => typeof id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id));
 }
 
@@ -171,6 +177,12 @@ export function validMediaAlt(value: unknown, mediaIds: unknown): value is strin
     value.every((description) => typeof description === "string" &&
       description === description.trim() && description.length <= MAX_IMAGE_ALT_CHARS &&
       !Array.from(description).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127));
+}
+
+export function validPlaceLabel(value: unknown): value is string {
+  return typeof value === "string" && value === value.trim() &&
+    value.length <= MAX_PLACE_LABEL_CHARS &&
+    !Array.from(value).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
 }
 
 function selectedPlatforms(value: unknown): PlatformId[] {
@@ -214,6 +226,7 @@ function parseDraft(value: unknown): SavedDraft | null {
       !validDate(value.createdAt) || !validDate(value.updatedAt)) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
+  if (value.placeLabel !== undefined && !validPlaceLabel(value.placeLabel)) return null;
   if (value.videoId !== undefined && !validUuid(value.videoId)) return null;
   if (value.plannedDate !== undefined && !validCalendarDate(value.plannedDate)) return null;
   return {
@@ -224,6 +237,7 @@ function parseDraft(value: unknown): SavedDraft | null {
     variants: validVariants(value.variants),
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
+    ...(value.placeLabel !== undefined ? { placeLabel: value.placeLabel as string } : {}),
     ...(value.videoId !== undefined ? { videoId: value.videoId as string } : {}),
     ...(value.plannedDate !== undefined ? { plannedDate: value.plannedDate as string } : {}),
     createdAt: value.createdAt,
@@ -240,6 +254,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
       !isRecord(value.posts)) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
+  if (value.placeLabel !== undefined && !validPlaceLabel(value.placeLabel)) return null;
   const posts: Partial<Record<PlatformId, string>> = {};
   for (const id of Object.keys(value.posts)) {
     if (!isPlatformId(id)) return null;
@@ -258,6 +273,7 @@ function parseScheduledPost(value: unknown): ScheduledPost | null {
     posts,
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
+    ...(value.placeLabel !== undefined ? { placeLabel: value.placeLabel as string } : {}),
     scheduledFor: value.scheduledFor,
     createdAt: value.createdAt,
     status: value.status,
@@ -280,6 +296,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
       (!validUuid(value.sourceDraftId) || !validUuid(value.batchId))) return null;
   if (value.mediaIds !== undefined && !validMediaIds(value.mediaIds)) return null;
   if (value.mediaAlt !== undefined && !validMediaAlt(value.mediaAlt, value.mediaIds)) return null;
+  if (value.placeLabel !== undefined && !validPlaceLabel(value.placeLabel)) return null;
   if (value.videoId !== undefined && !validUuid(value.videoId)) return null;
   if (value.reminderEnabled !== undefined && typeof value.reminderEnabled !== "boolean") return null;
   if (value.contentEditedAt !== undefined && !validUtcInstant(value.contentEditedAt)) return null;
@@ -295,6 +312,7 @@ function parseAssistedPost(value: unknown): AssistedPost | null {
     text: value.text,
     ...(value.mediaIds !== undefined ? { mediaIds: value.mediaIds as string[] } : {}),
     ...(value.mediaAlt !== undefined ? { mediaAlt: value.mediaAlt as string[] } : {}),
+    ...(value.placeLabel !== undefined ? { placeLabel: value.placeLabel as string } : {}),
     ...(value.videoId !== undefined ? { videoId: value.videoId as string } : {}),
     ...(value.sourceDraftId !== undefined ? { sourceDraftId: value.sourceDraftId as string, batchId: value.batchId as string } : {}),
     scheduledFor: value.scheduledFor,

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { assistedState, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, localDateTimeValue, normalizePublicPostUrl, parseWorkspace, scheduleState, validCalendarDate } from "../src/lib/workspace.ts";
 
 const stamp = "2026-10-22T12:00:00.000Z";
@@ -102,7 +103,11 @@ test("plan and assisted image snapshots round trip while malformed references ar
   assert.deepEqual(parseWorkspace({ ...backup, schedule: [{ ...plan, mediaIds: [imageId, imageId] }] })?.schedule, []);
   assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...assisted, mediaIds: ["not-a-uuid"] }] })?.assisted, []);
   assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...assisted, mediaIds: ["-".repeat(36)] }] })?.assisted, []);
-  assert.deepEqual(parseWorkspace({ ...backup, schedule: [{ ...plan, mediaIds: Array.from({ length: 5 }, (_, index) => `${index}be12631-17ee-4ec5-98f3-9756a0b3f57b`) }] })?.schedule, []);
+  const twentyIds = Array.from({ length: 20 }, (_, index) => `${index.toString(16).padStart(8, "0")}-17ee-4ec5-98f3-9756a0b3f57b`);
+  assert.equal(parseWorkspace({ ...backup, drafts: [{ ...draft, mediaIds: twentyIds, mediaAlt: twentyIds.map(() => "") }] })?.drafts[0].mediaIds?.length, 20);
+  assert.deepEqual(parseWorkspace({ ...backup, schedule: [{ ...plan, mediaIds: [...twentyIds, randomUUID()] }] })?.schedule, []);
+  assert.equal(parseWorkspace({ ...backup, drafts: [{ ...draft, placeLabel: "Central, Hong Kong" }] })?.drafts[0].placeLabel, "Central, Hong Kong");
+  assert.deepEqual(parseWorkspace({ ...backup, assisted: [{ ...assisted, placeLabel: "bad\nplace" }] })?.assisted, []);
 });
 
 test("plan items become due only at their local instant and remain simulated", () => {
