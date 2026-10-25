@@ -59,3 +59,5 @@ npm run build
 ```
 
 当前只有本机构建，没有线上部署。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-25，`npm audit --omit=dev --audit-level=high` 报出 15 条高危依赖路径，均关联 Bluesky OAuth 依赖所用的 Zod 3 与[这项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开启用 Bluesky 登录前须重新评估或等待兼容修复。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
+
+评委可访问的演示还需独立托管；低成本主机、持久存储和上线验收步骤见[托管方案](docs/hosting.md)。
