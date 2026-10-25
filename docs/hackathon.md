@@ -2,7 +2,7 @@
 
 拟参加 [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/rules) 的 **Best Apps and Agents** 赛道。截止时间为 2026 年 10 月 30 日 10:00 PDT。官方规则要求应用运行时调用 Nebius Token Factory 或部署在 Nebius AI Cloud，并使用至少一个 NVIDIA 开源模型。
 
-Plypost 在服务端请求 Nebius Token Factory 的 `/v1/chat/completions`。文字改写、旧帖风格提炼、参考结构提炼和一周选题使用 NVIDIA Nemotron 3 Super（`nvidia/nemotron-3-super-120b-a12b`）；看图起稿使用 NVIDIA Nemotron 3.5 Super VL（`nvidia/Nemotron-3.5-Super-VL`）。旧帖、图片、当前草稿或品牌资料分别只在用户点击对应生成操作时发送。旧帖原文不保存；提炼出的个人风格指南保存在用户工作区及完整备份中。图片起稿先展示视觉观察与可编辑文案；AI 不自动向社交平台发帖。
+Plypost 在服务端请求 Nebius Token Factory 的 `/v1/chat/completions`。文字改写、旧帖风格提炼和一周选题使用 NVIDIA Nemotron 3 Super（`nvidia/nemotron-3-super-120b-a12b`）；看图起稿使用 NVIDIA Nemotron 3.5 Super VL（`nvidia/Nemotron-3.5-Super-VL`）。旧帖、指定图片、当前草稿或品牌资料分别只在用户点击对应生成操作时发送。旧帖原文不保存；提炼出的个人风格指南保存在用户工作区及完整备份中。图片起稿先展示视觉观察与可编辑文案；AI 不自动向社交平台发帖。
 
 本机验证记录（2026-10-25）：Token Factory 模型列表显示文字模型和视觉模型可用；用固定样例文案与虚构品牌资料分别调用 Nemotron 3 Super，返回四个平台的可解析文案与一周选题。另用程序生成的纯色图片调用 Nemotron 3.5 Super VL，返回可解析的视觉观察与文案。本机生产构建的 HTTP 接口完成过登录、文案生成、品牌资料保存及周计划生成，结果写入隔离的测试数据库。自动测试覆盖手动选样、账号隔离、图片传输格式、风格指南备份与恢复。密钥只在本机被 Git 忽略的 `.env.local` 中使用；仓库不包含密钥。公开演示仍需部署本次更新并在 Render 实例验收；本机验证不能代替正式提交。
 

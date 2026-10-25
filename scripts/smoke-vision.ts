@@ -12,7 +12,7 @@ const response = await fetch("https://api.tokenfactory.nebius.com/v1/chat/comple
   headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
   body: JSON.stringify({
     model: "nvidia/Nemotron-3.5-Super-VL",
-    messages: imageCaptionMessages(`data:image/jpeg;base64,${image.toString("base64")}`, "A synthetic blue rectangle for a connection test.", null, null),
+    messages: imageCaptionMessages(`data:image/jpeg;base64,${image.toString("base64")}`, "A synthetic blue rectangle for a connection test.", null),
     temperature: 0.2, max_tokens: 700, stream: false,
   }),
   signal: AbortSignal.timeout(45_000), cache: "no-store",

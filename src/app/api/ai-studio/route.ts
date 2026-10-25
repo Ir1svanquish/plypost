@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { NextResponse } from "next/server";
 import { imageCaptionMessages, styleAnalysisMessages } from "@/lib/ai-prompts";
-import { parseExamples, parseGuide, parseGuideResponse, parseImageCaptionResponse } from "@/lib/ai-studio";
+import { parseExamples, parseGuide, parseGuideResponse, parseImageCaptionResponse, repeatsLongExcerpt } from "@/lib/ai-studio";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
@@ -42,6 +42,18 @@ export async function DELETE(request: Request) {
   return NextResponse.json({ voiceProfile: null }, { headers });
 }
 
+export async function PATCH(request: Request) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403, headers });
+  const user = currentUser(request);
+  if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401, headers });
+  const body = await readBoundedJsonObject(request, 2_000);
+  if (body.kind === "too-large") return NextResponse.json({ error: "Request is too large." }, { status: 413, headers });
+  if (body.kind === "invalid") return NextResponse.json({ error: "Invalid JSON body." }, { status: 400, headers });
+  const guide = parseGuide(body.value.guide);
+  if (!guide || !loadVoiceProfile(user)) return NextResponse.json({ error: "Choose a saved style guide under 1,000 characters." }, { status: 400, headers });
+  return NextResponse.json({ voiceProfile: saveVoiceProfile(user, guide) }, { headers });
+}
+
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403, headers });
   const user = currentUser(request);
@@ -52,24 +64,24 @@ export async function POST(request: Request) {
   const input = body.value;
   const action = input.action;
   const isPersonal = action === "analyze-style";
-  const isReference = action === "analyze-references";
   const isCaption = action === "caption-image";
-  if (!isPersonal && !isReference && !isCaption) {
+  if ((!isPersonal && !isCaption) || input.referenceGuide !== undefined) {
     return NextResponse.json({ error: "Unknown AI action." }, { status: 400, headers });
   }
-  const examples = isPersonal || isReference ? parseExamples(input.examples, isPersonal ? 3 : 2, isPersonal ? 6 : 5) : null;
+  const examples = isPersonal ? parseExamples(input.examples, 3, 6) : null;
   const media = isCaption && typeof input.mediaId === "string" ? getMedia(user, input.mediaId) : null;
   const context = isCaption && typeof input.context === "string" ? input.context.trim() : "";
   const useVoice = input.useVoice === true;
-  const referenceGuide = input.referenceGuide === undefined || input.referenceGuide === null || input.referenceGuide === ""
-    ? null : parseGuide(input.referenceGuide);
-  if ((isPersonal || isReference) && !examples) {
-    return NextResponse.json({ error: `Choose ${isPersonal ? "3–6" : "2–5"} examples, each under 1,800 characters.` }, { status: 400, headers });
+  if (isPersonal && !examples) {
+    return NextResponse.json({ error: "Choose 3–6 examples, each under 1,800 characters." }, { status: 400, headers });
   }
   if (isCaption && (!media || Array.from(context).length > 500 ||
-      (input.useVoice !== undefined && typeof input.useVoice !== "boolean") ||
-      (input.referenceGuide && !referenceGuide))) {
+      (input.useVoice !== undefined && typeof input.useVoice !== "boolean"))) {
     return NextResponse.json({ error: "Choose one image from your library and keep context under 500 characters." }, { status: 400, headers });
+  }
+  const voiceProfile = isCaption && useVoice ? loadVoiceProfile(user) : null;
+  if (isCaption && useVoice && !voiceProfile) {
+    return NextResponse.json({ error: "Analyze your writing style first, or turn off the voice guide." }, { status: 400, headers });
   }
   const config = nebiusConfig();
   if (!config.key) return NextResponse.json({ error: "Set NEBIUS_API_KEY on the server to enable AI." }, { status: 503, headers });
@@ -82,17 +94,16 @@ export async function POST(request: Request) {
         .jpeg({ quality: 80 }).toBuffer();
       const imageDataUrl = `data:image/jpeg;base64,${pixels.toString("base64")}`;
       const raw = await completion(config.key, VISION_MODEL,
-        imageCaptionMessages(imageDataUrl, context, useVoice ? loadVoiceProfile(user)?.guide ?? null : null, referenceGuide), 700);
+        imageCaptionMessages(imageDataUrl, context, voiceProfile?.guide ?? null), 700);
       const suggestion = parseImageCaptionResponse(raw);
       if (!suggestion) throw new Error("The vision model did not return a usable caption. Try another image.");
       return NextResponse.json({ ...suggestion, model: VISION_MODEL }, { headers });
     }
-    const raw = await completion(config.key, config.model,
-      styleAnalysisMessages(examples!, isPersonal ? "personal" : "reference"), 500);
+    const raw = await completion(config.key, config.model, styleAnalysisMessages(examples!), 500);
     const guide = parseGuideResponse(raw);
     if (!guide) throw new Error("The model did not return a usable style guide. Try shorter examples.");
-    if (isPersonal) return NextResponse.json({ voiceProfile: saveVoiceProfile(user, guide) }, { headers });
-    return NextResponse.json({ referenceGuide: guide }, { headers });
+    if (repeatsLongExcerpt(guide, examples!)) throw new Error("The model repeated part of a sample post. Try again with shorter examples.");
+    return NextResponse.json({ voiceProfile: saveVoiceProfile(user, guide) }, { headers });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "The AI request failed." }, { status: 502, headers });
   }

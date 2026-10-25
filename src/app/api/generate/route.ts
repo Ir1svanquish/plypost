@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { parseGeneratedVariants } from "@/lib/generated-variants";
-import { parseGuide } from "@/lib/ai-studio";
 import { variantMessages } from "@/lib/ai-prompts";
 import { characterCount } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
@@ -21,10 +20,9 @@ export async function POST(request: Request) {
 
   const input = body.value;
   const source = typeof input.source === "string" ? input.source.trim() : "";
-  const referenceGuide = input.referenceGuide === undefined || input.referenceGuide === "" ? null : parseGuide(input.referenceGuide);
   if (!source || characterCount(source) > 3000 || (input.provider !== undefined && input.provider !== "nebius") ||
       (input.useVoice !== undefined && typeof input.useVoice !== "boolean") ||
-      (input.referenceGuide !== undefined && input.referenceGuide !== "" && !referenceGuide)) {
+      input.referenceGuide !== undefined) {
     return NextResponse.json(
       { error: "Enter up to 3,000 characters. Nebius Token Factory is the only AI provider." },
       { status: 400 },
@@ -53,7 +51,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: config.model,
-        messages: variantMessages(source, { voice, reference: referenceGuide ?? undefined }),
+        messages: variantMessages(source, voice),
         temperature: 0.2,
         max_tokens: 1200,
         stream: false,

@@ -651,7 +651,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setNotice(null);
   }
 
-  async function generateVariants(useVoice = false, referenceGuide: string | null = null) {
+  async function generateVariants(useVoice = false) {
     if (!source.trim()) {
       setNotice({ kind: "error", text: "Add a source draft before asking AI to adapt it." });
       return;
@@ -664,7 +664,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, useVoice, referenceGuide: referenceGuide ?? "" }),
+        body: JSON.stringify({ source, useVoice }),
       });
       const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: OverLimitVariant[] } = await response.json();
       if (!response.ok) throw new Error(data.error || "AI adaptation failed.");
@@ -1590,8 +1590,16 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     </div>
                   </div>
                   <AIWritingPanel source={source} mediaIds={mediaIds} generating={generating} hasReview={Boolean(aiReview)}
-                    onGenerate={(useVoice, referenceGuide) => { void generateVariants(useVoice, referenceGuide); }}
-                    onInsertCaption={(caption) => { editorRevision.current += 1; setSource((current) => current.trim() ? `${current.trim()}\n\n${caption}` : caption); setAiReview(null); setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." }); }} />
+                    onGenerate={(useVoice) => { void generateVariants(useVoice); }}
+                    onInsertCaption={(caption) => {
+                      const next = source.trim() ? `${source.trim()}\n\n${caption}` : caption;
+                      if (next.length > 3000) { setNotice({ kind: "error", text: "This caption would take the draft over 3,000 characters. Shorten it before adding." }); return false; }
+                      editorRevision.current += 1;
+                      setSource(next);
+                      setAiReview(null);
+                      setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." });
+                      return true;
+                    }} />
                     {aiReview && <AIReviewPanel
                       source={aiReview.source}
                       original={aiReview.original}

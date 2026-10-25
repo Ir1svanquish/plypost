@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
-import { GET, POST, DELETE } from "../src/app/api/ai-studio/route.ts";
+import { GET, POST, PATCH, DELETE } from "../src/app/api/ai-studio/route.ts";
 import { POST as adaptPost } from "../src/app/api/generate/route.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { loadVoiceProfile, saveVoiceProfile } from "../src/lib/server/voice-profile.ts";
@@ -23,7 +23,7 @@ function request(path, token, body, method = "POST") {
   });
 }
 
-test("selected posts, reference patterns and one owned image use Nebius only after explicit actions", async () => {
+test("selected posts and an owned image use Nebius only after explicit actions", async () => {
   const owner = "studio@example.test";
   process.env.PLYPOST_OWNER_EMAIL = owner;
   process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
@@ -40,8 +40,7 @@ test("selected posts, reference patterns and one owned image use Nebius only aft
     const content = body.model === "nvidia/Nemotron-3.5-Super-VL"
       ? { observations: "A blue rectangular illustration is visible.", caption: "A simple blue visual for today's update." }
       : calls.length === 1 ? { guide: "Short openings, plain verbs, and one closing question." }
-        : calls.length === 2 ? { guide: "Open with a question, then give one concrete detail." }
-          : { bluesky: "A simple update", mastodon: "A simple update", linkedin: "A simple update", threads: "A simple update" };
+        : { bluesky: "A simple update", mastodon: "A simple update", linkedin: "A simple update", threads: "A simple update" };
     return globalThis.Response.json({ choices: [{ message: { content: JSON.stringify(content) } }] });
   };
   try {
@@ -49,6 +48,10 @@ test("selected posts, reference patterns and one owned image use Nebius only aft
     assert.equal(calls.length, 0);
     const rejected = await POST(request("/api/ai-studio", token, { action: "caption-image", mediaId: foreignImage.id }));
     assert.equal(rejected.status, 400);
+    const retiredAction = await POST(request("/api/ai-studio", token, { action: "analyze-references", examples: ["one", "two"] }));
+    assert.equal(retiredAction.status, 400);
+    const retiredGuide = await adaptPost(request("/api/generate", token, { source: "A draft", referenceGuide: "Old guide" }));
+    assert.equal(retiredGuide.status, 400);
     assert.equal(calls.length, 0);
 
     const samples = ["I keep these words private.", "A second private old post.", "One more old post." ];
@@ -58,32 +61,58 @@ test("selected posts, reference patterns and one owned image use Nebius only aft
     assert.equal(calls[0].body.model, "nvidia/nemotron-3-super-120b-a12b");
     assert.equal(calls[0].body.messages[1].content.includes(samples[0]), true);
     assert.equal(database().prepare("SELECT guide FROM voice_profiles WHERE user_id=?").get(owner).guide.includes(samples[0]), false);
+    const edited = await PATCH(request("/api/ai-studio", token, { guide: "Short openings and direct sentences." }, "PATCH"));
+    assert.equal(edited.status, 200);
+    assert.equal(loadVoiceProfile(owner).guide, "Short openings and direct sentences.");
+    assert.equal(calls.length, 1);
 
-    const references = await POST(request("/api/ai-studio", token, { action: "analyze-references", examples: ["Public example one", "Public example two"] }));
-    assert.equal(references.status, 200);
-    const referenceGuide = (await references.json()).referenceGuide;
-    assert.match(referenceGuide, /question/);
     assert.equal(database().prepare("SELECT COUNT(*) AS count FROM voice_profiles").get().count, 1);
 
     const caption = await POST(request("/api/ai-studio", token, {
-      action: "caption-image", mediaId: image.id, context: "This is a sample visual.", useVoice: true, referenceGuide,
+      action: "caption-image", mediaId: image.id, context: "This is a sample visual.", useVoice: true,
     }));
     assert.equal(caption.status, 200);
     assert.match((await caption.json()).caption, /blue visual/);
-    assert.equal(calls[2].body.model, "nvidia/Nemotron-3.5-Super-VL");
-    assert.equal(calls[2].body.messages[1].content[1].type, "image_url");
-    assert.match(calls[2].body.messages[1].content[1].image_url.url, /^data:image\/jpeg;base64,/);
-    assert.equal(calls[2].body.messages[1].content[0].text.includes("Short openings"), true);
+    assert.equal(calls[1].body.model, "nvidia/Nemotron-3.5-Super-VL");
+    assert.equal(calls[1].body.messages[1].content[1].type, "image_url");
+    assert.match(calls[1].body.messages[1].content[1].image_url.url, /^data:image\/jpeg;base64,/);
+    assert.equal(calls[1].body.messages[1].content[0].text.includes("direct sentences"), true);
 
-    const adapted = await adaptPost(request("/api/generate", token, { source: "A simple update.", useVoice: true, referenceGuide }));
+    const adapted = await adaptPost(request("/api/generate", token, { source: "A simple update.", useVoice: true }));
     assert.equal(adapted.status, 200);
-    const guided = JSON.parse(calls[3].body.messages[1].content);
+    const guided = JSON.parse(calls[2].body.messages[1].content);
     assert.equal(guided.draft, "A simple update.");
     assert.equal(guided.voiceGuide, loadVoiceProfile(owner).guide);
-    assert.equal(guided.referencePattern, referenceGuide);
+    assert.equal("referencePattern" in guided, false);
     assert.equal(calls.every((call) => call.url === "https://api.tokenfactory.nebius.com/v1/chat/completions"), true);
 
     assert.equal((await DELETE(request("/api/ai-studio", token, null, "DELETE"))).status, 200);
+    assert.equal(loadVoiceProfile(owner), null);
+    const staleVoice = await POST(request("/api/ai-studio", token, { action: "caption-image", mediaId: image.id, useVoice: true }));
+    assert.equal(staleVoice.status, 400);
+    assert.equal(calls.length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.NEBIUS_API_KEY;
+  }
+});
+
+test("a guide that repeats a long passage from a sample post is not saved", async () => {
+  const owner = "quoted-style@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-nebius-key";
+  const token = createSession(owner);
+  const originalFetch = globalThis.fetch;
+  const quoted = "A distinctive sentence that should stay only in the sample post.";
+  globalThis.fetch = async () => globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({ guide: `Use short lines. ${quoted}` }) } }] });
+  try {
+    const response = await POST(request("/api/ai-studio", token, {
+      action: "analyze-style", examples: [quoted, "A second sample post.", "A third sample post."],
+    }));
+    assert.equal(response.status, 502);
     assert.equal(loadVoiceProfile(owner), null);
   } finally {
     globalThis.fetch = originalFetch;

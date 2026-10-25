@@ -38,6 +38,23 @@ export function parseGuideResponse(raw: string): string | null {
   } catch { return null; }
 }
 
+export function repeatsLongExcerpt(guide: string, examples: string[]): boolean {
+  const normalize = (value: string) => Array.from(value.toLocaleLowerCase().replace(/\s+/g, " "));
+  const guideChars = normalize(guide);
+  const excerptLength = 24;
+  const guideExcerpts = new Set<string>();
+  for (let i = 0; i <= guideChars.length - excerptLength; i++) {
+    guideExcerpts.add(guideChars.slice(i, i + excerptLength).join(""));
+  }
+  for (const example of examples) {
+    const chars = normalize(example);
+    for (let i = 0; i <= chars.length - excerptLength; i++) {
+      if (guideExcerpts.has(chars.slice(i, i + excerptLength).join(""))) return true;
+    }
+  }
+  return false;
+}
+
 export function parseImageCaptionResponse(raw: string): { observations: string; caption: string } | null {
   if (raw.length > 12000) return null;
   const json = raw.match(/\{[\s\S]*\}/)?.[0];
