@@ -1,6 +1,7 @@
 "use client";
 
-import { Clock3, LogOut, UserRound } from "lucide-react";
+import { useRef } from "react";
+import { Clock3, Download, LogOut, Upload, UserRound } from "lucide-react";
 import { platforms, type PlatformId } from "@/lib/platforms";
 import { MastodonConnectionPanel, type MastodonConnection } from "@/components/mastodon-live-panel";
 import { BlueskyConnectionPanel, type BlueskyConnection } from "@/components/bluesky-live-panel";
@@ -23,6 +24,11 @@ type Props = {
   blueskyError: string | null;
   onRefreshBluesky: () => Promise<void>;
   editorDirty: boolean;
+  onExport: () => void;
+  onImport: (file: File) => Promise<void>;
+  onFullExport: () => Promise<void>;
+  onFullImport: (file: File) => Promise<void>;
+  backupBusy: boolean;
 };
 
 function formatTime(iso: string) {
@@ -31,7 +37,9 @@ function formatTime(iso: string) {
   });
 }
 
-export function AccountPanel({ email, auditLog, activity, onClearActivity, onLogout, mastodonConnection, mastodonLoading, mastodonError, onRefreshMastodon, blueskyConnection, blueskyLoading, blueskyError, onRefreshBluesky, editorDirty }: Props) {
+export function AccountPanel({ email, auditLog, activity, onClearActivity, onLogout, mastodonConnection, mastodonLoading, mastodonError, onRefreshMastodon, blueskyConnection, blueskyLoading, blueskyError, onRefreshBluesky, editorDirty, onExport, onImport, onFullExport, onFullImport, backupBusy }: Props) {
+  const fullInput = useRef<HTMLInputElement>(null);
+  const textInput = useRef<HTMLInputElement>(null);
   return <div id="account" className="section-anchor space-y-6">
     <div>
       <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Account</p>
@@ -44,6 +52,23 @@ export function AccountPanel({ email, auditLog, activity, onClearActivity, onLog
     </section>
     <MastodonConnectionPanel connection={mastodonConnection} loading={mastodonLoading} loadError={mastodonError} onRefresh={onRefreshMastodon} />
     <BlueskyConnectionPanel connection={blueskyConnection} loading={blueskyLoading} loadError={blueskyError} onRefresh={onRefreshBluesky} editorDirty={editorDirty} />
+    <details className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)]" aria-label="Backup and restore">
+      <summary className="cursor-pointer px-6 py-5 text-[17px] font-bold sm:px-7">Backup and restore</summary>
+      <div className="space-y-4 border-t border-[var(--line)] px-6 py-5 sm:px-7">
+        <p className="text-[13px] leading-6 text-[var(--text-muted)]">Saved drafts, plans, and media live in this account&apos;s server storage. Download a private copy before moving to another installation.</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void onFullExport()} disabled={backupBusy} className="inline-flex items-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50"><Download size={15} /> {backupBusy ? "Working…" : "Download full backup"}</button>
+          <button type="button" onClick={() => fullInput.current?.click()} disabled={backupBusy} className="inline-flex items-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50"><Upload size={15} /> Restore full backup</button>
+          <input ref={fullInput} type="file" accept="application/json,.json" className="sr-only" disabled={backupBusy} aria-label="Choose a full Plypost backup to restore" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onFullImport(file); event.target.value = ""; }} />
+        </div>
+        <p className="text-[12px] leading-5 text-[var(--text-soft)]">A full backup includes saved images and videos. Restoring replaces this account&apos;s saved work after a confirmation. Keep backup files private.</p>
+        <details className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3 text-[12px] text-[var(--text-muted)]">
+          <summary className="cursor-pointer font-semibold text-[var(--text-secondary)]">Text-only JSON for older copies</summary>
+          <p className="mt-2 leading-5">Includes drafts, plans, and handoff references, but omits image and video files. Use the full backup to move media.</p>
+          <div className="mt-3 flex flex-wrap gap-4"><button type="button" onClick={onExport} disabled={backupBusy} className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)] disabled:opacity-50"><Download size={13} /> Export text JSON</button><button type="button" onClick={() => textInput.current?.click()} disabled={backupBusy} className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)] disabled:opacity-50"><Upload size={13} /> Import text JSON</button><input ref={textInput} type="file" accept="application/json,.json" className="sr-only" disabled={backupBusy} aria-label="Choose a text-only Plypost JSON backup" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImport(file); event.target.value = ""; }} /></div>
+        </details>
+      </div>
+    </details>
     <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="audit-heading">
       <div className="border-b border-[var(--line)] px-6 py-5 sm:px-7"><h2 id="audit-heading" className="text-[17px] font-bold">Account activity</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Recent saved changes and worker results.</p></div>
       {auditLog.length === 0 ? <p className="px-6 py-8 text-[13px] text-[var(--text-soft)] sm:px-7">No activity yet.</p> : <div className="divide-y divide-[var(--line)] px-6 sm:px-7">{auditLog.slice(0, 12).map((item, index) => <div key={`${item.created_at}-${index}`} className="flex flex-wrap justify-between gap-2 py-3 text-[12px]"><span className="font-medium text-[var(--text-secondary)]">{item.action.replaceAll(".", " · ")}{item.detail ? ` · ${item.detail}` : ""}</span><time className="text-[var(--text-soft)]">{formatTime(item.created_at)}</time></div>)}</div>}

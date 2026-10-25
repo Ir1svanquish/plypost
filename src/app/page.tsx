@@ -1287,6 +1287,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   async function restoreFullBackup(file: File) {
     if (backupMutation.current) return;
+    if (draftSaveBusyRef.current || pendingDraftSave || assistedMutation.current) {
+      setNotice({ kind: "error", text: "Finish the current save or handoff update before restoring a backup." });
+      return;
+    }
     if (mediaBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the current image operation before restoring a backup." });
       return;
@@ -1299,10 +1303,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Choose a full backup no larger than 192 MiB." });
       return;
     }
-    const unsavedStrategyWarning = strategyDirty
-      ? " Your unsaved brand profile or AI idea edits will be lost."
-      : "";
-    if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedStrategyWarning} This cannot be undone.`)) return;
+    const unsavedWarning = `${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Your unsaved brand profile or AI idea edits will be lost." : ""}`;
+    if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedWarning} This cannot be undone.`)) return;
     backupMutation.current = true;
     setBackupBusy(true);
     restoringBackupRef.current = true;
@@ -1322,7 +1324,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setCurrentDraftVersion(null);
       setDraftConflict(false);
       setPendingDraftSave(null);
+      setEditorOrigin("new");
+      setTitle("");
+      setSource("");
+      setSelected([]);
+      setVariants({});
       setMediaIds([]);
+      setMediaAltById({});
       setVideoId(null);
       setPlannedDate("");
       resetMediaPicker();
@@ -1345,6 +1353,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function importWorkspace(file: File) {
+    if (backupMutation.current) return;
+    if (draftSaveBusyRef.current || pendingDraftSave || assistedMutation.current) {
+      setNotice({ kind: "error", text: "Finish the current save or handoff update before importing a backup." });
+      return;
+    }
+    backupMutation.current = true;
+    setBackupBusy(true);
     try {
       if (file.size > 2_000_000) throw new Error("Backup file is too large (2 MB maximum).");
       const raw = JSON.parse(await file.text());
@@ -1354,18 +1369,31 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           (raw.version === 3 && (!Array.isArray(raw.assisted) || workspace.assisted.length !== raw.assisted.length))) {
         throw new Error("This backup has invalid or excess records. Nothing was replaced.");
       }
-      if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`)) return;
+      if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`)) return;
       await changeWorkspace("import", { backup: raw });
-      localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace()));
+      try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
       setDraftConflict(false);
       setPendingDraftSave(null);
+      setEditorOrigin("new");
+      setTitle("");
+      setSource("");
+      setSelected([]);
+      setVariants({});
+      setMediaIds([]);
+      setMediaAltById({});
+      setVideoId(null);
+      setPlannedDate("");
+      resetMediaPicker();
       setStrategyRefreshEpoch((epoch) => epoch + 1);
       setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts. AI weekly plans were cleared; your saved brand profile remains.` });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import backup." });
+    } finally {
+      backupMutation.current = false;
+      setBackupBusy(false);
     }
   }
 
@@ -1775,8 +1803,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable. Unsaved editor text may not survive a reload. Items already saved to your account remain in the database.</div>}
 
           {view === "drafts" && <div>
-            <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Drafts</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Saved ideas</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Pick up a post you started earlier, or keep a backup.</p></div>
-            <DraftLibraryPanel drafts={drafts} assisted={assisted} currentDraftId={currentDraftId} onNew={newDraft} onLoad={loadDraft} onPrepare={prepareDraftHandoffs} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />
+            <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Drafts</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Saved ideas</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Pick up a post you started earlier.</p></div>
+            <DraftLibraryPanel drafts={drafts} assisted={assisted} currentDraftId={currentDraftId} onNew={newDraft} onLoad={loadDraft} onPrepare={prepareDraftHandoffs} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onDelete={deleteDraft} />
           </div>}
           <div hidden={view !== "schedule"}>
             <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">{showMastodonQueue ? "Plan drafts, manual handoffs and connected Mastodon posts." : "Plan drafts and manual handoffs in one place."}</p></div>
@@ -1791,7 +1819,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
             <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} startWithVideoGroup={openAssistedVideoGroup} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} initialVideoId={videoId} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
-          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} />}
+          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />}
         </main>
       </div>
     </div>
