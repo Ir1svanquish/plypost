@@ -672,30 +672,30 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function saveDraft(preserveTitle = false, asCopy = false): Promise<boolean> {
+  async function saveDraft(preserveTitle = false, asCopy = false): Promise<SavedDraft | null> {
     if (draftSaveBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the current draft save to finish." });
-      return false;
+      return null;
     }
     if (mediaBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the image operation to finish before saving this draft." });
-      return false;
+      return null;
     }
     if (videoBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the video operation to finish before saving this draft." });
-      return false;
+      return null;
     }
     if (!hasDraftContent(editorContentRef.current)) {
       setNotice({ kind: "error", text: "Add a title, caption, platform text, image or video before saving." });
-      return false;
+      return null;
     }
     if (plannedDate && !validCalendarDate(plannedDate)) {
       setNotice({ kind: "error", text: "Enter a real target date as YYYY-MM-DD, or clear it." });
-      return false;
+      return null;
     }
     if ((!currentDraftId || asCopy) && drafts.length >= 100) {
       setNotice({ kind: "error", text: "The library is full. Delete an old draft before saving another." });
-      return false;
+      return null;
     }
     const stamp = new Date().toISOString();
     const existing = drafts.find((draft) => draft.id === currentDraftId);
@@ -730,18 +730,43 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "success", text: editorRevision.current === revisionAtStart
         ? "Draft saved to your account."
         : "An earlier version was saved. Your newer edits remain unsaved." });
-      return true;
+      return stored;
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "DRAFT_CONFLICT") {
         setDraftConflict(true);
         void refreshWorkspace().catch(() => {});
       }
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save draft." });
-      return false;
+      return null;
     } finally {
       draftSaveBusyRef.current = false;
       setDraftSaveBusy(false);
     }
+  }
+
+  async function prepareEditorHandoffs() {
+    if (draftSaveBusyRef.current || mediaBusyRef.current || videoBusyRef.current || restoringBackupRef.current) return;
+    if (needsDraftRecovery) {
+      setNotice({ kind: "error", text: "This draft changed in another window. Review the latest version or save your edits as a new draft first." });
+      return;
+    }
+    if (!editorDirty && currentSavedDraft) {
+      batchLaunchCounter.current += 1;
+      setBatchLaunch({ draftId: currentSavedDraft.id, token: batchLaunchCounter.current });
+      return;
+    }
+    const originalRevision = editorRevision.current;
+    const originalContent = editorContentRef.current;
+    const stored = await saveDraft();
+    if (!stored) return;
+    const normalizedContent = { ...originalContent, title: stored.title };
+    if (editorRevision.current !== originalRevision ||
+        (!sameEditorContent(editorContentRef.current, originalContent) && !sameEditorContent(editorContentRef.current, normalizedContent))) {
+      setNotice({ kind: "error", text: "The draft was saved, but you changed the editor while it was saving. Review and save the newer edits before preparing posts." });
+      return;
+    }
+    batchLaunchCounter.current += 1;
+    setBatchLaunch({ draftId: stored.id, token: batchLaunchCounter.current });
   }
 
   function resetMediaPicker() {
@@ -1552,10 +1577,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
               </section>
 
               <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading">
-                <div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Prepare a handoff, then publish from your own account.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div>
+                <div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review a separate post for each destination, then publish from your own accounts.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div>
                 <div className="mb-5 flex flex-wrap gap-2">{selected.length ? platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">Choose destinations in the draft editor when you are ready.</span>}</div>
                 {invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}
-                <button type="button" onClick={() => openManualComposer()} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> Prepare a manual post <ArrowRight size={15} className="ml-1" /></button>
+                <button type="button" onClick={() => void prepareEditorHandoffs()} disabled={!canSaveEditor || !(source.trim() || platformDisplayIds.some((id) => variants[id]?.trim())) || mediaBusy || videoBusy || draftSaveBusy || restoringBackup || needsDraftRecovery} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition disabled:opacity-45"><Send size={16} />{draftSaveBusy ? "Saving draft…" : editorDirty || !currentSavedDraft ? "Save and review posts" : "Review posts"}<ArrowRight size={15} className="ml-1" /></button>
+                <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">Selected platforms are ready for review. You can add other networks before confirming; nothing is posted yet.</p>
+                <button type="button" onClick={() => openManualComposer()} className="mt-3 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Prepare just one post instead</button>
                 <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
                   <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Try a demo simulation</summary>
                   <p className="mt-3 text-[12px] leading-5 text-[var(--text-muted)]">Creates a sample receipt for selected previews. No post is sent to a social platform.</p>
