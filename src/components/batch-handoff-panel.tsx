@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, Copy, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, Copy, ShieldCheck, Sparkles } from "lucide-react";
 import { LocalDateTimeField, isValidLocalDateTime } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
@@ -10,7 +10,9 @@ import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisp
 import { validatePlatformText } from "@/lib/platform-validation";
 import type { AssistedPost, SavedDraft } from "@/lib/workspace";
 import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
+import { AiLiteralNotice } from "@/components/ai-literal-notice";
 import { isManualAiDestination } from "@/lib/ai-handoff";
+import type { PreflightReport } from "@/lib/ai-preflight";
 
 export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; reminderEnabled?: false; videoId?: string };
 export type BatchPrepareResult = "prepared" | "rejected" | "uncertain";
@@ -44,6 +46,9 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const [submitting, setSubmitting] = useState(false);
   const [videoId, setVideoId] = useState<string | null>(draft.videoId ?? null);
   const [videoBusy, setVideoBusy] = useState(false);
+  const [preflightReports, setPreflightReports] = useState<Partial<Record<AssistedDestinationId, { source: string; text: string; report: PreflightReport }>>>({});
+  const [preflightBusyId, setPreflightBusyId] = useState<AssistedDestinationId | null>(null);
+  const [preflightErrors, setPreflightErrors] = useState<Partial<Record<AssistedDestinationId, string>>>({});
   const batchIdRef = useRef<string | null>(null);
   const attemptedItemsRef = useRef<BatchHandoffItem[] | null>(null);
   const attemptedSlotModeRef = useRef(false);
@@ -120,7 +125,28 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     setTexts({});
     setVideoId(draft.videoId ?? null);
     setSlotPreview(null); setSlotTimes({}); setSlotApplied(false); setSlotError(null);
+    setPreflightReports({}); setPreflightErrors({});
     openReview();
+  }
+
+  async function checkWithAi(destination: AssistedDestinationId) {
+    const text = textFor(destination);
+    if (preflightBusyId || attempted || !text.trim() || characterCount(text) > 5000) return;
+    setPreflightBusyId(destination);
+    setPreflightErrors((current) => ({ ...current, [destination]: "" }));
+    try {
+      const response = await fetch("/api/ai-preflight", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", cache: "no-store",
+        body: JSON.stringify({ destination, source: draft.source, text }),
+      });
+      const body = await response.json() as { report?: PreflightReport; error?: string };
+      if (!response.ok || !body.report || !Array.isArray(body.report.findings)) {
+        throw new Error(body.error || "Could not check this post.");
+      }
+      setPreflightReports((current) => ({ ...current, [destination]: { source: draft.source, text, report: body.report! } }));
+    } catch (cause) {
+      setPreflightErrors((current) => ({ ...current, [destination]: cause instanceof Error ? cause.message : "Could not check this post." }));
+    } finally { setPreflightBusyId(null); }
   }
 
   async function previewSlots() {
@@ -244,12 +270,27 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         const check = isPlatformId(id) ? validatePlatformText(id, text) : null;
         const valid = check?.valid ?? Boolean(text.trim() && characterCount(text) <= 5000);
         const missingMedia = missingHandoffMedia(id, draft.mediaIds?.length ?? 0, Boolean(videoId));
+        const preflight = preflightReports[id];
+        const preflightStale = Boolean(preflight && (preflight.source !== draft.source || preflight.text !== text));
         return <div key={id} id="batch-active-editor" className="min-w-0 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4">
           <label htmlFor={`batch-text-${id}`} className="text-[13px] font-bold text-[var(--text)]">{assistedDestinations[id].name} text</label>
           <textarea id={`batch-text-${id}`} value={text} onChange={(event) => setTexts((current) => ({ ...current, [id]: event.target.value }))} disabled={attempted} className="mt-2 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-70" />
           {!isPlatformId(id) && isManualAiDestination(id) && <AIHandoffAssistant destination={id} source={text} disabled={attempted || editorDirty || busy || mediaBusy} onApply={(next) => setTexts((current) => ({ ...current, [id]: next }))} />}
           <p className={`mt-1 text-[11px] ${valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}`}>{check ? `${check.count} / ${check.limit} ${id === "bluesky" ? "graphemes" : "characters"}` : `${characterCount(text)} / 5,000 characters`}{check?.byteCount !== undefined ? ` · ${check.byteCount} / ${check.byteLimit} UTF-8 bytes` : ""}{!valid ? " · Edit this text before confirming" : ""}</p>
+          {draft.source.trim() && <AiLiteralNotice source={draft.source} suggestion={text} />}
           {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{missingMedia === "video" ? " No video is attached here; bring one when posting." : missingMedia ? " No photo or video is attached here; bring one when posting." : ""}</p>}
+          <div className="mt-3 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><p className="text-[13px] font-bold text-[var(--text)]">AI post check</p><p className="mt-0.5 text-[12px] leading-5 text-[var(--text-muted)]">Check this post against the saved draft before publishing.</p></div>
+              <button type="button" onClick={() => void checkWithAi(id)} disabled={attempted || editorDirty || busy || mediaBusy || Boolean(preflightBusyId) || !text.trim() || characterCount(text) > 5000} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-45"><Sparkles size={13} aria-hidden="true" />{preflightBusyId === id ? "Checking…" : preflight ? "Check again" : "Check with AI"}</button>
+            </div>
+            <p className="mt-2 text-[11px] leading-4 text-[var(--text-soft)]">Clicking sends this post and the saved draft text to Nebius. It does not send media or verify facts online.</p>
+            {preflightErrors[id] && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">{preflightErrors[id]}</p>}
+            {preflightStale && <p role="status" className="mt-2 text-[11px] font-semibold text-[var(--warning)]">Text changed after this check. Run it again for the current version.</p>}
+            {preflight && !preflightStale && <div role="status" className="mt-3 border-t border-[var(--line)] pt-3">
+              {preflight.report.findings.length ? <ul className="space-y-2">{preflight.report.findings.map((finding, index) => <li key={`${finding.excerpt}-${index}`} className="rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[12px] leading-5 text-[var(--text-secondary)]"><span className="font-bold text-[var(--accent-text)]">{finding.kind === "source-drift" ? "Check against draft" : "Check clarity"}</span><span className="mx-1">·</span><q className="break-words">{finding.excerpt}</q><p className="mt-0.5">{finding.question}</p></li>)}</ul> : <p className="text-[12px] leading-5 text-[var(--text-muted)]">No specific wording concerns found. Verify facts, links and platform formatting yourself.</p>}
+            </div>}
+          </div>
           <div className="mt-3">{slotApplied && isPlatformId(id) && slotTimes[id] ? <p className="rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)]">Reminder: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview?.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(slotTimes[id]))} · {slotPreview?.timeZone}</p> : <fieldset disabled={attempted} className={attempted ? "opacity-70" : ""}><LocalDateTimeField id={`batch-reminder-${id}`} label={`${assistedDestinations[id].name} reminder`} value={reminders[id] ?? ""} minTimestamp={currentTime} optional onChange={(value) => setReminders((current) => ({ ...current, [id]: value }))} /></fieldset>}</div>
         </div>;
       })}
