@@ -11,6 +11,8 @@ import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@
 import { MediaHandoff } from "@/components/media-handoff";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { PrivateVideoPreview, VideoAttachmentPicker } from "@/components/video-attachment-picker";
+import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
+import { isManualAiDestination } from "@/lib/ai-handoff";
 
 type Props = {
   items: AssistedPost[];
@@ -356,9 +358,10 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
         <div className="sm:col-span-2">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><label htmlFor="assisted-text" className="text-[12px] font-bold text-[var(--text-secondary)]">Text to copy · {customText ? `Custom for ${selected.name}` : "From current draft"}</label>{customText && <button type="button" onClick={onResetText} className="text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use current draft text</button>}</div>
           <textarea id="assisted-text" value={text} maxLength={5000} onChange={(event) => onTextChange(event.target.value)} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
+          {!isPlatformId(destination) && isManualAiDestination(destination) && <AIHandoffAssistant key={`ai-${destination}`} destination={destination} source={text} disabled={busy} onApply={onTextChange} />}
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
           <p className="mt-2 text-[12px] text-[var(--text-secondary)]">{imageCount ? `${imageCount} ${imageCount === 1 ? "image" : "images"} from the current draft will be saved with this handoff.` : "No images selected in the current draft."} <button type="button" onClick={onEditImages} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit images in Create</button></p>
-          <details key={destination} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
+          <details key={`video-${destination}`} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
           {selected.needsMedia && <p className={`mt-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${missingComposerMedia ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{missingComposerMedia === "video" ? "No video attached here. Attach one or bring a video when you publish on YouTube." : missingComposerMedia ? "No photo or video attached here. Bring one when you publish." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
             <p className={validation.valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}>{validation.count} / {validation.limit} {destination === "bluesky" ? "graphemes" : "characters"}{validation.byteCount !== undefined ? ` · ${validation.byteCount} / ${validation.byteLimit} UTF-8 bytes` : ""}</p>

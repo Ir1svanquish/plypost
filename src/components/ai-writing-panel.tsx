@@ -108,7 +108,7 @@ export function AIWritingPanel({ source, mediaIds, selectedCount, generating, ha
 
   async function captionImage() {
     const imageId = mediaIds.includes(selectedImageId) ? selectedImageId : mediaIds[0];
-    if (!imageId) { setError("Select an image above first."); return; }
+    if (!imageId) { setError("Add an image under Photos or video first."); return; }
     const context = imageContext.trim();
     const voiceUsed = useVoice && Boolean(profile);
     const voiceUpdatedAt = voiceUsed ? profile?.updatedAt ?? null : null;
@@ -141,16 +141,16 @@ export function AIWritingPanel({ source, mediaIds, selectedCount, generating, ha
     if (imageToolRef.current) imageToolRef.current.open = true;
     window.requestAnimationFrame(() => imageToolRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   }
-  return <div className="mt-4 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex min-w-0 items-start gap-2.5"><Sparkles size={19} className="mt-0.5 shrink-0 text-[var(--accent-text)]" aria-hidden="true" /><div><h3 className="text-[13px] font-bold text-[var(--text)]">Write with AI</h3><p className="mt-0.5 text-[11px] text-[var(--text-muted)]">{selectedCount ? `Adapt for ${selectedCount} selected ${selectedCount === 1 ? "platform" : "platforms"}.` : "Choose platforms below, or explore all four."}</p></div></div>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={openImageTool} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-[var(--accent-border)] bg-[var(--surface)] px-3 text-[12px] font-bold text-[var(--accent-text)]"><ImagePlus size={14} aria-hidden="true" />Write from photo</button>
-        <button type="button" onClick={() => onGenerate(useVoice && Boolean(profile))} disabled={working || !source.trim()} className="gradient-button inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-[12px] font-bold text-white disabled:opacity-50"><Sparkles size={14} aria-hidden="true" />{generating ? "Adapting…" : hasReview ? "Regenerate" : selectedCount === 1 ? "Generate version" : "Generate versions"}</button>
+  return <section aria-label="AI writing tools" className="mt-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-3 sm:px-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h3 className="inline-flex items-center gap-2 text-[13px] font-bold text-[var(--accent-text)]"><Sparkles size={16} aria-hidden="true" />AI writing</h3>
+      <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+        <button type="button" onClick={() => onGenerate(useVoice && Boolean(profile))} disabled={working || !source.trim()} className="gradient-button inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg px-4 text-[12px] font-bold text-white disabled:opacity-50 sm:flex-none"><Sparkles size={14} aria-hidden="true" />{generating ? "Adapting…" : hasReview ? "Regenerate" : selectedCount === 0 ? "Explore four versions" : selectedCount === 1 ? "Adapt for platform" : "Adapt for platforms"}</button>
+        <button type="button" onClick={openImageTool} className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 text-[12px] font-bold text-[var(--accent-text)] sm:flex-none"><ImagePlus size={14} aria-hidden="true" />Write from photo</button>
       </div>
     </div>
-    <details ref={moreToolsRef} className="mt-3 border-t border-[var(--accent-border)] pt-3">
-      <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Image caption and writing style</summary>
+    <details ref={moreToolsRef} className="mt-2 border-t border-[var(--accent-border)] pt-2">
+      <summary className="cursor-pointer text-[11px] font-semibold text-[var(--accent-text)]">Writing style and photo options{selectedCount ? ` · ${selectedCount} selected` : ""}</summary>
     <div className="mt-4 space-y-4">
       <p className="text-[12px] leading-5 text-[var(--text-muted)]">Only content you choose is sent to Nebius when you use an AI action. Review suggestions before using them.</p>
 
@@ -182,7 +182,7 @@ export function AIWritingPanel({ source, mediaIds, selectedCount, generating, ha
             {mediaIds.map((id, index) => <option key={id} value={id}>Image {index + 1}</option>)}
           </select>
         </>}
-        {mediaIds.length === 0 && <p className="mt-3 text-[11px] text-[var(--text-muted)]">Attach an image above to use this feature.</p>}
+        {mediaIds.length === 0 && <p className="mt-3 text-[11px] text-[var(--text-muted)]">Add an image under Photos or video to use this feature.</p>}
         <label htmlFor="ai-image-context" className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Optional context</label>
         <input id="ai-image-context" value={imageContext} onChange={(event) => setImageContext(event.target.value)} maxLength={500} placeholder="What should the reader know?" className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)]" />
         <button type="button" onClick={() => void captionImage()} disabled={working || !imageId} className="mt-2 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-50">{busy === "image" ? "Looking at image…" : "Draft from selected image"}</button>
@@ -210,5 +210,5 @@ export function AIWritingPanel({ source, mediaIds, selectedCount, generating, ha
       <p className="border-t border-[var(--line)] pt-3 text-[11px] leading-5 text-[var(--text-muted)]">The version generator uses your current draft and, if selected, your saved writing style.</p>
     </div>
     </details>
-  </div>;
+  </section>;
 }

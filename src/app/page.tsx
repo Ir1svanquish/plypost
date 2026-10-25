@@ -1545,7 +1545,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} drafts, {legacyWorkspace.schedule.length} planned items and {legacyWorkspace.assisted.length} assisted items in older browser storage. Review before moving them into this account.</span><button type="button" onClick={() => { setLegacyImportError(null); setLegacyReviewOpen(true); }} className="font-bold text-[var(--accent-text)]">Review migration →</button></div>}
           {view === "compose" && <div id="compose" className="section-anchor mx-auto max-w-[850px]">
           <div className="mb-5">
-            <h1 className="text-[28px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[32px]">Create a post</h1>
+            <h1 className="text-[27px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[30px]">Create</h1>
           </div>
           <div className="space-y-5">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
@@ -1555,10 +1555,22 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                 </div>
                 <div className="px-5 pb-5 pt-6 sm:px-7 sm:pb-7">
                   <label htmlFor="source-draft" className="sr-only">Your message</label>
-                  <textarea id="source-draft" value={source} onChange={(event) => { const nextSource = event.target.value; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(nextSource, variants))); setSource(nextSource); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[210px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                  <textarea id="source-draft" value={source} onChange={(event) => { const nextSource = event.target.value; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(nextSource, variants))); setSource(nextSource); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[170px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
                   <div className="mt-2 flex justify-end text-[12px] text-[var(--text-soft)]"><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
-                  <details className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
-                    <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Add photos or video{mediaIds.length || videoId ? ` · ${mediaIds.length} ${mediaIds.length === 1 ? "photo" : "photos"}${videoId ? ", 1 video" : ""}` : ""}</summary>
+                  <AIWritingPanel source={source} mediaIds={mediaIds} selectedCount={selected.length} generating={generating} hasReview={Boolean(aiReview)}
+                    onGenerate={(useVoice) => { void generateVariants(useVoice); }}
+                    onInsertCaption={(caption) => {
+                      const next = source.trim() ? `${source.trim()}\n\n${caption}` : caption;
+                      if (next.length > 3000) { setNotice({ kind: "error", text: "This caption would take the draft over 3,000 characters. Shorten it before adding." }); return false; }
+                      editorRevision.current += 1;
+                      setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(next, variants)));
+                      setSource(next);
+                      setAiReview(null);
+                      setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." });
+                      return true;
+                    }} />
+                  <details className="mt-3 rounded-xl border border-[var(--line)] px-4 py-3">
+                    <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Photos or video{mediaIds.length || videoId ? ` · ${mediaIds.length} ${mediaIds.length === 1 ? "photo" : "photos"}${videoId ? ", 1 video" : ""}` : ""}</summary>
                     <div className="mt-3"><ImageAttachmentPicker
                     key={mediaPickerEpoch}
                     selectedIds={mediaIds}
@@ -1574,18 +1586,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     /></div>
                     <div className="mt-4"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { editorRevision.current += 1; setVideoId(id); }} onBusyChange={(busy) => { videoBusyRef.current = busy; setVideoBusy(busy); }} disabled={restoringBackup} /></div>
                   </details>
-                  <AIWritingPanel source={source} mediaIds={mediaIds} selectedCount={selected.length} generating={generating} hasReview={Boolean(aiReview)}
-                    onGenerate={(useVoice) => { void generateVariants(useVoice); }}
-                    onInsertCaption={(caption) => {
-                      const next = source.trim() ? `${source.trim()}\n\n${caption}` : caption;
-                      if (next.length > 3000) { setNotice({ kind: "error", text: "This caption would take the draft over 3,000 characters. Shorten it before adding." }); return false; }
-                      editorRevision.current += 1;
-                      setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(next, variants)));
-                      setSource(next);
-                      setAiReview(null);
-                      setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." });
-                      return true;
-                    }} />
                   {aiReview && <AIReviewPanel
                     source={aiReview.source}
                     original={aiReview.original}
