@@ -52,7 +52,8 @@ const interimSampleDraft =
 type AIReview = {
   source: string;
   original: Partial<Record<PlatformId, string>>;
-  suggestions: Record<PlatformId, string>;
+  suggestions: Partial<Record<PlatformId, string>>;
+  platforms: PlatformId[];
   overLimit: OverLimitVariant[];
   revision: number;
 };
@@ -662,24 +663,25 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
     const revisionAtStart = editorRevision.current;
     const previousVariants = { ...variants };
+    const requested = selected.length ? platformDisplayIds.filter((id) => selected.includes(id)) : [...platformDisplayIds];
     setGenerating(true);
     setNotice(null);
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, useVoice }),
+        body: JSON.stringify({ source, useVoice, platforms: requested }),
       });
-      const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: OverLimitVariant[] } = await response.json();
+      const data: { error?: string; variants?: Partial<Record<PlatformId, string>>; overLimit?: OverLimitVariant[] } = await response.json();
       if (!response.ok) throw new Error(data.error || "AI adaptation failed.");
-      if (!data.variants) throw new Error("AI adaptation returned no drafts.");
+      if (!data.variants || requested.some((id) => !data.variants?.[id]?.trim())) throw new Error("AI adaptation returned incomplete drafts.");
       if (editorRevision.current !== revisionAtStart) {
         setNotice({ kind: "error", text: "The editor changed while AI was working, so your edits were kept. Generate again when ready." });
         return;
       }
-      setAiReview({ source, original: previousVariants, suggestions: data.variants, overLimit: data.overLimit ?? [], revision: revisionAtStart });
-      setAiApplyIds(selected.length ? platformDisplayIds.filter((id) => selected.includes(id)) : [...platformDisplayIds]);
-      setNotice({ kind: "success", text: "Four suggestions are ready. Compare them below and choose what to apply." });
+      setAiReview({ source, original: previousVariants, suggestions: data.variants, platforms: requested, overLimit: data.overLimit ?? [], revision: revisionAtStart });
+      setAiApplyIds(selected.length ? requested : []);
+      setNotice({ kind: "success", text: `${requested.length} ${requested.length === 1 ? "suggestion is" : "suggestions are"} ready. Compare below and choose what to apply.` });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "AI adaptation failed." });
     } finally {
@@ -694,7 +696,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "The editor changed after AI generated these suggestions. Generate again before applying them." });
       return;
     }
-    const chosen = platformDisplayIds.filter((id) => aiApplyIds.includes(id));
+    const chosen = aiReview.platforms.filter((id) => aiApplyIds.includes(id) && aiReview.suggestions[id]);
+    if (chosen.length === 0) return;
     const previous = { ...variants };
     const next = { ...variants };
     for (const id of chosen) next[id] = aiReview.suggestions[id];
@@ -1554,34 +1557,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   <label htmlFor="source-draft" className="sr-only">Your message</label>
                   <textarea id="source-draft" value={source} onChange={(event) => { const nextSource = event.target.value; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(nextSource, variants))); setSource(nextSource); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[210px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
                   <div className="mt-2 flex justify-end text-[12px] text-[var(--text-soft)]"><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
-                  <AIWritingPanel source={source} mediaIds={mediaIds} generating={generating} hasReview={Boolean(aiReview)}
-                    onGenerate={(useVoice) => { void generateVariants(useVoice); }}
-                    onInsertCaption={(caption) => {
-                      const next = source.trim() ? `${source.trim()}\n\n${caption}` : caption;
-                      if (next.length > 3000) { setNotice({ kind: "error", text: "This caption would take the draft over 3,000 characters. Shorten it before adding." }); return false; }
-                      editorRevision.current += 1;
-                      setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(next, variants)));
-                      setSource(next);
-                      setAiReview(null);
-                      setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." });
-                      return true;
-                    }} />
-                  {aiReview && <AIReviewPanel
-                    source={aiReview.source}
-                    original={aiReview.original}
-                    suggestions={aiReview.suggestions}
-                    overLimit={aiReview.overLimit}
-                    selected={aiApplyIds}
-                    stale={editorRevision.current !== aiReview.revision || source !== aiReview.source ||
-                      platformIds.some((id) => variants[id] !== aiReview.original[id])}
-                    busy={generating}
-                    onToggle={(id) => setAiApplyIds((current) => current.includes(id)
-                      ? current.filter((item) => item !== id)
-                      : platformDisplayIds.filter((item) => current.includes(item) || item === id))}
-                    onApply={applyAIReview}
-                    onDiscard={() => { setAiReview(null); setNotice(null); }}
-                  />}
-                  {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setAiReview(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   <details className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
                     <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Add photos or video{mediaIds.length || videoId ? ` · ${mediaIds.length} ${mediaIds.length === 1 ? "photo" : "photos"}${videoId ? ", 1 video" : ""}` : ""}</summary>
                     <div className="mt-3"><ImageAttachmentPicker
@@ -1599,6 +1574,35 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     /></div>
                     <div className="mt-4"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { editorRevision.current += 1; setVideoId(id); }} onBusyChange={(busy) => { videoBusyRef.current = busy; setVideoBusy(busy); }} disabled={restoringBackup} /></div>
                   </details>
+                  <AIWritingPanel source={source} mediaIds={mediaIds} selectedCount={selected.length} generating={generating} hasReview={Boolean(aiReview)}
+                    onGenerate={(useVoice) => { void generateVariants(useVoice); }}
+                    onInsertCaption={(caption) => {
+                      const next = source.trim() ? `${source.trim()}\n\n${caption}` : caption;
+                      if (next.length > 3000) { setNotice({ kind: "error", text: "This caption would take the draft over 3,000 characters. Shorten it before adding." }); return false; }
+                      editorRevision.current += 1;
+                      setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(next, variants)));
+                      setSource(next);
+                      setAiReview(null);
+                      setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." });
+                      return true;
+                    }} />
+                  {aiReview && <AIReviewPanel
+                    source={aiReview.source}
+                    original={aiReview.original}
+                    suggestions={aiReview.suggestions}
+                    available={aiReview.platforms}
+                    overLimit={aiReview.overLimit}
+                    selected={aiApplyIds}
+                    stale={editorRevision.current !== aiReview.revision || source !== aiReview.source ||
+                      platformIds.some((id) => variants[id] !== aiReview.original[id])}
+                    busy={generating}
+                    onToggle={(id) => setAiApplyIds((current) => current.includes(id)
+                      ? current.filter((item) => item !== id)
+                      : aiReview.platforms.filter((item) => current.includes(item) || item === id))}
+                    onApply={applyAIReview}
+                    onDiscard={() => { setAiReview(null); setNotice(null); }}
+                  />}
+                  {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setAiReview(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   <div className="mt-5 border-t border-[var(--line)] pt-5">
                     <div className="mb-3 flex items-center justify-between"><h3 className="text-[13px] font-bold text-[var(--text)]">Post to</h3><span className="text-[12px] text-[var(--text-muted)]">{selected.length} selected</span></div>
                     <div role="group" aria-label="Editable photo and text destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">

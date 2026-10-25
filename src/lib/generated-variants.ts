@@ -3,15 +3,16 @@ import { validatePlatformText } from "./platform-validation";
 
 export type OverLimitVariant = { platform: PlatformId; count: number; limit: number; byteCount?: number; byteLimit?: number };
 
-export function parseGeneratedVariants(content: string): { variants: Record<PlatformId, string>; overLimit: OverLimitVariant[] } | null {
+export function parseGeneratedVariants(content: string, requested: readonly PlatformId[] = platformIds): { variants: Partial<Record<PlatformId, string>>; overLimit: OverLimitVariant[] } | null {
+  if (requested.length === 0) return null;
   const json = content.match(/\{[\s\S]*\}/)?.[0];
   if (!json) return null;
   try {
     const value: unknown = JSON.parse(json);
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const variants = {} as Record<PlatformId, string>;
+    const variants: Partial<Record<PlatformId, string>> = {};
     const overLimit: OverLimitVariant[] = [];
-    for (const platform of platformIds) {
+    for (const platform of requested) {
       const raw = (value as Record<string, unknown>)[platform];
       if (typeof raw !== "string" || !raw.trim()) return null;
       const text = raw.trim();

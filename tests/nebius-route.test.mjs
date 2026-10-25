@@ -77,6 +77,44 @@ test("Nebius routes use Nemotron through Token Factory and keep planning input l
   }
 });
 
+test("adaptation requests only selected platforms and rejects invalid selections before model use", async () => {
+  const owner = "scoped-ai@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-nebius-key";
+  const token = createSession(owner);
+  const headers = { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${token}`, "content-type": "application/json" };
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (_url, options) => {
+    calls.push(JSON.parse(options.body));
+    return globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({ linkedin: "A considered update", threads: "Ignore this extra draft" }) } }] });
+  };
+  try {
+    for (const platforms of [[], ["linkedin", "linkedin"], ["unknown"], "linkedin"]) {
+      const invalid = await adaptPost(new globalThis.Request("http://localhost:3000/api/generate", {
+        method: "POST", headers, body: JSON.stringify({ source: "A useful update", platforms }),
+      }));
+      assert.equal(invalid.status, 400);
+    }
+    assert.equal(calls.length, 0);
+    const response = await adaptPost(new globalThis.Request("http://localhost:3000/api/generate", {
+      method: "POST", headers, body: JSON.stringify({ source: "A useful update", platforms: ["linkedin"] }),
+    }));
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).variants, { linkedin: "A considered update" });
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].messages[0].content, /named linkedin/);
+    assert.doesNotMatch(calls[0].messages[0].content, /Bluesky:|Mastodon:|Threads:/);
+    assert.equal(database().prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE user_id=?").get(owner).count, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.NEBIUS_API_KEY;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+  }
+});
+
 test("AI routes refuse the removed direct NVIDIA provider", async () => {
   const owner = "single-provider@example.test";
   process.env.PLYPOST_OWNER_EMAIL = owner;

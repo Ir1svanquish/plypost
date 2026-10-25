@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ImagePlus, Sparkles } from "lucide-react";
 import type { VoiceProfile } from "@/lib/ai-studio";
 
 type Props = {
   source: string;
   mediaIds: readonly string[];
+  selectedCount: number;
   generating: boolean;
   hasReview: boolean;
   onGenerate: (useVoice: boolean) => void;
@@ -22,7 +23,9 @@ async function responseError(response: Response, fallback: string) {
   return body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : fallback;
 }
 
-export function AIWritingPanel({ source, mediaIds, generating, hasReview, onGenerate, onInsertCaption }: Props) {
+export function AIWritingPanel({ source, mediaIds, selectedCount, generating, hasReview, onGenerate, onInsertCaption }: Props) {
+  const moreToolsRef = useRef<HTMLDetailsElement>(null);
+  const imageToolRef = useRef<HTMLDetailsElement>(null);
   const [profile, setProfile] = useState<VoiceProfile | null>(null);
   const [useVoice, setUseVoice] = useState(false);
   const [guideDraft, setGuideDraft] = useState<string | null>(null);
@@ -133,12 +136,20 @@ export function AIWritingPanel({ source, mediaIds, generating, hasReview, onGene
     imageSuggestion.voiceUpdatedAt === (useVoice && profile ? profile.updatedAt : null));
   const captionLength = imageSuggestion ? (source.trim()
     ? `${source.trim()}\n\n${imageSuggestion.caption.trim()}` : imageSuggestion.caption.trim()).length : 0;
+  function openImageTool() {
+    if (moreToolsRef.current) moreToolsRef.current.open = true;
+    if (imageToolRef.current) imageToolRef.current.open = true;
+    window.requestAnimationFrame(() => imageToolRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+  }
   return <div className="mt-4 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex min-w-0 items-start gap-2.5"><Sparkles size={19} className="mt-0.5 shrink-0 text-[var(--accent-text)]" aria-hidden="true" /><div><h3 className="text-[13px] font-bold text-[var(--text)]">Write with AI</h3><p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Create versions for each platform with Nemotron.</p></div></div>
-      <button type="button" onClick={() => onGenerate(useVoice && Boolean(profile))} disabled={working || !source.trim()} className="gradient-button inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-[12px] font-bold text-white disabled:opacity-50"><Sparkles size={14} aria-hidden="true" />{generating ? "Adapting…" : hasReview ? "Regenerate" : "Generate versions"}</button>
+      <div className="flex min-w-0 items-start gap-2.5"><Sparkles size={19} className="mt-0.5 shrink-0 text-[var(--accent-text)]" aria-hidden="true" /><div><h3 className="text-[13px] font-bold text-[var(--text)]">Write with AI</h3><p className="mt-0.5 text-[11px] text-[var(--text-muted)]">{selectedCount ? `Adapt for ${selectedCount} selected ${selectedCount === 1 ? "platform" : "platforms"}.` : "Choose platforms below, or explore all four."}</p></div></div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={openImageTool} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-[var(--accent-border)] bg-[var(--surface)] px-3 text-[12px] font-bold text-[var(--accent-text)]"><ImagePlus size={14} aria-hidden="true" />Write from photo</button>
+        <button type="button" onClick={() => onGenerate(useVoice && Boolean(profile))} disabled={working || !source.trim()} className="gradient-button inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-[12px] font-bold text-white disabled:opacity-50"><Sparkles size={14} aria-hidden="true" />{generating ? "Adapting…" : hasReview ? "Regenerate" : selectedCount === 1 ? "Generate version" : "Generate versions"}</button>
+      </div>
     </div>
-    <details className="mt-3 border-t border-[var(--accent-border)] pt-3">
+    <details ref={moreToolsRef} className="mt-3 border-t border-[var(--accent-border)] pt-3">
       <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Image caption and writing style</summary>
     <div className="mt-4 space-y-4">
       <p className="text-[12px] leading-5 text-[var(--text-muted)]">Only content you choose is sent to Nebius when you use an AI action. Review suggestions before using them.</p>
@@ -162,7 +173,7 @@ export function AIWritingPanel({ source, mediaIds, generating, hasReview, onGene
         <button type="button" onClick={() => void analyze()} disabled={working || !oldPosts.trim()} className="mt-2 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-50">{busy === "voice" ? "Analyzing…" : profile ? "Update style guide" : "Analyze my style"}</button>
       </details>
 
-      <details className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3.5">
+      <details ref={imageToolRef} className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3.5">
         <summary className="cursor-pointer text-[13px] font-bold text-[var(--text)]">Write from an image {mediaIds.length ? `· ${mediaIds.length} selected` : ""}</summary>
         <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Choose an attached image. It is resized and sent to Nemotron 3.5 Super VL only when you click. Add context for facts the image cannot show.</p>
         {mediaIds.length > 1 && <>

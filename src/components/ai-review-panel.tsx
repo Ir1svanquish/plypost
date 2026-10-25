@@ -1,13 +1,14 @@
 "use client";
 
-import { adaptDraft, platformDisplayIds, platforms, type PlatformId } from "@/lib/platforms";
+import { adaptDraft, platforms, type PlatformId } from "@/lib/platforms";
 import type { OverLimitVariant } from "@/lib/generated-variants";
 import { compareText, type TextPart } from "@/lib/text-diff";
 
 type Props = {
   source: string;
   original: Partial<Record<PlatformId, string>>;
-  suggestions: Record<PlatformId, string>;
+  suggestions: Partial<Record<PlatformId, string>>;
+  available: readonly PlatformId[];
   overLimit: OverLimitVariant[];
   selected: PlatformId[];
   stale: boolean;
@@ -23,7 +24,7 @@ function highlighted(parts: TextPart[], kind: "current" | "suggested") {
     : <span key={index}>{part.text}</span>);
 }
 
-export function AIReviewPanel({ source, original, suggestions, overLimit, selected, stale, busy, onToggle, onApply, onDiscard }: Props) {
+export function AIReviewPanel({ source, original, suggestions, available, overLimit, selected, stale, busy, onToggle, onApply, onDiscard }: Props) {
   return <section aria-label="Review AI drafts" className="mt-4 rounded-xl border border-[var(--accent-border)] bg-[var(--surface)] p-4">
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div>
@@ -34,9 +35,9 @@ export function AIReviewPanel({ source, original, suggestions, overLimit, select
     </div>
     {stale && <p role="alert" className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">The editor changed after these suggestions were generated. Generate again to review the latest draft.</p>}
     <div className="mt-3 space-y-2">
-      {platformDisplayIds.map((id) => {
+      {available.map((id) => {
         const warning = overLimit.find((item) => item.platform === id);
-        const comparison = compareText(original[id] ?? adaptDraft(source, id), suggestions[id]);
+        const comparison = compareText(original[id] ?? adaptDraft(source, id), suggestions[id] ?? "");
         return <div key={id} className="rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="inline-flex items-center gap-2 text-[12px] font-semibold text-[var(--text)]">

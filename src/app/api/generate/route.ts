@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { parseGeneratedVariants } from "@/lib/generated-variants";
 import { variantMessages } from "@/lib/ai-prompts";
-import { characterCount } from "@/lib/platforms";
+import { characterCount, isPlatformId, platformDisplayIds } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import { reserveAiRequest } from "@/lib/server/workspace";
@@ -28,6 +28,14 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (input.platforms !== undefined && (!Array.isArray(input.platforms) || input.platforms.length < 1 ||
+      input.platforms.length > platformDisplayIds.length || !input.platforms.every(isPlatformId) ||
+      new Set(input.platforms).size !== input.platforms.length)) {
+    return NextResponse.json({ error: "Choose one to four supported platforms." }, { status: 400 });
+  }
+  const requestedInput = input.platforms as string[] | undefined;
+  const requested = requestedInput === undefined ? platformDisplayIds :
+    platformDisplayIds.filter((id) => requestedInput.includes(id));
   const voice = input.useVoice ? loadVoiceProfile(user)?.guide : undefined;
   if (input.useVoice && !voice) return NextResponse.json({ error: "Analyze your writing style first, or turn off the voice guide." }, { status: 400 });
 
@@ -51,7 +59,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: config.model,
-        messages: variantMessages(source, voice),
+        messages: variantMessages(source, voice, requested),
         temperature: 0.2,
         max_tokens: 1200,
         stream: false,
@@ -70,10 +78,10 @@ export async function POST(request: Request) {
 
     const data: unknown = await response.json();
     const content = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content;
-    const parsed = typeof content === "string" ? parseGeneratedVariants(content) : null;
+    const parsed = typeof content === "string" ? parseGeneratedVariants(content, requested) : null;
     if (!parsed) {
       return NextResponse.json(
-        { error: "The model did not return four usable drafts. Please try again." },
+        { error: "The model did not return usable drafts for the selected platforms. Please try again." },
         { status: 502 },
       );
     }

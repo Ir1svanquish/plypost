@@ -8,6 +8,14 @@ test("parses four usable drafts and ignores surrounding prose", () => {
   assert.deepEqual(parseGeneratedVariants(`Here are drafts: ${JSON.stringify(valid)}`), { variants: valid, overLimit: [] });
 });
 
+test("accepts only the requested platform and rejects a missing requested draft", () => {
+  assert.deepEqual(parseGeneratedVariants(JSON.stringify(valid), ["linkedin"]), {
+    variants: { linkedin: valid.linkedin }, overLimit: [],
+  });
+  assert.equal(parseGeneratedVariants(JSON.stringify({ bluesky: valid.bluesky }), ["linkedin"]), null);
+  assert.equal(parseGeneratedVariants(JSON.stringify(valid), []), null);
+});
+
 test("preserves an over-limit draft for editing and reports the exact platform", () => {
   const parsed = parseGeneratedVariants(JSON.stringify({ ...valid, bluesky: "a".repeat(301) }));
   assert.deepEqual(parsed?.overLimit, [{ platform: "bluesky", count: 301, limit: 300 }]);
