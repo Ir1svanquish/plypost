@@ -35,7 +35,11 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
       <span className="text-[11px] font-semibold text-[var(--text-muted)]">{selectedIds.length} / {limit} selected</span>
     </div>
     <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">
-      {sourceIds.length > limit ? `Starts with the first ${limit} of ${sourceIds.length} draft images. Pick a different set or order below.` : `Choose from ${sourceIds.length} draft ${sourceIds.length === 1 ? "image" : "images"}.`}
+      {sourceIds.length > limit
+        ? selectedIds.length >= limit
+          ? `This platform can use ${limit} of ${sourceIds.length} draft images. Unselect one to choose another.`
+          : `Choose up to ${limit} of ${sourceIds.length} draft images.`
+        : `Choose from ${sourceIds.length} draft ${sourceIds.length === 1 ? "image" : "images"}.`}
     </p>
     <div className="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
       {sourceIds.map((id, index) => {
@@ -65,3 +69,4 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
     {selectedIds.length === 0 && <p role="status" className="mt-2 text-[11px] text-[var(--warning)]">No images will be included in this handoff.</p>}
   </section>;
 }
+
