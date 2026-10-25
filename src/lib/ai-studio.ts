@@ -67,3 +67,18 @@ export function parseImageCaptionResponse(raw: string): { observations: string; 
     return observations && caption ? { observations, caption } : null;
   } catch { return null; }
 }
+
+export function parseDraftFromNotesResponse(raw: string): string | null {
+  if (raw.length > 12000) return null;
+  const json = raw.match(/\{[\s\S]*\}/)?.[0];
+  if (!json) return null;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return isRecord(parsed) ? parseGuide(parsed.draft, 3000) : null;
+  } catch { return null; }
+}
+
+export function isStandaloneQuestion(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && trimmed.length <= 300 && /^[^.!。！;；\n?？]+[?？]$/.test(trimmed);
+}

@@ -11,6 +11,7 @@ import { GET, POST, PATCH, DELETE } from "../src/app/api/ai-studio/route.ts";
 import { POST as adaptPost } from "../src/app/api/generate/route.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { loadVoiceProfile, saveVoiceProfile } from "../src/lib/server/voice-profile.ts";
+import { isStandaloneQuestion, parseDraftFromNotesResponse } from "../src/lib/ai-studio.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-ai-studio-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "workspace.sqlite");
@@ -114,6 +115,83 @@ test("a guide that repeats a long passage from a sample post is not saved", asyn
     }));
     assert.equal(response.status, 502);
     assert.equal(loadVoiceProfile(owner), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.NEBIUS_API_KEY;
+  }
+});
+
+test("drafting from notes sends only the selected notes and optional style guide", async () => {
+  const owner = "notes@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-nebius-key";
+  const token = createSession(owner);
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (_url, options) => {
+    calls.push(JSON.parse(options.body));
+    return globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({ draft: "Workshop Saturday at 2 p.m. Bring a laptop." }) } }] });
+  };
+  try {
+    for (const invalid of [
+      { action: "draft-from-notes", notes: "" },
+      { action: "draft-from-notes", notes: "a".repeat(3001) },
+      { action: "draft-from-notes", notes: "Workshop", useVoice: "yes" },
+      { action: "draft-from-notes", notes: "Workshop", useVoice: true },
+      { action: "draft-from-notes", notes: "Workshop", style: "viral" },
+    ]) {
+      assert.equal((await POST(request("/api/ai-studio", token, invalid))).status, 400);
+    }
+    assert.equal(calls.length, 0);
+    saveVoiceProfile(owner, "Short, plain sentences.");
+    const notes = "Workshop Saturday 2 p.m. Bring laptop.";
+    const response = await POST(request("/api/ai-studio", token, {
+      action: "draft-from-notes", notes, useVoice: true, mediaId: "should-not-be-sent",
+    }));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).draft, "Workshop Saturday at 2 p.m. Bring a laptop.");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, "nvidia/nemotron-3-super-120b-a12b");
+    assert.deepEqual(JSON.parse(calls[0].messages[1].content), { notes, voiceGuide: "Short, plain sentences." });
+    assert.equal(database().prepare("SELECT COUNT(*) AS count FROM drafts WHERE user_id=?").get(owner).count, 0);
+    const conversational = await POST(request("/api/ai-studio", token, {
+      action: "draft-from-notes", notes, style: "conversation",
+    }));
+    assert.equal(conversational.status, 200);
+    assert.match(calls[1].messages[0].content, /one specific, relevant question/);
+    assert.deepEqual(JSON.parse(calls[1].messages[1].content), { notes });
+    assert.equal(parseDraftFromNotesResponse('{"draft":"  A short post.  "}'), "A short post.");
+    assert.equal(parseDraftFromNotesResponse('{"draft":"' + "a".repeat(3001) + '"}'), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.NEBIUS_API_KEY;
+  }
+});
+
+test("a question alone cannot become a fabricated personal anecdote", async () => {
+  assert.equal(isStandaloneQuestion("What changed your workflow?"), true);
+  assert.equal(isStandaloneQuestion("你最近改进了什么？"), true);
+  assert.equal(isStandaloneQuestion("We changed our workflow. What about you?"), false);
+  const owner = "question@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-nebius-key";
+  const token = createSession(owner);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({
+    draft: "I streamlined my work with a new keyboard shortcut. What helped you?",
+  }) } }] });
+  try {
+    const response = await POST(request("/api/ai-studio", token, {
+      action: "draft-from-notes", notes: "What changed your workflow?", style: "practical",
+    }));
+    assert.equal(response.status, 502);
+    assert.match((await response.json()).error, /unsupported answer/);
   } finally {
     globalThis.fetch = originalFetch;
     delete process.env.PLYPOST_OWNER_EMAIL;

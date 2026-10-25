@@ -1,7 +1,8 @@
 import sharp from "sharp";
 import { NextResponse } from "next/server";
-import { imageCaptionMessages, styleAnalysisMessages } from "@/lib/ai-prompts";
-import { parseExamples, parseGuide, parseGuideResponse, parseImageCaptionResponse, repeatsLongExcerpt } from "@/lib/ai-studio";
+import { draftFromNotesMessages, imageCaptionMessages, styleAnalysisMessages } from "@/lib/ai-prompts";
+import { isCaptionStyleId } from "@/lib/caption-styles";
+import { isStandaloneQuestion, parseDraftFromNotesResponse, parseExamples, parseGuide, parseGuideResponse, parseImageCaptionResponse, repeatsLongExcerpt } from "@/lib/ai-studio";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
 const headers = { "Cache-Control": "no-store" };
 const VISION_MODEL = "nvidia/Nemotron-3.5-Super-VL";
 
-async function completion(key: string, model: string, messages: ReturnType<typeof styleAnalysisMessages> | ReturnType<typeof imageCaptionMessages>, maxTokens: number) {
+async function completion(key: string, model: string, messages: ReturnType<typeof styleAnalysisMessages> | ReturnType<typeof imageCaptionMessages> | ReturnType<typeof draftFromNotesMessages>, maxTokens: number) {
   const response = await fetch("https://api.tokenfactory.nebius.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -65,22 +66,32 @@ export async function POST(request: Request) {
   const action = input.action;
   const isPersonal = action === "analyze-style";
   const isCaption = action === "caption-image";
-  if ((!isPersonal && !isCaption) || input.referenceGuide !== undefined) {
+  const isDraft = action === "draft-from-notes";
+  if ((!isPersonal && !isCaption && !isDraft) || input.referenceGuide !== undefined) {
     return NextResponse.json({ error: "Unknown AI action." }, { status: 400, headers });
   }
   const examples = isPersonal ? parseExamples(input.examples, 3, 6) : null;
   const media = isCaption && typeof input.mediaId === "string" ? getMedia(user, input.mediaId) : null;
   const context = isCaption && typeof input.context === "string" ? input.context.trim() : "";
-  const useVoice = input.useVoice === true;
+  const notes = isDraft && typeof input.notes === "string" ? input.notes.trim() : "";
+  const style = isCaptionStyleId(input.style) ? input.style : (input.useVoice === true ? "personal" : "default");
+  const styleValid = (input.style === undefined || isCaptionStyleId(input.style)) &&
+    (input.useVoice === undefined || (typeof input.useVoice === "boolean" && input.useVoice === (style === "personal")));
+  const useVoice = style === "personal";
   if (isPersonal && !examples) {
     return NextResponse.json({ error: "Choose 3–6 examples, each under 1,800 characters." }, { status: 400, headers });
   }
-  if (isCaption && (!media || Array.from(context).length > 500 ||
-      (input.useVoice !== undefined && typeof input.useVoice !== "boolean"))) {
-    return NextResponse.json({ error: "Choose one image from your library and keep context under 500 characters." }, { status: 400, headers });
+  if ((isCaption || isDraft) && !styleValid) {
+    return NextResponse.json({ error: "Choose a supported caption style." }, { status: 400, headers });
   }
-  const voiceProfile = isCaption && useVoice ? loadVoiceProfile(user) : null;
-  if (isCaption && useVoice && !voiceProfile) {
+  if (isCaption && (!media || Array.from(context).length > 3000)) {
+    return NextResponse.json({ error: "Choose one image from your library and keep notes under 3,000 characters." }, { status: 400, headers });
+  }
+  if (isDraft && (!notes || Array.from(notes).length > 3000)) {
+    return NextResponse.json({ error: "Write up to 3,000 characters of notes first." }, { status: 400, headers });
+  }
+  const voiceProfile = (isCaption || isDraft) && useVoice ? loadVoiceProfile(user) : null;
+  if ((isCaption || isDraft) && useVoice && !voiceProfile) {
     return NextResponse.json({ error: "Analyze your writing style first, or turn off the voice guide." }, { status: 400, headers });
   }
   const config = nebiusConfig();
@@ -88,13 +99,23 @@ export async function POST(request: Request) {
   const quota = reserveAiRequest(user);
   if (!quota.allowed) return NextResponse.json({ error: quota.error }, { status: quota.status, headers });
   try {
+    if (isDraft) {
+      const raw = await completion(config.key, config.model,
+        draftFromNotesMessages(notes, style, voiceProfile?.guide), 700);
+      const draft = parseDraftFromNotesResponse(raw);
+      if (!draft) throw new Error("The model did not return a usable post. Try shorter notes.");
+      if (isStandaloneQuestion(notes) && !isStandaloneQuestion(draft)) {
+        throw new Error("The model added an unsupported answer to your question. Keep the question as written or add facts and try again.");
+      }
+      return NextResponse.json({ draft, model: config.model }, { headers });
+    }
     if (isCaption && media) {
       // Images in the private library have already been re-encoded without EXIF. Downsize again for inference.
       const pixels = await sharp(media.bytes).resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 80 }).toBuffer();
       const imageDataUrl = `data:image/jpeg;base64,${pixels.toString("base64")}`;
       const raw = await completion(config.key, VISION_MODEL,
-        imageCaptionMessages(imageDataUrl, context, voiceProfile?.guide ?? null), 700);
+        imageCaptionMessages(imageDataUrl, context, voiceProfile?.guide ?? null, style), 700);
       const suggestion = parseImageCaptionResponse(raw);
       if (!suggestion) throw new Error("The vision model did not return a usable caption. Try another image.");
       return NextResponse.json({ ...suggestion, model: VISION_MODEL }, { headers });

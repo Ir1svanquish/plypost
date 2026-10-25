@@ -10,6 +10,7 @@ import {
   Clock3,
   Copy,
   FilePenLine,
+  Plus,
   RotateCcw,
   Send,
   UserRound,
@@ -27,7 +28,7 @@ import { WeeklySlotsPanel } from "@/components/weekly-slots-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
 import { AIReviewPanel } from "@/components/ai-review-panel";
-import { AIWritingPanel } from "@/components/ai-writing-panel";
+import { CaptionComposer } from "@/components/caption-composer";
 import { PlatformPreview } from "@/components/platform-preview";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
@@ -188,6 +189,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [active, setActive] = useState<PlatformId>(platformDisplayIds[0]);
   const [variants, setVariants] = useState<Partial<Record<PlatformId, string>>>({});
   const [mediaIds, setMediaIds] = useState<string[]>([]);
+  const [showAttachments, setShowAttachments] = useState(false);
   const [mediaAltById, setMediaAltById] = useState<Record<string, string>>({});
   const [videoId, setVideoId] = useState<string | null>(null);
   const [plannedDate, setPlannedDate] = useState("");
@@ -1684,22 +1686,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                 </div>
                 <div className="px-5 pb-5 pt-6 sm:px-7 sm:pb-7">
                   <label htmlFor="source-draft" className="sr-only">Your message</label>
-                  <textarea id="source-draft" value={source} onChange={(event) => { const nextSource = event.target.value; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(nextSource, variants))); setSource(nextSource); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[170px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                  <div className="relative">
+                    <textarea id="source-draft" value={source} onChange={(event) => { const nextSource = event.target.value; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(nextSource, variants))); setSource(nextSource); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[190px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 pb-16 pt-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                    <button type="button" aria-expanded={showAttachments} aria-controls="draft-media-panel" onClick={() => setShowAttachments((open) => !open)} className="absolute bottom-4 left-3 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 text-[12px] font-semibold text-[var(--text-secondary)] shadow-sm hover:bg-[var(--surface-hover)]"><Plus size={16} aria-hidden="true" />{mediaIds.length || videoId ? `${mediaIds.length} ${mediaIds.length === 1 ? "photo" : "photos"}${videoId ? " · 1 video" : ""}` : "Add photo or video"}</button>
+                  </div>
                   <div className="mt-2 flex justify-end text-[12px] text-[var(--text-soft)]"><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
-                  <AIWritingPanel source={source} mediaIds={mediaIds} selectedCount={selected.length} generating={generating} hasReview={Boolean(aiReview)}
-                    onGenerate={(useVoice) => { void generateVariants(useVoice); }}
-                    onInsertCaption={(caption) => {
-                      const next = source.trim() ? `${source.trim()}\n\n${caption}` : caption;
-                      if (next.length > 3000) { setNotice({ kind: "error", text: "This caption would take the draft over 3,000 characters. Shorten it before adding." }); return false; }
-                      editorRevision.current += 1;
-                      setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(next, variants)));
-                      setSource(next);
-                      setAiReview(null);
-                      setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." });
-                      return true;
-                    }} />
-                  <details className="mt-3 rounded-xl border border-[var(--line)] px-4 py-3">
-                    <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Photos or video{mediaIds.length || videoId ? ` · ${mediaIds.length} ${mediaIds.length === 1 ? "photo" : "photos"}${videoId ? ", 1 video" : ""}` : ""}</summary>
+                  <div id="draft-media-panel" hidden={!showAttachments} className="mt-3 rounded-xl border border-[var(--line)] px-4 pb-4">
                     <div className="mt-3"><ImageAttachmentPicker
                     key={mediaPickerEpoch}
                     selectedIds={mediaIds}
@@ -1714,7 +1706,18 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     }}
                     /></div>
                     <div className="mt-4"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { editorRevision.current += 1; setVideoId(id); }} onBusyChange={(busy) => { videoBusyRef.current = busy; setVideoBusy(busy); }} disabled={restoringBackup} /></div>
-                  </details>
+                  </div>
+                  <CaptionComposer source={source} revision={editorRevision.current} mediaIds={mediaIds} videoId={videoId} selectedCount={selected.length} generating={generating} hasReview={Boolean(aiReview)}
+                    onGenerate={(useVoice) => { void generateVariants(useVoice); }}
+                    onUseDraft={(draft, expectedSource, expectedRevision) => {
+                      if (source !== expectedSource || editorRevision.current !== expectedRevision || !draft || characterCount(draft) > 3000) return false;
+                      editorRevision.current += 1;
+                      setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(draft, variants)));
+                      setSource(draft);
+                      setAiReview(null);
+                      setNotice({ kind: "success", text: "AI draft added. Check the wording and facts before sharing." });
+                      return true;
+                    }} />
                   {aiReview && <AIReviewPanel
                     source={aiReview.source}
                     original={aiReview.original}
