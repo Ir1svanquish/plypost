@@ -40,16 +40,16 @@ export async function GET(request: Request, context: Context) {
         return new Response(null, { status: 416, headers: { ...headers, "Content-Range": `bytes */${length}` } });
       }
       end = Math.min(end, length - 1);
-      return new Response(new Uint8Array(found.bytes.subarray(start, end + 1)), {
+      return new Response(new Uint8Array(found.bytes.buffer as ArrayBuffer, found.bytes.byteOffset + start, end - start + 1), {
         status: 206, headers: { ...headers, "Content-Length": String(end - start + 1),
           "Content-Range": `bytes ${start}-${end}/${length}` },
       });
     }
-    return new Response(new Uint8Array(found.bytes), {
+    return new Response(new Uint8Array(found.bytes.buffer as ArrayBuffer, found.bytes.byteOffset, found.bytes.byteLength), {
       headers: { ...headers, "Content-Length": String(length) },
     });
   }
-  return new Response(new Uint8Array(found.bytes), {
+  return new Response(new Uint8Array(found.bytes.buffer as ArrayBuffer, found.bytes.byteOffset, found.bytes.byteLength), {
     headers: {
       ...privateHeaders,
       "Content-Type": found.video.mimeType,

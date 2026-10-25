@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   }
   try {
     const body = await boundedBody(request);
-    const multipart = new Request(request.url, { method: "POST", headers: { "Content-Type": contentType }, body: new Uint8Array(body) });
+    const multipart = new Request(request.url, { method: "POST", headers: { "Content-Type": contentType }, body: body.buffer as ArrayBuffer });
     const entries = [...(await multipart.formData()).entries()];
     if (entries.length !== 1 || entries[0][0] !== "file" || !(entries[0][1] instanceof File)) {
       throw new VideoError("Upload exactly one video in the file field.");

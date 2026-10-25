@@ -90,7 +90,7 @@ export function getMedia(userId: string, id: string): { media: MediaItem; bytes:
   if (!MEDIA_ID_PATTERN.test(id)) return null;
   const row = mediaDatabase().prepare("SELECT id,original_name,mime_type,byte_size,width,height,created_at,body FROM media WHERE id=? AND user_id=?")
     .get(id, userId) as (MediaRow & { body: Uint8Array }) | undefined;
-  return row ? { media: itemFromRow(row), bytes: Buffer.from(row.body) } : null;
+  return row ? { media: itemFromRow(row), bytes: Buffer.from(row.body.buffer, row.body.byteOffset, row.body.byteLength) } : null;
 }
 
 export function assertOwnedMedia(userId: string, mediaIds: unknown): asserts mediaIds is string[] {

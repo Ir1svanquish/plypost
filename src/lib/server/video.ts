@@ -78,7 +78,7 @@ export function getVideo(userId: string, id: string): { video: VideoItem; bytes:
   if (!VIDEO_ID_PATTERN.test(id)) return null;
   const row = videoDatabase().prepare("SELECT id,original_name,mime_type,byte_size,created_at,body FROM videos WHERE id=? AND user_id=?")
     .get(id, userId) as (VideoRow & { body: Uint8Array }) | undefined;
-  return row ? { video: itemFromRow(row), bytes: Buffer.from(row.body) } : null;
+  return row ? { video: itemFromRow(row), bytes: Buffer.from(row.body.buffer, row.body.byteOffset, row.body.byteLength) } : null;
 }
 
 export function assertOwnedVideo(userId: string, id: unknown): void {

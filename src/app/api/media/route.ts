@@ -7,12 +7,12 @@ export const runtime = "nodejs";
 const MAX_REQUEST_BYTES = MAX_IMAGE_BYTES + 256 * 1024;
 const noStore = { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" };
 
-async function boundedBody(request: Request): Promise<Buffer> {
+async function boundedBody(request: Request): Promise<Uint8Array<ArrayBuffer>> {
   const claimedLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(claimedLength) && claimedLength > MAX_REQUEST_BYTES) throw new MediaError("Upload request exceeds 5 MiB.", 413);
   if (!request.body) throw new MediaError("Upload is empty.");
   const reader = request.body.getReader();
-  const chunks: Buffer[] = [];
+  const chunks: Uint8Array[] = [];
   let size = 0;
   try {
     while (true) {
@@ -23,10 +23,13 @@ async function boundedBody(request: Request): Promise<Buffer> {
         await reader.cancel();
         throw new MediaError("Upload request exceeds 5 MiB.", 413);
       }
-      chunks.push(Buffer.from(value));
+      chunks.push(value);
     }
   } finally { reader.releaseLock(); }
-  return Buffer.concat(chunks, size);
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return body;
 }
 
 export async function GET(request: Request) {
@@ -45,7 +48,7 @@ export async function POST(request: Request) {
   }
   try {
     const body = await boundedBody(request);
-    const multipart = new Request(request.url, { method: "POST", headers: { "Content-Type": contentType }, body: new Uint8Array(body) });
+    const multipart = new Request(request.url, { method: "POST", headers: { "Content-Type": contentType }, body: body.buffer });
     const form = await multipart.formData();
     const entries = [...form.entries()];
     if (entries.length !== 1 || entries[0][0] !== "file" || !(entries[0][1] instanceof File)) {
