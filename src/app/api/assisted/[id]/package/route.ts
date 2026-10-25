@@ -18,7 +18,7 @@ export async function GET(request: Request, context: Context) {
   const { id } = await context.params;
   try {
     const { bytes, filename } = buildHandoffPackage(user, id);
-    return new Response(new Uint8Array(bytes), {
+    return new Response(bytes as Uint8Array<ArrayBuffer>, {
       headers: {
         ...privateHeaders,
         "Content-Type": "application/zip",
