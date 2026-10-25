@@ -1305,7 +1305,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function markAssistedPosted(id: string, postUrl?: string) {
-    await runAssistedAction("set-assisted-status", { id, status: "posted", ...(postUrl ? { postUrl } : {}) }, "Marked as posted by you. Plypost did not verify the platform post.");
+    return runAssistedAction("set-assisted-status", { id, status: "posted", ...(postUrl ? { postUrl } : {}) }, "Marked as posted by you. Plypost did not verify the platform post.");
   }
 
   async function updateAssistedPostUrl(id: string, postUrl: string | null): Promise<boolean> {
@@ -1395,7 +1395,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }
 
   async function undoAssistedPosted(id: string) {
-    await runAssistedAction("set-assisted-status", { id, status: "queued" }, "Post returned to your assisted publishing checklist.");
+    return runAssistedAction("set-assisted-status", { id, status: "queued" }, "Post returned to your assisted publishing checklist.");
   }
 
   async function removeAssisted(id: string) {

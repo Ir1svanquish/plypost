@@ -33,14 +33,14 @@ type Props = {
   onAdd: (videoId?: string) => Promise<boolean>;
   onSetReminder: (post: AssistedPost, scheduledFor: string | null) => Promise<void>;
   onCopy: (text: string, destination: AssistedDestinationId) => void;
-  onMarkPosted: (id: string, postUrl?: string) => void;
+  onMarkPosted: (id: string, postUrl?: string) => Promise<boolean>;
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
   onUpdateVideo: (id: string, expectedVideoId: string | null, videoId: string | null) => Promise<boolean>;
   onUpdateImages: (id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaIds: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdateDescriptions: (id: string, expectedMediaAlt: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdatePostUrl: (id: string, postUrl: string | null) => Promise<boolean>;
   onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null) => Promise<boolean>;
-  onUndo: (id: string) => void;
+  onUndo: (id: string) => Promise<boolean>;
   onRemove: (id: string) => void;
   onEnableNotifications: () => void;
   onEditImages: () => void;
@@ -115,6 +115,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   const [composerInitialized, setComposerInitialized] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("to-post");
   const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
+  const [pendingStatusFocus, setPendingStatusFocus] = useState<{ id: string; status: "posted" | "queued" } | null>(null);
   const [reminderEdit, setReminderEdit] = useState<{ itemId: string; value: string; error: string } | null>(null);
   const [reminderSavingId, setReminderSavingId] = useState<string | null>(null);
   const [showVideoDestinations, setShowVideoDestinations] = useState(() => startWithVideoGroup || assistedVideoDisplayIds.some((id) => id === destination));
@@ -175,6 +176,19 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
     element?.scrollIntoView({ behavior: "smooth", block: "center" });
     element?.focus({ preventScroll: true });
   }, [focusItemId, hasFocusedItem, statusFilter, activeDestinationFilter]);
+
+  useEffect(() => {
+    if (!pendingStatusFocus || !visibleItems.some((item) => item.id === pendingStatusFocus.id && item.status === pendingStatusFocus.status)) return;
+    const element = document.getElementById(`assisted-item-${pendingStatusFocus.id}`);
+    if (!element) return;
+    if (pendingStatusFocus.status === "posted") {
+      const record = document.getElementById(`assisted-posted-record-${pendingStatusFocus.id}`);
+      if (record instanceof HTMLDetailsElement) record.open = true;
+    }
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    element.focus({ preventScroll: true });
+    setPendingStatusFocus(null);
+  }, [pendingStatusFocus, visibleItems]);
 
   function closeLinkEditor(id: string) {
     setEditingLinks((current) => { const next = { ...current }; delete next[id]; return next; });
@@ -293,6 +307,22 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
     setStatusFilter("to-post");
     setDestinationFilter("all");
     await onAdd(videoId ?? undefined);
+  }
+
+  async function markPosted(id: string, postUrl?: string) {
+    if (busy || !await onMarkPosted(id, postUrl)) return;
+    closeVideoEditor(id);
+    setDestinationFilter("all");
+    setStatusFilter("posted");
+    setPendingStatusFocus({ id, status: "posted" });
+  }
+
+  async function undoPosted(id: string) {
+    if (busy || !await onUndo(id)) return;
+    closeOutcomeEditor(id);
+    setDestinationFilter("all");
+    setStatusFilter("to-post");
+    setPendingStatusFocus({ id, status: "queued" });
   }
 
   return (
@@ -465,10 +495,10 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
-                {item.status === "queued" ? <button type="button" onClick={() => { closeVideoEditor(item.id); onMarkPosted(item.id, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { closeOutcomeEditor(item.id); onUndo(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+                {item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item.id, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { void undoPosted(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
               {item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
-              {item.status === "posted" && <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
+              {item.status === "posted" && <details id={`assisted-posted-record-${item.id}`} className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
                 <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Posted record{savedUrl ? " · link saved" : ""}{item.outcome ? " · results recorded" : ""}</summary>
               <div className="mt-3 text-[11px] leading-5 text-[var(--text-muted)]">
                 <p>Marked posted by you{item.postedAt ? ` · ${formatLocalDateTime(item.postedAt)}` : ""} · not verified by Plypost.</p>
