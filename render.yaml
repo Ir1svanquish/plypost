@@ -18,6 +18,8 @@ services:
         value: /opt/render/project/src/storage/plypost.sqlite
       - key: PLYPOST_MASTODON_SCHEDULE_ENABLED
         value: "false"
+      - key: PLYPOST_AI_DAILY_LIMIT
+        value: "40"
       - key: PLYPOST_OWNER_EMAIL
         sync: false
       - key: PLYPOST_OWNER_PASSWORD_HASH

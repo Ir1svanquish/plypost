@@ -44,6 +44,7 @@ npm run hash-password
 | 功能 | 配置 |
 | --- | --- |
 | AI 文案与选题 | 默认使用 Nebius Token Factory 上的 `nvidia/nemotron-3-super-120b-a12b`；在 `.env.local` 中填写 `NEBIUS_API_KEY` 即可。可用 `NEBIUS_MODEL` 覆盖模型；若要走 NVIDIA 的独立接口，则另填 `NVIDIA_API_KEY` 并在界面选择。点击文案改写会发送当前草稿文字；点击生成周计划只发送已保存的品牌资料，不发送发帖结果。 |
+| AI 调用额度 | 每个账号每小时最多请求 10 次，两种 AI 功能共用额度，记录存在 SQLite 中。公开演示可额外设置 `PLYPOST_AI_DAILY_LIMIT`（1–240）限制滚动 24 小时内的总请求；留空则只用每小时限制。这不是 Nebius 账户的费用上限。 |
 | Bluesky 账号 | 填写 `PLYPOST_BLUESKY_ORIGIN` 和 `PLYPOST_BLUESKY_SECRET`，然后在 **Account** 中连接。浏览器地址须与配置一致。 |
 | Mastodon 账号 | 有账号时再填写 `PLYPOST_MASTODON_INSTANCE`、`PLYPOST_PUBLIC_ORIGIN` 和 `PLYPOST_MASTODON_SECRET`。可用 `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` 暂停新的定时任务和后续派发，改动后须重启应用与 worker。 |
 

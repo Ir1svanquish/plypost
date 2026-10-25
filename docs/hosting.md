@@ -2,7 +2,7 @@
 
 Plypost currently runs on one Node.js process with a local SQLite database. A public judging copy needs its **own** database and owner account. Keep the local `data/` folder and `.env.local` off the host. Use HTTPS, set the Nebius key only in the host's server-side secret settings, and leave Bluesky/Mastodon connection settings unset. Do not run the worker for the judging demo. `GET /api/health` returns `200` only when the app can open its database; it does not reveal credentials or content.
 
-The AI routes require an owner session and allow ten requests per hour. They now stop oversized request bodies while reading them, before charging that allowance or calling the model. This limits accidental abuse of a shared judging login; it is not a spending cap for the Nebius account.
+The AI routes require an owner session and allow ten requests per hour. Usage is stored in SQLite, so restarting the app does not reset the limit. `PLYPOST_AI_DAILY_LIMIT` optionally adds a shared rolling 24-hour cap across draft adaptation and weekly planning; the Render Blueprint sets it to 40. A VPS judging copy should set its own cap from 1 to 240. Oversized request bodies stop before charging either allowance or calling the model. These limits reduce accidental use of a shared judging login, but they are not a spending cap for the Nebius account because requests vary in size and other applications may use the same key.
 
 ## Using your own VPS
 

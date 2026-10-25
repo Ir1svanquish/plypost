@@ -674,14 +674,28 @@ export function migrateLegacyBrowserWorkspace(userId: string, raw: unknown) {
   return importWorkspace(userId, raw, "merge-legacy");
 }
 
-export function aiRateAllowed(userId: string): boolean {
+type AiQuotaDecision = { allowed: true } | { allowed: false; status: 429 | 503; error: string };
+
+export function reserveAiRequest(userId: string, now = Date.now()): AiQuotaDecision {
+  const rawDailyLimit = process.env.PLYPOST_AI_DAILY_LIMIT?.trim();
+  const dailyLimit = rawDailyLimit && /^[1-9]\d*$/.test(rawDailyLimit) ? Number(rawDailyLimit) : null;
+  if (rawDailyLimit && (dailyLimit === null || !Number.isSafeInteger(dailyLimit) || dailyLimit > 240)) {
+    return { allowed: false, status: 503, error: "AI daily limit is misconfigured. Set PLYPOST_AI_DAILY_LIMIT to a whole number from 1 to 240." };
+  }
   return transaction((db) => {
-    const since = new Date(Date.now() - 60 * 60_000).toISOString();
-    db.prepare("DELETE FROM ai_usage WHERE created_at < ?").run(since);
-    const row = db.prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE user_id=?").get(userId) as { count: number };
-    if (row.count >= 10) return false;
-    db.prepare("INSERT INTO ai_usage(user_id,created_at) VALUES (?,?)").run(userId, new Date().toISOString());
-    return true;
+    const hourSince = new Date(now - 60 * 60_000).toISOString();
+    const daySince = new Date(now - 24 * 60 * 60_000).toISOString();
+    db.prepare("DELETE FROM ai_usage WHERE created_at < ?").run(daySince);
+    const hourly = db.prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE user_id=? AND created_at>=?")
+      .get(userId, hourSince) as { count: number };
+    if (hourly.count >= 10) return { allowed: false, status: 429, error: "AI limit reached: 10 requests per hour. Try again later." };
+    if (dailyLimit !== null) {
+      const daily = db.prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE user_id=? AND created_at>=?")
+        .get(userId, daySince) as { count: number };
+      if (daily.count >= dailyLimit) return { allowed: false, status: 429, error: `AI demo limit reached: ${dailyLimit} requests per 24 hours. Try again later.` };
+    }
+    db.prepare("INSERT INTO ai_usage(user_id,created_at) VALUES (?,?)").run(userId, new Date(now).toISOString());
+    return { allowed: true };
   });
 }
 

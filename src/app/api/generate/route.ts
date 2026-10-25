@@ -4,7 +4,7 @@ import { variantMessages } from "@/lib/ai-prompts";
 import { characterCount } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, providerConfig } from "@/lib/server/ai-provider";
-import { aiRateAllowed } from "@/lib/server/workspace";
+import { reserveAiRequest } from "@/lib/server/workspace";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 
 export const runtime = "nodejs";
@@ -35,9 +35,8 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!aiRateAllowed(user)) {
-    return NextResponse.json({ error: "AI limit reached: 10 requests per hour. Try again later." }, { status: 429 });
-  }
+  const quota = reserveAiRequest(user);
+  if (!quota.allowed) return NextResponse.json({ error: quota.error }, { status: quota.status });
 
   try {
     const response = await fetch(config.url, {

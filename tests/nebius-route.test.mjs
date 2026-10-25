@@ -114,3 +114,45 @@ test("oversized AI requests stop before model calls or rate-limit charges", asyn
     delete process.env.NEBIUS_API_KEY;
   }
 });
+
+test("adaptation and weekly planning share the optional daily cap before calling Nebius", async () => {
+  const owner = "daily-route@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-nebius-key";
+  process.env.PLYPOST_AI_DAILY_LIMIT = "1";
+  const token = createSession(owner);
+  saveBrandBrief(owner, {
+    brandName: "Workshop", description: "Small local classes", audience: "New learners",
+    goal: "Share useful class ideas", voice: "Clear and friendly", facts: "Workshops are held on Saturdays.",
+    contentPillars: ["Learning"], platforms: ["bluesky", "linkedin"],
+  });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({
+      bluesky: "A post", mastodon: "A post", linkedin: "A post", threads: "A post",
+    }) } }] });
+  };
+  try {
+    const headers = { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${token}`, "content-type": "application/json" };
+    const adapted = await adaptPost(new globalThis.Request("http://localhost:3000/api/generate", {
+      method: "POST", headers, body: JSON.stringify({ provider: "nebius", source: "A useful workshop update" }),
+    }));
+    assert.equal(adapted.status, 200);
+    const planned = await strategyPost(new globalThis.Request("http://localhost:3000/api/strategy", {
+      method: "POST", headers, body: JSON.stringify({ action: "generate", provider: "nebius", weekStart: "2026-10-26" }),
+    }));
+    assert.equal(planned.status, 429);
+    assert.match((await planned.json()).error, /1 requests per 24 hours/);
+    assert.equal(calls, 1);
+    assert.equal(database().prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE user_id=?").get(owner).count, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.PLYPOST_AI_DAILY_LIMIT;
+    delete process.env.NEBIUS_API_KEY;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+  }
+});

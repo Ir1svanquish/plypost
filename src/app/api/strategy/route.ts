@@ -7,7 +7,7 @@ import {
   approveStrategyIdea, createWeeklyPlan, dismissStrategyIdea, listStrategy, loadBrandBrief,
   saveBrandBrief, updateStrategyIdea,
 } from "@/lib/server/strategy";
-import { aiRateAllowed } from "@/lib/server/workspace";
+import { reserveAiRequest } from "@/lib/server/workspace";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 
 export const runtime = "nodejs";
@@ -26,9 +26,8 @@ async function generate(user: string, provider: StrategyProvider, weekStart: str
       error: `Configure ${provider === "nebius" ? "NEBIUS_API_KEY" : "NVIDIA_API_KEY"} in .env.local to enable AI planning.`,
     }, { status: 503 });
   }
-  if (!aiRateAllowed(user)) {
-    return NextResponse.json({ error: "AI limit reached: 10 requests per hour. Try again later." }, { status: 429 });
-  }
+  const quota = reserveAiRequest(user);
+  if (!quota.allowed) return NextResponse.json({ error: quota.error }, { status: quota.status });
   try {
     // The user approved sending these eight saved brief fields on this explicit Generate action.
     // The date and self-reported outcomes remain local; they are not included in the request.
