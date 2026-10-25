@@ -69,4 +69,3 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
     {selectedIds.length === 0 && <p role="status" className="mt-2 text-[11px] text-[var(--warning)]">No images will be included in this handoff.</p>}
   </section>;
 }
-
