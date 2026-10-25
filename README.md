@@ -72,7 +72,7 @@ npm test
 npm run build
 ```
 
-公开演示站的首页和 `/api/health` 已从外部网络返回 200；新密码登录及会话接口已在该实例返回 200。AI 调用和重启后的持久保存仍需在该实例上验收。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-25，`npm audit --omit=dev --audit-level=high` 报出 15 条高危依赖路径，均关联 Bluesky OAuth 依赖所用的 Zod 3 与[这项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开启用 Bluesky 登录前须重新评估或等待兼容修复。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
+公开演示站的首页和 `/api/health` 已从外部网络返回 200；新密码登录及会话接口已在该实例返回 200。虚构文案的单平台改写、双平台改写和合成图片的看图起稿也已在该实例返回可用结果；重启后的持久保存仍需验收。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-25，`npm audit --omit=dev --audit-level=high` 报出 15 条高危依赖路径，均关联 Bluesky OAuth 依赖所用的 Zod 3 与[这项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开启用 Bluesky 登录前须重新评估或等待兼容修复。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
 
 演示站的持久存储和上线验收步骤见[托管方案](docs/hosting.md)。
 

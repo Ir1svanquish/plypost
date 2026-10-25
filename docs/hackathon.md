@@ -14,7 +14,7 @@ Plypost 在服务端请求 Nebius Token Factory 的 `/v1/chat/completions`。文
 
 根据[官方提交规则](https://nebiusglobalaihackathon.devpost.com/rules)，还需要：
 
-1. 可让评委访问的运行中演示、托管应用或测试构建，以及测试说明。[公开演示站](https://plypost.onrender.com/)已在 Render 创建，首页、`/api/health`、新密码登录及会话检查从外部网络返回 200；仍需在该实例验证 Nemotron 调用与重启后的数据保留。[托管配置和验收](hosting.md)记录了边界。
+1. 可让评委访问的运行中演示、托管应用或测试构建，以及测试说明。[公开演示站](https://plypost.onrender.com/)已在 Render 创建，首页、`/api/health`、新密码登录及会话检查从外部网络返回 200；用虚构文案和合成图片验证了 Nemotron 文案改写与看图起稿均返回可用结果。仍需验证重启后的数据保留。[托管配置和验收](hosting.md)记录了边界。
 2. 公开的源码仓库和显眼的开源许可证。已按项目所有者选择在仓库顶层加入 MIT 许可证；当前 GitHub 仓库仍是私有的，公开前还须确认素材来源并复查敏感文件。
 3. 公开上传到 YouTube、少于三分钟且展示实际运行的演示视频。尚未录制或上传。
 4. 英文功能描述、所选赛道、Nebius/NVIDIA 使用说明与反馈，以及 Devpost 提交。尚未提交。
