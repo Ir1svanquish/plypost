@@ -47,6 +47,8 @@ npm run hash-password
 
 配置好 Nebius 密钥后，可选运行 `npm run smoke:nebius`：它用固定样例文案和虚构品牌资料做两次模型调用，检查四个平台版本和周计划，不会读取本机草稿或品牌资料。密钥和输出不会写入仓库。
 
+不想用自己的草稿演示时，运行 `npm run demo`，用独立的虚构数据库查看草稿、排程与人工发布流程。登录信息生成在 Git 忽略的 `data/demo/login.txt`。操作步骤与 AI 实时演示条件见[本机演示说明](docs/demo.md)。
+
 ## 检查
 
 ```powershell

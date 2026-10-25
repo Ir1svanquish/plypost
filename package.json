@@ -10,6 +10,8 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
+    "demo": "node --import=tsx scripts/demo.ts",
+    "demo:seed": "node --import=tsx scripts/demo.ts --seed-only",
     "worker": "tsx scripts/worker.ts",
     "smoke:nebius": "node --env-file=.env.local --import=tsx scripts/smoke-nebius.ts",
     "hash-password": "tsx scripts/hash-password.ts",
