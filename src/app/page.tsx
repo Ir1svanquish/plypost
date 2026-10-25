@@ -38,6 +38,7 @@ import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
+import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
 import type { OverLimitVariant } from "@/lib/generated-variants";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -243,6 +244,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const switchSavingRef = useRef(false);
   const [draftSaveBusy, setDraftSaveBusy] = useState(false);
   const draftSaveBusyRef = useRef(false);
+  const [pendingDraftSave, setPendingDraftSave] = useState<PendingDraftSave | null>(null);
   const switchDialogRef = useRef<HTMLDialogElement>(null);
   const legacyReviewRef = useRef<HTMLDialogElement>(null);
   const [scheduleTime, setScheduleTime] = useState("");
@@ -272,7 +274,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const canSaveEditor = hasDraftContent(editorContent) && (!plannedDate || validCalendarDate(plannedDate));
   const editorDirty = hasUnsavedEditorChanges(editorContent, currentDraftId, drafts, editorOrigin);
   const currentSavedDraft = currentDraftId ? drafts.find((draft) => draft.id === currentDraftId) ?? null : null;
-  const needsDraftRecovery = draftConflict || Boolean(currentDraftId && workspaceReady && currentSavedDraft?.updatedAt !== currentDraftVersion);
+  const needsDraftRecovery = !pendingDraftSave && (draftConflict || Boolean(currentDraftId && workspaceReady &&
+    currentSavedDraft?.updatedAt !== currentDraftVersion));
 
   useEffect(() => {
     if (view !== "compose" || !batchLaunch || currentSavedDraft?.id !== batchLaunch.draftId) return;
@@ -445,7 +448,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   async function refreshWorkspace() {
     const response = await fetch("/api/workspace", { cache: "no-store" });
     if (!response.ok) throw new Error("Could not load your server workspace.");
-    const data = await response.json();
+    const data = await response.json().catch(() => {
+      const failure = new Error(response.status >= 500
+        ? "The server is temporarily unavailable. Your editor is unchanged; retry when it recovers."
+        : "The server returned an unreadable response. Your editor is unchanged.") as Error & { status?: number };
+      failure.status = response.status;
+      throw failure;
+    });
     setDrafts(data.drafts);
     setSchedule(data.schedule);
     setAssisted(data.assisted);
@@ -460,7 +469,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, ...extra }),
     });
-    const data = await response.json();
+    const data = await response.json().catch(() => {
+      const failure = new Error(response.status >= 500
+        ? "The server is temporarily unavailable. Your editor is unchanged; retry when it recovers."
+        : "The server returned an unreadable response. Your editor is unchanged.") as Error & { status?: number };
+      failure.status = response.status;
+      throw failure;
+    });
     if (!response.ok) {
       const failure = new Error(data.error || "Could not update workspace.") as Error & { code?: string; status?: number };
       failure.status = response.status;
@@ -492,6 +507,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           videoId?: unknown;
           plannedDate?: unknown;
           editorOrigin?: unknown;
+          pendingDraftSave?: unknown;
         };
         const untouchedStarter = isUntouchedStarterCache(data,
           [sampleDraft, previousSampleDraft, legacySampleDraft, interimSampleDraft], platformIds);
@@ -511,10 +527,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         }
         if (Array.isArray(data.activity)) setActivity(data.activity.slice(0, 12));
         if (typeof data.title === "string") setTitle(data.title.slice(0, 120));
+        const pending = parsePendingDraftSave(data.pendingDraftSave);
         if (typeof data.currentDraftId === "string") {
           setCurrentDraftId(data.currentDraftId);
           if (typeof data.currentDraftVersion === "string") setCurrentDraftVersion(data.currentDraftVersion);
-          else setDraftConflict(true);
+          else if (!pending) setDraftConflict(true);
         }
         if (Array.isArray(data.mediaIds) && data.mediaIds.length <= 4 && data.mediaIds.every((id) => typeof id === "string")) {
           setMediaIds(data.mediaIds);
@@ -528,6 +545,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         if (typeof data.videoId === "string" && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(data.videoId)) setVideoId(data.videoId);
         if (typeof data.plannedDate === "string" && data.plannedDate.length <= 10 && /^[\d-]*$/.test(data.plannedDate)) setPlannedDate(data.plannedDate);
         if (data.editorOrigin === "starter" || data.editorOrigin === "new" || data.editorOrigin === "planned") setEditorOrigin(data.editorOrigin);
+        if (pending && (data.currentDraftId === null || data.currentDraftId === undefined ||
+            pending.snapshot.id === data.currentDraftId || pending.asCopy)) setPendingDraftSave(pending);
       }
     } catch {
       // A malformed local draft should never prevent the editor from opening.
@@ -562,15 +581,20 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     })();
   }, []);
 
+  function persistEditorCache(pending: PendingDraftSave | null) {
+    writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId,
+      plannedDate, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave: pending }));
+  }
+
   useEffect(() => {
     if (!hydrated) return;
     try {
-      writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId, plannedDate, activity, title, currentDraftId, currentDraftVersion, editorOrigin }));
+      persistEditorCache(pendingDraftSave);
       setStorageWarning(false);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, activity, title, currentDraftId, currentDraftVersion, editorOrigin, hydrated, email]);
+  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -769,7 +793,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Enter a real target date as YYYY-MM-DD, or clear it." });
       return null;
     }
-    if ((!currentDraftId || asCopy) && drafts.length >= 100) {
+    if ((!currentDraftId || asCopy) && drafts.length >= 100 && !pendingDraftSave) {
       setNotice({ kind: "error", text: "The library is full. Delete an old draft before saving another." });
       return null;
     }
@@ -777,30 +801,72 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     const existing = drafts.find((draft) => draft.id === currentDraftId);
     const titleSource = editorTitleSource(source, variants);
     const savedTitle = draftTitle(title, titleSource);
+    const copyMode = pendingDraftSave?.asCopy ?? asCopy;
+    const saveId = pendingDraftSave?.snapshot.id ?? (!copyMode && currentDraftId ? currentDraftId : crypto.randomUUID());
     const saved: SavedDraft = {
-      id: !asCopy && currentDraftId ? currentDraftId : crypto.randomUUID(),
-      title: asCopy ? `${savedTitle.slice(0, 113)} (copy)` : savedTitle,
-      source,
-      selected: [...selected],
-      variants: { ...variants },
-      mediaIds: [...mediaIds],
-      mediaAlt: mediaAlt.map((value) => value.trim()),
-      ...(videoId ? { videoId } : {}),
-      ...(plannedDate ? { plannedDate } : {}),
-      createdAt: !asCopy && existing ? existing.createdAt : stamp,
-      updatedAt: stamp,
+      id: saveId, title: copyMode ? `${savedTitle.slice(0, 113)} (copy)` : savedTitle,
+      source, selected: [...selected], variants: { ...variants },
+      mediaIds: [...mediaIds], mediaAlt: mediaAlt.map((value) => value.trim()),
+      ...(videoId ? { videoId } : {}), ...(plannedDate ? { plannedDate } : {}),
+      createdAt: !copyMode && existing ? existing.createdAt : stamp, updatedAt: stamp,
     };
     const revisionAtStart = editorRevision.current;
     draftSaveBusyRef.current = true;
     setDraftSaveBusy(true);
+    let attempt = pendingDraftSave;
     try {
+      let expectedUpdatedAt: string | null = copyMode || !currentDraftId ? null : currentDraftVersion ?? "untracked";
+      if (pendingDraftSave) {
+        let latest: Awaited<ReturnType<typeof refreshWorkspace>>;
+        try { latest = await refreshWorkspace(); }
+        catch {
+          setNotice({ kind: "error", text: "Could not check the earlier save yet. Your editor is still here; retry when the service responds." });
+          return null;
+        }
+        const serverDraft = (latest.drafts as SavedDraft[]).find((draft) => draft.id === pendingDraftSave.snapshot.id);
+        const result = inspectPendingDraftSave(pendingDraftSave, serverDraft);
+        if (result === "conflict") {
+          setCurrentDraftId(pendingDraftSave.snapshot.id);
+          setCurrentDraftVersion(pendingDraftSave.expectedUpdatedAt);
+          setDraftConflict(true);
+          setPendingDraftSave(null);
+          setNotice({ kind: "error", text: "This draft changed elsewhere while the save result was uncertain. Your editor is intact; review the latest version or save a copy." });
+          return null;
+        }
+        if (result === "committed" && serverDraft) {
+          setCurrentDraftId(serverDraft.id);
+          setCurrentDraftVersion(serverDraft.updatedAt);
+          setDraftConflict(false);
+          setEditorOrigin("new");
+          if (sameDraftPayload(serverDraft, saved)) {
+            setPendingDraftSave(null);
+            if (!preserveTitle && editorRevision.current === revisionAtStart) setTitle(serverDraft.title);
+            setNotice({ kind: "success", text: editorRevision.current === revisionAtStart
+              ? "Earlier save confirmed. The draft is in your account."
+              : "An earlier version was saved. Your newer edits remain unsaved." });
+            return serverDraft;
+          }
+          expectedUpdatedAt = serverDraft.updatedAt;
+        } else {
+          expectedUpdatedAt = pendingDraftSave.expectedUpdatedAt;
+        }
+      }
+      if (editorRevision.current !== revisionAtStart) {
+        setNotice({ kind: "error", text: "The editor changed while checking the earlier save. Your new edits are here; review and retry." });
+        return null;
+      }
+      attempt = { snapshot: saved, expectedUpdatedAt, asCopy: copyMode };
+      try { persistEditorCache(attempt); setStorageWarning(false); }
+      catch { setStorageWarning(true); }
+      setPendingDraftSave(attempt);
       const data = await changeWorkspace("save-draft", { item: saved,
-        expectedUpdatedAt: asCopy || !currentDraftId ? null : currentDraftVersion ?? "untracked" });
+        expectedUpdatedAt });
       const stored = data.savedDraft as SavedDraft | undefined;
       if (!stored || stored.id !== saved.id) throw new Error("The draft was saved, but its version could not be confirmed. Reload before editing it again.");
       setCurrentDraftId(saved.id);
       setCurrentDraftVersion(stored.updatedAt);
       setDraftConflict(false);
+      setPendingDraftSave(null);
       setEditorOrigin("new");
       if (!preserveTitle && editorRevision.current === revisionAtStart) setTitle(saved.title);
       setNotice({ kind: "success", text: editorRevision.current === revisionAtStart
@@ -808,10 +874,40 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         : "An earlier version was saved. Your newer edits remain unsaved." });
       return stored;
     } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "DRAFT_CONFLICT") {
-        setDraftConflict(true);
-        void refreshWorkspace().catch(() => {});
+      const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+      const uncertain = status === undefined || status === 409 ||
+        typeof status === "number" && (status >= 500 || status >= 200 && status < 300);
+      if (uncertain && attempt) {
+        const checkedAttempt = attempt;
+        try {
+          const latest = await refreshWorkspace();
+          const serverDraft = (latest.drafts as SavedDraft[]).find((draft) => draft.id === checkedAttempt.snapshot.id);
+          const result = inspectPendingDraftSave(checkedAttempt, serverDraft);
+          if (result === "committed" && serverDraft) {
+            setCurrentDraftId(serverDraft.id);
+            setCurrentDraftVersion(serverDraft.updatedAt);
+            setDraftConflict(false);
+            setPendingDraftSave(null);
+            setEditorOrigin("new");
+            if (!preserveTitle && editorRevision.current === revisionAtStart) setTitle(serverDraft.title);
+            setNotice({ kind: "success", text: editorRevision.current === revisionAtStart
+              ? "Draft saved to your account."
+              : "An earlier version was saved. Your newer edits remain unsaved." });
+            return serverDraft;
+          }
+          if (result === "conflict") {
+            setCurrentDraftId(checkedAttempt.snapshot.id);
+            setCurrentDraftVersion(checkedAttempt.expectedUpdatedAt);
+            setDraftConflict(true);
+            setPendingDraftSave(null);
+            setNotice({ kind: "error", text: "This draft changed elsewhere. Your editor is intact; review the latest version or save a copy." });
+            return null;
+          }
+        } catch { /* Keep the same draft ID until the server can confirm the outcome. */ }
+        setNotice({ kind: "error", text: "Save not confirmed. Your edits are still here. Retry when the service responds; Plypost will check before writing again." });
+        return null;
       }
+      setPendingDraftSave(null);
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not save draft." });
       return null;
     } finally {
@@ -826,7 +922,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "This draft changed in another window. Review the latest version or save your edits as a new draft first." });
       return;
     }
-    if (!editorDirty && currentSavedDraft) {
+    if (!editorDirty && currentSavedDraft && !pendingDraftSave) {
       batchLaunchCounter.current += 1;
       setBatchLaunch({ draftId: currentSavedDraft.id, token: batchLaunchCounter.current });
       return;
@@ -854,6 +950,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   function applyEditorSwitch(next: EditorSwitch) {
     editorRevision.current += 1;
+    setPendingDraftSave(null);
     resetMediaPicker();
     setAiUndo(null);
     setAiReview(null);
@@ -942,7 +1039,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         : "Wait for backup restoration to finish before changing drafts." });
       return;
     }
-    if (editorDirty) {
+    if (editorDirty || pendingDraftSave) {
       setPendingEditorSwitch(next);
       return;
     }
@@ -1008,7 +1105,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     if (!window.confirm("Delete this saved draft from your account?")) return;
     try {
       await changeWorkspace("delete-draft", { id, expectedUpdatedAt });
-      if (currentDraftId === id) { setCurrentDraftId(null); setCurrentDraftVersion(null); setDraftConflict(false); }
+      if (currentDraftId === id) { setCurrentDraftId(null); setCurrentDraftVersion(null); setDraftConflict(false); setPendingDraftSave(null); }
       setNotice({ kind: "success", text: "Saved draft deleted. The current editor was kept." });
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "DRAFT_CONFLICT") {
@@ -1228,6 +1325,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
       setDraftConflict(false);
+      setPendingDraftSave(null);
       setMediaIds([]);
       setVideoId(null);
       setPlannedDate("");
@@ -1267,6 +1365,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
       setDraftConflict(false);
+      setPendingDraftSave(null);
       setStrategyRefreshEpoch((epoch) => epoch + 1);
       setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts. AI weekly plans were cleared; your saved brand profile remains.` });
     } catch (error) {
@@ -1287,6 +1386,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         setCurrentDraftId(null);
         setCurrentDraftVersion(null);
         setDraftConflict(false);
+        setPendingDraftSave(null);
         setStrategyRefreshEpoch((epoch) => epoch + 1);
       }
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); }
@@ -1637,9 +1737,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     <div className="mt-3"><LocalDateField id="draft-planned-date" label="Target day" value={plannedDate} onChange={(next) => { editorRevision.current += 1; setPlannedDate(next); }} /></div>
                   </details>
                   {needsDraftRecovery && currentDraftId && <div role="alert" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">This draft changed in another window or was deleted.</p><p className="mt-1">Your current editor text is still here. Save it as a new draft, or open the latest saved version after reviewing any unsaved changes.</p><div className="mt-3 flex flex-wrap gap-3"><button type="button" onClick={() => { void saveDraft(false, true); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Save as new draft</button><button type="button" onClick={() => { void openLatestDraft(); }} disabled={draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Open latest saved version</button></div></div>}
+                  {pendingDraftSave && <div role="status" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">Save result not confirmed</p><p className="mt-1">Your editor content is still here. Check the save below when the service responds; Plypost will verify it before writing again.</p></div>}
                   {invalidSelected.length > 0 && <p className="mt-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}
                   <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-5">
-                    <button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy || needsDraftRecovery} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[13px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">{mediaBusy ? "Working with images…" : videoBusy ? "Working with video…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button>
+                    <button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy || needsDraftRecovery} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[13px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">{mediaBusy ? "Working with images…" : videoBusy ? "Working with video…" : draftSaveBusy ? "Saving…" : pendingDraftSave ? "Check save" : currentDraftId ? "Update draft" : "Save draft"}</button>
                     <button type="button" onClick={() => void prepareEditorHandoffs()} disabled={!canSaveEditor || !(source.trim() || platformDisplayIds.some((id) => variants[id]?.trim())) || mediaBusy || videoBusy || draftSaveBusy || restoringBackup || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-45"><Send size={15} />{draftSaveBusy ? "Saving…" : "Review posts"}<ArrowRight size={14} /></button>
                   </div>
                   <p className="mt-2 text-[11px] text-[var(--text-muted)]">Review each post before publishing. Nothing is posted yet.</p>
@@ -1721,12 +1822,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     </dialog>}
     {pendingEditorSwitch && <dialog ref={switchDialogRef} onCancel={(event) => { event.preventDefault(); if (!switchSaving) setPendingEditorSwitch(null); }} aria-labelledby="unsaved-editor-title" aria-describedby="unsaved-editor-description" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">Unsaved changes</h2>
-      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">Your current text, platform versions, and image choices have changed. {needsDraftRecovery ? "The saved draft changed elsewhere. Save your edits as a new draft" : "Save your edits"} before {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : pendingEditorSwitch.kind === "planned" ? "opening a copy of this planned post" : "starting a draft from a posted handoff"}, or discard them.</p>
+      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">{pendingDraftSave ? "The last save has not been confirmed. Check it before" : "Your current text, platform versions, and image choices have changed. Save your edits before"} {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : pendingEditorSwitch.kind === "planned" ? "opening a copy of this planned post" : "starting a draft from a posted handoff"}. {pendingDraftSave ? "Discarding here also clears the pending check." : needsDraftRecovery ? "If the saved draft changed elsewhere, save your edits as a new draft." : ""}</p>
       {!canSaveEditor && <p className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Add a title, caption, platform text or image before saving.</p>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
         <button type="button" autoFocus onClick={() => setPendingEditorSwitch(null)} disabled={switchSaving} className="rounded-lg px-3 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Keep editing</button>
         <button type="button" onClick={() => { const target = pendingEditorSwitch; setPendingEditorSwitch(null); applyEditorSwitch(target); }} disabled={switchSaving} className="rounded-lg border border-[var(--danger)] px-3 py-2.5 text-[12px] font-semibold text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50">Discard changes</button>
-        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !canSaveEditor} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving…" : needsDraftRecovery ? "Save as new and continue" : "Save and continue"}</button>
+        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !canSaveEditor} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving…" : pendingDraftSave ? "Check save and continue" : needsDraftRecovery ? "Save as new and continue" : "Save and continue"}</button>
       </div>
     </dialog>}
     </>
