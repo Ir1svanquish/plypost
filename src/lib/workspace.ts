@@ -167,7 +167,7 @@ export function normalizePublicPostUrl(value: unknown): string | null {
   }
 }
 
-function validMediaIds(value: unknown): value is string[] {
+export function validMediaIds(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= MAX_POST_IMAGES && new Set(value).size === value.length &&
     value.every((id) => typeof id === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id));
 }

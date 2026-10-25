@@ -9,6 +9,10 @@ export const imageLimits = {
   x: 4,
 } as const;
 
+export function imageLimitForDestination(destination: string): number {
+  return imageLimits[destination as keyof typeof imageLimits] ?? MAX_POST_IMAGES;
+}
+
 export function imageLimitWarning(destination: string, count: number): string | null {
   const limit = imageLimits[destination as keyof typeof imageLimits];
   if (!limit || count <= limit) return null;

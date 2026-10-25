@@ -10,10 +10,11 @@ import { assistedState, hasManualReminder, localDateTimeValue, MAX_ASSISTED_OUTC
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
+import { PlatformImageSelection } from "@/components/platform-image-selection";
 import { PrivateVideoPreview, VideoAttachmentPicker } from "@/components/video-attachment-picker";
 import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
 import { isManualAiDestination } from "@/lib/ai-handoff";
-import { imageLimitWarning } from "@/lib/media-policy";
+import { imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
 type Props = {
   items: AssistedPost[];
@@ -26,14 +27,15 @@ type Props = {
   workspaceReady: boolean;
   busy: boolean;
   mediaBusy: boolean;
-  imageCount: number;
+  sourceMediaIds: string[];
+  sourceMediaAlt: string[];
   initialVideoId?: string | null;
   notificationPermission: NotificationPermission | "unsupported";
   onDestinationChange: (destination: AssistedDestinationId) => void;
   onTextChange: (text: string) => void;
   onResetText: () => void;
   onTimeChange: (time: string) => void;
-  onAdd: (videoId?: string) => Promise<boolean>;
+  onAdd: (videoId?: string, selectedMediaIds?: string[]) => Promise<boolean>;
   onSetReminder: (post: AssistedPost, scheduledFor: string | null) => Promise<void>;
   onCopy: (text: string, destination: AssistedDestinationId) => void;
   onMarkPosted: (id: string, postUrl?: string) => Promise<boolean>;
@@ -99,7 +101,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, imageCount, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, startWithVideoGroup = false }: Props) {
+export function AssistedPublishPanel({ items, drafts, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, sourceMediaIds, sourceMediaAlt, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, startWithVideoGroup = false }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -124,12 +126,15 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   const [showVideoDestinations, setShowVideoDestinations] = useState(() => startWithVideoGroup || assistedVideoDisplayIds.some((id) => id === destination));
   const previousDestination = useRef(destination);
   const [videoId, setVideoId] = useState<string | null>(initialVideoId);
+  const [imageSelections, setImageSelections] = useState<Partial<Record<AssistedDestinationId, string[]>>>({});
   const [videoBusy, setVideoBusy] = useState(false);
   const handledFocusRef = useRef<string | null>(null);
   const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
-  const missingComposerMedia = missingHandoffMedia(destination, imageCount, Boolean(videoId));
+  const selectedMediaIds = (imageSelections[destination] ?? sourceMediaIds.slice(0, imageLimitForDestination(destination)))
+    .filter((id) => sourceMediaIds.includes(id));
+  const missingComposerMedia = missingHandoffMedia(destination, selectedMediaIds.length, Boolean(videoId));
   const videoFirst = assistedVideoDisplayIds.some((id) => id === destination);
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
   const availableTextImageDestinations = assistedTextImageDisplayIds.filter((id) => items.some((item) => item.destination === id));
@@ -309,7 +314,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   async function addPost() {
     setStatusFilter("to-post");
     setDestinationFilter("all");
-    await onAdd(videoId ?? undefined);
+    if (await onAdd(videoId ?? undefined, selectedMediaIds)) setImageSelections({});
   }
 
   async function markPosted(id: string, postUrl?: string) {
@@ -361,8 +366,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
           <textarea id="assisted-text" value={text} maxLength={5000} onChange={(event) => onTextChange(event.target.value)} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
           {!isPlatformId(destination) && isManualAiDestination(destination) && <AIHandoffAssistant key={`ai-${destination}`} destination={destination} source={text} disabled={busy} onApply={onTextChange} />}
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
-          <p className="mt-2 text-[12px] text-[var(--text-secondary)]">{imageCount ? `${imageCount} ${imageCount === 1 ? "image" : "images"} from the current draft will be saved with this handoff.` : "No images selected in the current draft."} <button type="button" onClick={onEditImages} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit images in Create</button></p>
-          {imageLimitWarning(destination, imageCount) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(destination, imageCount)}</p>}
+          <PlatformImageSelection destination={destination} sourceIds={sourceMediaIds} sourceAlt={sourceMediaAlt} selectedIds={selectedMediaIds} onChange={(ids) => setImageSelections((current) => ({ ...current, [destination]: ids }))} disabled={busy || mediaBusy} />
+          <button type="button" onClick={onEditImages} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit the image pool in Create</button>
           <details key={`video-${destination}`} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
           {selected.needsMedia && <p className={`mt-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${missingComposerMedia ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{missingComposerMedia === "video" ? "No video attached here. Attach one or bring a video when you publish on YouTube." : missingComposerMedia ? "No photo or video attached here. Bring one when you publish." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">

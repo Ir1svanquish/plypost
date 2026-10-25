@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { imageLimitForDestination } from "../media-policy";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
 import { validatePlatformText } from "../platform-validation";
@@ -114,6 +115,9 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
   }
   transaction((db) => {
     assertOwnedMedia(userId, item.mediaIds ?? []);
+    if ((item.mediaIds?.length ?? 0) > imageLimitForDestination(item.destination)) {
+      throw new Error("Select fewer images for this platform before preparing its handoff.");
+    }
     assertOwnedVideo(userId, item.videoId);
     if (db.prepare("SELECT id FROM assisted WHERE id=?").get(item.id)) throw new Error("Assisted item already exists.");
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
@@ -125,7 +129,7 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
   return item;
 }
 
-type BatchHandoff = { destination: AssistedDestinationId; scheduledFor: string; reminderEnabled?: boolean; text?: string; videoId?: string };
+type BatchHandoff = { destination: AssistedDestinationId; scheduledFor: string; reminderEnabled?: boolean; text?: string; videoId?: string; mediaIds?: string[] };
 
 /** Snapshot reviewed manual-publishing handoffs from one saved draft. */
 export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: unknown, items: unknown,
@@ -134,11 +138,12 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
   if (expectedUpdatedAt !== undefined && !validUtcInstant(expectedUpdatedAt)) throw new Error("Invalid saved draft version.");
   if (!validUuid(draftId) || !validUuid(batchId) || !Array.isArray(items) ||
       items.length < 1 || items.length > assistedIds.length || items.some((entry) =>
-        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor" && key !== "reminderEnabled" && key !== "text" && key !== "videoId") ||
+        !isRecord(entry) || Object.keys(entry).some((key) => key !== "destination" && key !== "scheduledFor" && key !== "reminderEnabled" && key !== "text" && key !== "videoId" && key !== "mediaIds") ||
         !isAssistedDestinationId(entry.destination) || !validUtcInstant(entry.scheduledFor) ||
         (entry.reminderEnabled !== undefined && typeof entry.reminderEnabled !== "boolean") ||
         (entry.text !== undefined && (typeof entry.text !== "string" || !entry.text.trim() || characterCount(entry.text) > 5000)) ||
-        (entry.videoId !== undefined && !validUuid(entry.videoId)))) {
+        (entry.videoId !== undefined && !validUuid(entry.videoId)) ||
+        (entry.mediaIds !== undefined && (!validMediaIds(entry.mediaIds) || entry.mediaIds.length > imageLimitForDestination(entry.destination as string))))) {
     throw new Error("Choose a saved draft and one to eleven destinations with valid text and UTC timestamps.");
   }
   const requested = items as BatchHandoff[];
@@ -149,9 +154,10 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     // Keep the original request in the local audit log so a retry cannot shrink a
     // batch after one or all handoffs were deleted. Imported backups may lack this log.
     const manifest = JSON.stringify({ draftId, ...(expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : {}), items: requested
-      .map(({ destination, scheduledFor, reminderEnabled, text, videoId }) => ({ destination, scheduledFor,
+      .map(({ destination, scheduledFor, reminderEnabled, text, videoId, mediaIds }) => ({ destination, scheduledFor,
         ...(reminderEnabled !== undefined ? { reminderEnabled } : {}),
         ...(videoId !== undefined ? { videoId } : {}),
+        ...(mediaIds !== undefined ? { mediaIds } : {}),
         ...(text !== undefined ? { textSha256: createHash("sha256").update(text).digest("hex") } : {}) }))
       .sort((a, b) => a.destination.localeCompare(b.destination)) });
     const recorded = db.prepare("SELECT detail FROM audit WHERE user_id=? AND action='assisted.batch_prepared' AND subject_id=? ORDER BY id LIMIT 1")
@@ -189,13 +195,17 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     const count = db.prepare("SELECT COUNT(*) AS count FROM assisted WHERE user_id=?").get(userId) as { count: number };
     if (count.count + requested.length > 100) throw new Error("Assisted publishing list is full.");
     assertOwnedMedia(userId, draft.mediaIds ?? []);
+    const draftImageIds = draft.mediaIds ?? [];
+    if (requested.some((item) => item.mediaIds?.some((id) => !draftImageIds.includes(id)))) {
+      throw new Error("Choose images from this saved draft only.");
+    }
     assertOwnedVideo(userId, draft.videoId);
     for (const videoId of new Set(requested.map((item) => item.videoId).filter((id): id is string => id !== undefined))) {
       assertOwnedVideo(userId, videoId);
     }
 
     const now = new Date().toISOString();
-    const prepared = requested.map(({ destination, scheduledFor, reminderEnabled, text: reviewedText, videoId }): AssistedPost => {
+    const prepared = requested.map(({ destination, scheduledFor, reminderEnabled, text: reviewedText, videoId, mediaIds }): AssistedPost => {
       const text = reviewedText ?? (isPlatformId(destination)
         ? draft.variants[destination] ?? adaptDraft(draft.source, destination)
         : draft.source);
@@ -203,10 +213,14 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
           (isPlatformId(destination) && !validatePlatformText(destination, text).valid)) {
         throw new Error(`Fix the ${reviewedText === undefined ? "saved " : ""}${destination} text before preparing this handoff.`);
       }
+      // Omitted selection supports older clients; current clients send an explicit list,
+      // including [] when no images should travel with this handoff.
+      const selectedMediaIds = mediaIds ?? draftImageIds.slice(0, imageLimitForDestination(destination));
+      const selectedMediaAlt = selectedMediaIds.map((id) => draft.mediaAlt?.[draftImageIds.indexOf(id)] ?? "");
       const item: AssistedPost = {
         id: randomUUID(), title: draftTitle(draft.title, draft.source), destination, text,
-        ...(draft.mediaIds !== undefined ? { mediaIds: [...draft.mediaIds] } : {}),
-        ...(draft.mediaAlt !== undefined ? { mediaAlt: [...draft.mediaAlt] } : {}),
+        ...(draft.mediaIds !== undefined || mediaIds !== undefined ? { mediaIds: [...selectedMediaIds] } : {}),
+        ...(draft.mediaAlt !== undefined ? { mediaAlt: selectedMediaAlt } : {}),
         ...(draft.placeLabel ? { placeLabel: draft.placeLabel } : {}),
         ...(videoId !== undefined ? { videoId } : {}),
         sourceDraftId: draft.id, batchId, scheduledFor,
@@ -325,6 +339,9 @@ export function updateAssistedImages(userId: string, id: string, expectedMediaId
     const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
     if (!row) throw new AssistedConflictError("This handoff is no longer available. Refresh the list before editing.");
     const current = JSON.parse(row.payload) as AssistedPost;
+    if (nextIds.length > imageLimitForDestination(current.destination)) {
+      throw new Error("Select fewer images for this platform before preparing its handoff.");
+    }
     const savedIds = current.mediaIds ?? [];
     const savedAlt = current.mediaAlt ?? savedIds.map(() => "");
     if (current.status !== "queued" || savedIds.some((value, index) => value !== previousIds[index]) ||

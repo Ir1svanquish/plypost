@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Copy, ShieldCheck, Sparkles } from "lucide-react";
 import { LocalDateTimeField, isValidLocalDateTime } from "@/components/local-date-time-field";
-import { MediaHandoff } from "@/components/media-handoff";
+import { PlatformImageSelection } from "@/components/platform-image-selection";
 import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
 import { adaptDraft, characterCount, isPlatformId, platformDisplayIds, platforms, type PlatformId } from "@/lib/platforms";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, missingHandoffMedia, type AssistedDestinationId } from "@/lib/assisted";
@@ -13,9 +13,9 @@ import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
 import { AiLiteralNotice } from "@/components/ai-literal-notice";
 import { isManualAiDestination } from "@/lib/ai-handoff";
 import type { PreflightReport } from "@/lib/ai-preflight";
-import { imageLimitWarning } from "@/lib/media-policy";
+import { imageLimitForDestination } from "@/lib/media-policy";
 
-export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; reminderEnabled?: false; videoId?: string };
+export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; mediaIds: string[]; reminderEnabled?: false; videoId?: string };
 export type BatchPrepareResult = "prepared" | "rejected" | "uncertain";
 
 type Props = {
@@ -37,6 +37,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const [focusedDestination, setFocusedDestination] = useState<AssistedDestinationId | null>(null);
   const [reminders, setReminders] = useState<Partial<Record<AssistedDestinationId, string>>>({});
   const [texts, setTexts] = useState<Partial<Record<AssistedDestinationId, string>>>({});
+  const [imageSelections, setImageSelections] = useState<Partial<Record<AssistedDestinationId, string[]>>>({});
   const [slotPreview, setSlotPreview] = useState<{ timeZone: string; suggestions: { platform: PlatformId; scheduledFor: string; skippedConflicts: number }[] } | null>(null);
   const [slotTimes, setSlotTimes] = useState<Partial<Record<PlatformId, string>>>({});
   const [slotApplied, setSlotApplied] = useState(false);
@@ -72,6 +73,8 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const currentTime = now || Date.now();
   const textFor = (id: AssistedDestinationId) => texts[id] ??
     (isPlatformId(id) ? draft.variants[id] ?? adaptDraft(draft.source, id) : draft.source);
+  const imagesFor = (id: AssistedDestinationId) => imageSelections[id] ??
+    (draft.mediaIds ?? []).slice(0, imageLimitForDestination(id));
   const invalidText = destinations.filter((id) => {
     const text = textFor(id);
     return isPlatformId(id) ? !validatePlatformText(id, text).valid : !text.trim() || characterCount(text) > 5000;
@@ -80,7 +83,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     ? !slotTimes[id] || Date.parse(slotTimes[id]!) < currentTime + 10_000
     : reminders[id] && !isValidLocalDateTime(reminders[id]!, currentTime));
   const mediaGaps = destinations.flatMap((id) => {
-    const kind = missingHandoffMedia(id, draft.mediaIds?.length ?? 0, Boolean(videoId));
+    const kind = missingHandoffMedia(id, imagesFor(id).length, Boolean(videoId));
     return kind ? [{ id, kind }] : [];
   });
   const canPrepare = !editorDirty && !busy && !mediaBusy && !videoBusy && !submitting && !prepared &&
@@ -124,6 +127,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     setFocusedDestination(null);
     setReminders({});
     setTexts({});
+    setImageSelections({});
     setVideoId(draft.videoId ?? null);
     setSlotPreview(null); setSlotTimes({}); setSlotApplied(false); setSlotError(null);
     setPreflightReports({}); setPreflightErrors({});
@@ -178,6 +182,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         return {
           destination,
           text: textFor(destination),
+          mediaIds: [...imagesFor(destination)],
           scheduledFor: slotApplied && isPlatformId(destination) ? slotTimes[destination]! : reminder ? new Date(reminder).toISOString() : new Date(timestamp).toISOString(),
           ...(!((slotApplied && isPlatformId(destination)) || reminder) ? { reminderEnabled: false as const } : {}),
           ...(videoId ? { videoId } : {}),
@@ -270,7 +275,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         const text = textFor(id);
         const check = isPlatformId(id) ? validatePlatformText(id, text) : null;
         const valid = check?.valid ?? Boolean(text.trim() && characterCount(text) <= 5000);
-        const missingMedia = missingHandoffMedia(id, draft.mediaIds?.length ?? 0, Boolean(videoId));
+        const missingMedia = missingHandoffMedia(id, imagesFor(id).length, Boolean(videoId));
         const preflight = preflightReports[id];
         const preflightStale = Boolean(preflight && (preflight.source !== draft.source || preflight.text !== text));
         return <div key={id} id="batch-active-editor" className="min-w-0 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4">
@@ -280,7 +285,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           <p className={`mt-1 text-[11px] ${valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}`}>{check ? `${check.count} / ${check.limit} ${id === "bluesky" ? "graphemes" : "characters"}` : `${characterCount(text)} / 5,000 characters`}{check?.byteCount !== undefined ? ` · ${check.byteCount} / ${check.byteLimit} UTF-8 bytes` : ""}{!valid ? " · Edit this text before confirming" : ""}</p>
           {draft.source.trim() && <AiLiteralNotice source={draft.source} suggestion={text} />}
           {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{missingMedia === "video" ? " No video is attached here; bring one when posting." : missingMedia ? " No photo or video is attached here; bring one when posting." : ""}</p>}
-          {imageLimitWarning(id, draft.mediaIds?.length ?? 0) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(id, draft.mediaIds?.length ?? 0)}</p>}
+          <PlatformImageSelection destination={id} sourceIds={draft.mediaIds ?? []} sourceAlt={draft.mediaAlt} selectedIds={imagesFor(id)} onChange={(ids) => setImageSelections((current) => ({ ...current, [id]: ids }))} disabled={attempted || editorDirty || busy || mediaBusy} />
           {draft.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {draft.placeLabel} · add on the platform yourself</p>}
           <div className="mt-3 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -297,7 +302,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           <div className="mt-3">{slotApplied && isPlatformId(id) && slotTimes[id] ? <p className="rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)]">Reminder: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview?.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(slotTimes[id]))} · {slotPreview?.timeZone}</p> : <fieldset disabled={attempted} className={attempted ? "opacity-70" : ""}><LocalDateTimeField id={`batch-reminder-${id}`} label={`${assistedDestinations[id].name} reminder`} value={reminders[id] ?? ""} minTimestamp={currentTime} optional onChange={(value) => setReminders((current) => ({ ...current, [id]: value }))} /></fieldset>}</div>
         </div>;
       })}
-      {draft.mediaIds?.length ? <MediaHandoff mediaIds={draft.mediaIds} mediaAlt={draft.mediaAlt} variant="review" /> : <p className="text-[11px] leading-5 text-[var(--text-soft)]">{videoId ? "This draft has no saved images. The selected video will be attached to each handoff." : "This draft has no saved images. You can still bring media directly to the platform when publishing."}</p>}
+      {!draft.mediaIds?.length && <p className="text-[11px] leading-5 text-[var(--text-soft)]">{videoId ? "This draft has no saved images. The selected video will be attached to each handoff." : "This draft has no saved images. You can still bring media directly to the platform when publishing."}</p>}
       <details className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
         <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Video for this batch · {videoId ? "attached" : "optional"}</summary>
         <div className="mt-3"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy || attempted || submitting} /></div>

@@ -71,6 +71,53 @@ test("batch handoffs snapshot saved platform versions and media, while repeat re
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, items), /handoffs were removed/);
 });
 
+test("each platform receives only its reviewed image subset, order and matching descriptions", async () => {
+  const images = [];
+  for (let index = 0; index < 6; index++) {
+    images.push((await createMedia(owner, {
+      name: `batch-${index}.png`, type: "image/png",
+      bytes: await sharp({ create: { width: 4, height: 4, channels: 3,
+        background: { r: index * 30, g: 80, b: 180 } } }).png().toBuffer(),
+    })).media);
+  }
+  const ids = images.map((image) => image.id);
+  const saved = saveDraft(owner, { ...draft("Photo set", undefined, undefined, ids),
+    mediaAlt: ids.map((_, index) => `Photo ${index + 1}`) });
+  const [skyTime, linkedTime] = handoffs();
+  const items = [
+    { ...skyTime, mediaIds: [ids[5], ids[1], ids[0], ids[3]] },
+    { ...linkedTime, mediaIds: [ids[2], ids[4], ids[3], ids[0], ids[1], ids[5]] },
+  ];
+  const batchId = randomUUID();
+  const [sky, linked] = prepareAssistedBatch(owner, saved.id, batchId, items);
+  assert.deepEqual(sky.mediaIds, items[0].mediaIds);
+  assert.deepEqual(sky.mediaAlt, ["Photo 6", "Photo 2", "Photo 1", "Photo 4"]);
+  assert.deepEqual(linked.mediaIds, items[1].mediaIds);
+  assert.deepEqual(linked.mediaAlt, ["Photo 3", "Photo 5", "Photo 4", "Photo 1", "Photo 2", "Photo 6"]);
+  assert.deepEqual(listWorkspace(owner).drafts.find((item) => item.id === saved.id).mediaIds, ids);
+  assert.deepEqual(prepareAssistedBatch(owner, saved.id, batchId, [...items].reverse()), [linked, sky]);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId,
+    [{ ...items[0], mediaIds: [...items[0].mediaIds].reverse() }, items[1]]), /different or partial/);
+  const before = listWorkspace(owner).assisted.length;
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...skyTime, mediaIds: ids.slice(0, 5) }]), /valid text and UTC timestamps/);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...skyTime, mediaIds: [ids[0], ids[0]] }]), /valid text and UTC timestamps/);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...skyTime, mediaIds: [randomUUID()] }]), /this saved draft only/);
+  assert.throws(() => updateAssistedImages(owner, sky.id, sky.mediaIds, sky.mediaAlt,
+    ids.slice(0, 5), ids.slice(0, 5).map(() => "")), /fewer images/);
+  assert.throws(() => addAssisted(owner, {
+    id: randomUUID(), title: "Too many", destination: "bluesky", text: "Image set",
+    mediaIds: ids.slice(0, 5), mediaAlt: ids.slice(0, 5).map(() => ""),
+    scheduledFor: new Date(Date.now() + 60_000).toISOString(), createdAt: new Date().toISOString(), status: "queued",
+  }), /fewer images/);
+  assert.equal(listWorkspace(owner).assisted.length, before);
+  const [textOnly] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...skyTime, mediaIds: [] }]);
+  assert.deepEqual(textOnly.mediaIds, []);
+  assert.deepEqual(textOnly.mediaAlt, []);
+});
+
 test("unmodified platform text uses the same adaptation shown in Create", () => {
   const saved = saveDraft(owner, draft("First line\nSecond line", ["bluesky", "linkedin"], {}));
   const prepared = prepareAssistedBatch(owner, saved.id, randomUUID(), handoffs());

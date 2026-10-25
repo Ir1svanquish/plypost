@@ -46,7 +46,7 @@ import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisp
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
-import { MAX_POST_IMAGES, imageLimitWarning } from "@/lib/media-policy";
+import { MAX_POST_IMAGES, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
 const sampleDraft =
   "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.";
@@ -1474,7 +1474,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function addAssistedPost(videoId?: string): Promise<boolean> {
+  async function addAssistedPost(videoId?: string, selectedMediaIds?: string[]): Promise<boolean> {
     if (mediaBusyRef.current) {
       setNotice({ kind: "error", text: "Wait for the image operation to finish before saving this handoff." });
       return false;
@@ -1500,13 +1500,20 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "The assisted publishing list is full. Remove an old item first." });
       return false;
     }
+    const handoffMediaIds = selectedMediaIds ?? mediaIds.slice(0, imageLimitForDestination(assistDestination));
+    if (handoffMediaIds.length > imageLimitForDestination(assistDestination) ||
+        new Set(handoffMediaIds).size !== handoffMediaIds.length ||
+        handoffMediaIds.some((id) => !mediaIds.includes(id))) {
+      setNotice({ kind: "error", text: "Review the selected images for this platform before saving." });
+      return false;
+    }
     const item: AssistedPost = {
       id: crypto.randomUUID(),
       title: draftTitle(title, text),
       destination: assistDestination,
       text,
-      mediaIds: [...mediaIds],
-      mediaAlt: mediaAlt.map((value) => value.trim()),
+      mediaIds: [...handoffMediaIds],
+      mediaAlt: handoffMediaIds.map((id) => mediaAlt[mediaIds.indexOf(id)]?.trim() ?? ""),
       ...(placeLabel.trim() ? { placeLabel: placeLabel.trim() } : {}),
       ...(videoId ? { videoId } : {}),
       scheduledFor: scheduledFor.toISOString(),
@@ -1862,7 +1869,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           </div>
           {view === "assisted" && <div>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publish with a handoff</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Prepare text and reminders for platforms you post to yourself.</p></div>
-            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} startWithVideoGroup={openAssistedVideoGroup} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} imageCount={mediaIds.length} initialVideoId={videoId} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
+            <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} startWithVideoGroup={openAssistedVideoGroup} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} sourceMediaIds={mediaIds} sourceMediaAlt={mediaAlt} initialVideoId={videoId} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />}
         </main>
