@@ -1,5 +1,4 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { isIP } from "node:net";
 import { database } from "./db";
 
 export const SESSION_COOKIE = "plypost_session";
@@ -77,27 +76,4 @@ export function cookieOptions(request: Request) {
     ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
   return { httpOnly: true, secure: process.env.NODE_ENV === "production" && !localHttpDemo,
     sameSite: "strict" as const, path: "/", maxAge: SESSION_SECONDS };
-}
-
-export function loginFailureKey(request: Request): string {
-  // Render's Cloudflare edge overwrites this header. X-Forwarded-For can be forged.
-  const address = process.env.RENDER === "true" ? request.headers.get("cf-connecting-ip")?.trim() ?? "" : "";
-  const client = isIP(address) ? address.toLowerCase() : "unknown";
-  return `owner-login:${createHash("sha256").update(client).digest("hex")}`;
-}
-
-export function loginAllowed(key: string): boolean {
-  const db = database();
-  const since = new Date(Date.now() - 15 * 60_000).toISOString();
-  db.prepare("DELETE FROM login_attempts WHERE created_at < ?").run(since);
-  const row = db.prepare("SELECT COUNT(*) AS count FROM login_attempts WHERE key=?").get(key) as { count: number };
-  return row.count < 5;
-}
-
-export function recordLoginFailure(key: string) {
-  database().prepare("INSERT INTO login_attempts(key,created_at) VALUES (?,?)").run(key, new Date().toISOString());
-}
-
-export function clearLoginFailures(key: string) {
-  database().prepare("DELETE FROM login_attempts WHERE key=?").run(key);
 }

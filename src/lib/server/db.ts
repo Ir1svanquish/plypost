@@ -61,10 +61,6 @@ export function database(): DatabaseSync {
       id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS ai_usage_owner ON ai_usage(user_id, created_at);
-    CREATE TABLE IF NOT EXISTS login_attempts (
-      id INTEGER PRIMARY KEY, key TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS login_attempts_key ON login_attempts(key, created_at);
     CREATE TABLE IF NOT EXISTS worker_heartbeat (
       id INTEGER PRIMARY KEY CHECK(id=1), seen_at TEXT NOT NULL
     );
