@@ -39,7 +39,6 @@ import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
-import type { OverLimitVariant } from "@/lib/generated-variants";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
@@ -56,7 +55,6 @@ type AIReview = {
   original: Partial<Record<PlatformId, string>>;
   suggestions: Partial<Record<PlatformId, string>>;
   platforms: PlatformId[];
-  overLimit: OverLimitVariant[];
   revision: number;
 };
 type WorkspaceView = "compose" | "drafts" | "schedule" | "assisted" | "account";
@@ -697,14 +695,14 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source, useVoice, platforms: requested }),
       });
-      const data: { error?: string; variants?: Partial<Record<PlatformId, string>>; overLimit?: OverLimitVariant[] } = await response.json();
+      const data: { error?: string; variants?: Partial<Record<PlatformId, string>> } = await response.json();
       if (!response.ok) throw new Error(data.error || "AI adaptation failed.");
       if (!data.variants || requested.some((id) => !data.variants?.[id]?.trim())) throw new Error("AI adaptation returned incomplete drafts.");
       if (editorRevision.current !== revisionAtStart) {
         setNotice({ kind: "error", text: "The editor changed while AI was working, so your edits were kept. Generate again when ready." });
         return;
       }
-      setAiReview({ source, original: previousVariants, suggestions: data.variants, platforms: requested, overLimit: data.overLimit ?? [], revision: revisionAtStart });
+      setAiReview({ source, original: previousVariants, suggestions: data.variants, platforms: requested, revision: revisionAtStart });
       const preselected = selected.length ? requested.filter((id) => {
         const details = compareAiLiterals(source, data.variants?.[id] ?? "");
         return details.missing.length === 0 && details.added.length === 0;
@@ -727,6 +725,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
     const chosen = aiReview.platforms.filter((id) => aiApplyIds.includes(id) && aiReview.suggestions[id]);
     if (chosen.length === 0) return;
+    const invalid = chosen.filter((id) => !validatePlatformText(id, aiReview.suggestions[id] ?? "").valid);
+    if (invalid.length) {
+      setNotice({ kind: "error", text: `Edit or deselect ${invalid.map((id) => platforms[id].name).join(", ")} before applying; the suggested text is empty or over its limit.` });
+      return;
+    }
     const previous = { ...variants };
     const next = { ...variants };
     for (const id of chosen) next[id] = aiReview.suggestions[id];
@@ -737,14 +740,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setSelected(nextSelected);
     if (!nextSelected.includes(active)) setActive(nextSelected[0]);
     setAiReview(null);
-    const overLimit = aiReview.overLimit.filter(({ platform }) => chosen.includes(platform));
-    setNotice(overLimit.length ? {
-      kind: "error",
-      text: `Applied ${chosen.length} selected versions. ${overLimit.map(({ platform, count, limit, byteCount, byteLimit }) =>
-        byteCount !== undefined && byteLimit !== undefined
-          ? `${platforms[platform].name} is ${byteCount}/${byteLimit} bytes`
-          : `${platforms[platform].name} is ${count}/${limit} characters`).join("; ")}. Shorten them before sharing.`,
-    } : { kind: "success", text: `Applied ${chosen.length} selected ${chosen.length === 1 ? "version" : "versions"}. Check facts and tone before sharing.` });
+    setNotice({ kind: "success", text: `Applied ${chosen.length} selected ${chosen.length === 1 ? "version" : "versions"}. Check facts and tone before sharing.` });
   }
 
   async function simulatePublish() {
@@ -1696,7 +1692,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     original={aiReview.original}
                     suggestions={aiReview.suggestions}
                     available={aiReview.platforms}
-                    overLimit={aiReview.overLimit}
                     selected={aiApplyIds}
                     stale={editorRevision.current !== aiReview.revision || source !== aiReview.source ||
                       platformIds.some((id) => variants[id] !== aiReview.original[id])}
@@ -1704,6 +1699,11 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     onToggle={(id) => setAiApplyIds((current) => current.includes(id)
                       ? current.filter((item) => item !== id)
                       : aiReview.platforms.filter((item) => current.includes(item) || item === id))}
+                    onEdit={(id, text) => {
+                      setAiReview((current) => current ? { ...current, suggestions: { ...current.suggestions, [id]: text } } : current);
+                      const details = compareAiLiterals(source, text);
+                      if (details.missing.length || details.added.length) setAiApplyIds((current) => current.filter((item) => item !== id));
+                    }}
                     onApply={applyAIReview}
                     onDiscard={() => { setAiReview(null); setNotice(null); }}
                   />}
