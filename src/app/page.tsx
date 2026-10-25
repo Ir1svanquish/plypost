@@ -37,7 +37,7 @@ import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
-import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
+import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import type { OverLimitVariant } from "@/lib/generated-variants";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
@@ -113,8 +113,8 @@ function hasUnsavedEditorChanges(editor: EditorContent, currentDraftId: string |
   }
   if (origin === "planned") return true;
   return !sameEditorContent(editor, {
-    title: "", source: origin === "starter" ? sampleDraft : "",
-    selected: platformIds, variants: {}, mediaIds: [], mediaAlt: [], videoId: null, plannedDate: "",
+    title: "", source: "",
+    selected: [], variants: {}, mediaIds: [], mediaAlt: [], videoId: null, plannedDate: "",
   });
 }
 
@@ -144,8 +144,8 @@ function PlatformMark({ id, size = "normal" }: { id: PlatformId; size?: "small" 
 
 function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void }) {
   const [view, setView] = useState<WorkspaceView>("compose");
-  const [source, setSource] = useState(sampleDraft);
-  const [selected, setSelected] = useState<PlatformId[]>([...platformIds]);
+  const [source, setSource] = useState("");
+  const [selected, setSelected] = useState<PlatformId[]>([]);
   const [active, setActive] = useState<PlatformId>(platformDisplayIds[0]);
   const [variants, setVariants] = useState<Partial<Record<PlatformId, string>>>({});
   const [mediaIds, setMediaIds] = useState<string[]>([]);
@@ -425,14 +425,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           plannedDate?: unknown;
           editorOrigin?: unknown;
         };
-        if (typeof data.source === "string") {
-          const hasCustomVariants = data.variants && typeof data.variants === "object" &&
-            Object.values(data.variants).some((value) => typeof value === "string");
-          const isStarterText = data.source === previousSampleDraft || data.source === legacySampleDraft || data.source === interimSampleDraft;
-          setSource(isStarterText && !hasCustomVariants && typeof data.currentDraftId !== "string" ? sampleDraft : data.source);
-        }
-        if (Array.isArray(data.selected)) {
-          setSelected(data.selected.filter((id): id is PlatformId => platformIds.includes(id)));
+        const untouchedStarter = isUntouchedStarterCache(data,
+          [sampleDraft, previousSampleDraft, legacySampleDraft, interimSampleDraft], platformIds);
+        if (typeof data.source === "string") setSource(untouchedStarter ? "" : data.source);
+        if (Array.isArray(data.selected) && !untouchedStarter) {
+          const cachedSelected = data.selected.filter((id): id is PlatformId => platformIds.includes(id));
+          setSelected(cachedSelected);
+          setActive(platformDisplayIds.find((id) => cachedSelected.includes(id)) ?? platformDisplayIds[0]);
         }
         if (data.variants && typeof data.variants === "object") {
           const safe: Partial<Record<PlatformId, string>> = {};
@@ -776,7 +775,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setMediaAltById({});
       setVideoId(null);
       setPlannedDate("");
-      setSelected([...platformIds]);
+      setSelected([]);
       setActive(platformDisplayIds[0]);
       setNotice(null);
     } else if (next.kind === "draft") {
@@ -1538,8 +1537,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
             <div className="min-w-0 space-y-6">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="preview-heading">
-                <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="preview-heading" className="text-[17px] font-bold tracking-[-0.025em]">Platform preview</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your text before sharing.</p></div><span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--accent-text)]">EXAMPLE</span></div>
-                <div className="mobile-x-scroll flex gap-1 border-b border-[var(--line)] px-4 sm:px-6" role="tablist" aria-label="Platform previews">{platformDisplayIds.map((id) => <button key={id} type="button" role="tab" aria-selected={active === id} onClick={() => setActive(id)} className={`relative flex shrink-0 items-center gap-1.5 px-3 py-4 text-[12px] font-semibold transition sm:text-[13px] ${active === id ? "text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}><span className={`${selected.includes(id) ? "" : "opacity-40"}`}>{platforms[id].name}</span>{active === id && <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--accent)]" />}</button>)}</div>
+                <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="preview-heading" className="text-[17px] font-bold tracking-[-0.025em]">Platform preview</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your text before sharing.</p></div>{selected.length > 0 && <span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--accent-text)]">EXAMPLE</span>}</div>
+                {selected.length === 0 ? <p className="px-6 py-10 text-center text-[13px] text-[var(--text-muted)] sm:px-7">Select a platform in the draft editor to see its preview.</p> : <>
+                <div className="mobile-x-scroll flex gap-1 border-b border-[var(--line)] px-4 sm:px-6" role="tablist" aria-label="Platform previews">{platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <button key={id} type="button" role="tab" aria-selected={active === id} onClick={() => setActive(id)} className={`relative flex shrink-0 items-center gap-1.5 px-3 py-4 text-[12px] font-semibold transition sm:text-[13px] ${active === id ? "text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>{platforms[id].name}{active === id && <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--accent)]" />}</button>)}</div>
                 <div className="dot-grid bg-[var(--surface-muted)] p-5 sm:p-7"><PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} mediaIds={mediaIds} mediaAlt={mediaAlt} /></div>
                 {currentValidation.issues.length > 0 && <div role="status" className="space-y-2 px-6 pt-5 sm:px-7">
                   {currentValidation.issues.map((issue) => <p key={issue.code} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${issue.severity === "error" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--warning-soft)] text-[var(--warning)]"}`}>
@@ -1548,9 +1548,20 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   </p>)}
                 </div>}
                 <div className="px-6 pb-6 pt-5 sm:px-7 sm:pb-7"><div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">Edit {platforms[active].name} draft</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div><textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" /><div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${!currentValidation.valid ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{!currentValidation.valid ? "Needs attention" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${!currentValidation.valid ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div><button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button></div>
+                </>}
               </section>
 
-              <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading"><div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Prepare a handoff, then publish from your own account.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div><div className="mb-5 flex flex-wrap gap-2">{selected.length ? platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">No previews selected</span>}</div>{invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}<button type="button" onClick={() => openManualComposer()} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> Prepare a manual post <ArrowRight size={15} className="ml-1" /></button><button type="button" onClick={simulatePublish} disabled={!canPublish} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-45">{publishing ? "Simulating..." : "Run a demo simulation"}</button><p className="mt-2 text-center text-[12px] text-[var(--text-soft)]">Demo only; no post is sent to a social platform.</p></section>
+              <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading">
+                <div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Prepare a handoff, then publish from your own account.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div>
+                <div className="mb-5 flex flex-wrap gap-2">{selected.length ? platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">Choose destinations in the draft editor when you are ready.</span>}</div>
+                {invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}
+                <button type="button" onClick={() => openManualComposer()} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition"><Send size={16} /> Prepare a manual post <ArrowRight size={15} className="ml-1" /></button>
+                <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
+                  <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Try a demo simulation</summary>
+                  <p className="mt-3 text-[12px] leading-5 text-[var(--text-muted)]">Creates a sample receipt for selected previews. No post is sent to a social platform.</p>
+                  <button type="button" onClick={simulatePublish} disabled={!canPublish} className="mt-3 w-full rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-45">{publishing ? "Simulating..." : "Run simulation"}</button>
+                </details>
+              </section>
               {showBlueskyLive && selected.includes("bluesky") && active === "bluesky" && <BlueskyLivePanel connection={blueskyConnection} connectionLoading={blueskyLoading} connectionError={blueskyError} selected active text={textFor("bluesky")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
               {showMastodonLive && selected.includes("mastodon") && active === "mastodon" && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[12px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
             </div>
@@ -1567,7 +1578,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             <DraftLibraryPanel drafts={drafts} assisted={assisted} currentDraftId={currentDraftId} onNew={newDraft} onLoad={loadDraft} onPrepare={prepareDraftHandoffs} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onDelete={deleteDraft} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />
           </div>}
           <div hidden={view !== "schedule"}>
-            <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">{showMastodonQueue ? "See real Mastodon posts, simulations and manual handoffs together." : "Plan drafts, simulations and manual handoffs in one place."}</p></div>
+            <div className="mb-6"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Plan</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Publishing plan</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">{showMastodonQueue ? "Plan drafts, manual handoffs and connected Mastodon posts." : "Plan drafts and manual handoffs in one place."}</p></div>
             <div className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-[var(--surface)] px-6 py-4 sm:px-7"><div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">Current draft</p><p className="mt-1 truncate text-[14px] font-semibold text-[var(--text)]">{canSaveEditor ? draftTitle(title, source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "") : "No draft yet"}</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">{selected.length} destinations · {mediaIds.length} {mediaIds.length === 1 ? "image" : "images"}</p></div><button type="button" onClick={() => openView("compose")} className="text-[12px] font-semibold text-[var(--accent-text)]">Edit draft →</button></div>
             <ServerSchedulePanel drafts={drafts} schedule={schedule} assisted={assisted} realMastodon={realMastodonSchedules} showRealMastodon={showMastodonQueue} realQueueError={realMastodonQueueError} value={scheduleTime} now={now} canSchedule={Boolean(!mediaBusy && scheduleTime && source.trim() && selected.length && invalidSelected.length === 0 && new Date(scheduleTime).getTime() > now + 10_000)} runningId={runningId} onValueChange={setScheduleTime} onAdd={addToPlan} onLoad={loadScheduled} onRun={runScheduled} onReschedule={rescheduleScheduled} onRescheduleAssisted={rescheduleAssistedPost} onRemove={removeScheduled} onOpenAssisted={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onOpenDraft={loadDraft} onPrepareDraft={prepareDraftHandoffs} onSetDraftTargetDate={setDraftTargetDate} onOpenRealMastodon={openRealMastodonSchedule} onPrepareManual={(localTime) => { setFocusedAssistedId(null); setAssistTime(localTime); openView("assisted"); }} />
             <PostingResultsPanel posts={assisted} onOpenRecord={(item) => { setFocusedAssistedId(item.id); openView("assisted"); }} onReuseText={(item) => requestEditorSwitch({ kind: "assisted", post: item })} />

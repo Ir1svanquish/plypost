@@ -13,7 +13,7 @@ Open `http://127.0.0.1:3187` and sign in with the random credentials in `data/de
 
 To inspect the compiled test build with the same isolated demo data, run `npm run build` followed by `npm run demo:test-build`. You can choose a port with `npm run demo:test-build -- --port 3201`. This runs `next start` on the loopback address and permits an HTTP session cookie only for this script's local demo. Public hosting still needs HTTPS and its own server-side credentials. Rebuild after changing source code.
 
-Try the flow: open **Create** to inspect platform-specific versions, **Drafts** to see two planned ideas and their handoff progress, **Plan** to see the reminder and simulated slot, and **Assisted** to review the manual publishing checklist. No worker is needed to browse the seeded data. You can edit the fixtures freely; future demo starts reuse your local edits.
+Try the flow: **Create** starts blank; open a saved idea from **Drafts** to inspect its platform-specific versions. **Drafts** has two planned ideas and their handoff progress, **Plan** has the reminder and simulated slot, and **Assisted** has the manual publishing checklist. No worker is needed to browse the seeded data. You can edit the fixtures freely; future demo starts reuse your local edits.
 
 For the live AI part, configure `NEBIUS_API_KEY` in the ignored `.env.local`, restart the demo, and click **Generate variants** on a draft or **Make a weekly plan** in Strategy. The default model is NVIDIA Nemotron 3 Super through Nebius Token Factory. Only the text or fictional brand brief you explicitly submit goes to that service. The seeded data itself was written locally and does not represent an AI response.
 

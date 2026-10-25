@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readOwnerEditorCache, writeOwnerEditorCache } from "../src/lib/editor-cache.ts";
+import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "../src/lib/editor-cache.ts";
 
 function storage(entries = []) {
   const values = new Map(entries);
@@ -39,4 +39,19 @@ test("a failed scoped write keeps the older browser copy available", () => {
   local.setItem = () => { throw new Error("storage unavailable"); };
   assert.throws(() => writeOwnerEditorCache(local, "first@example.test", "new content"));
   assert.equal(local.getItem("socialflow-mvp"), "draft to recover");
+});
+
+test("only an untouched starter template is cleared from the editor cache", () => {
+  const samples = ["Old example", "Earlier example"];
+  const channels = ["bluesky", "mastodon", "linkedin", "threads"];
+  const starter = { editorOrigin: "starter", source: samples[0], selected: channels, variants: {}, title: "", mediaIds: [], videoId: null, plannedDate: "", currentDraftId: null };
+  assert.equal(isUntouchedStarterCache(starter, samples, channels), true);
+  for (const changed of [
+    { source: "My own idea" }, { title: "My title" }, { selected: ["linkedin"] },
+    { variants: { linkedin: "My version" } }, { mediaIds: ["kept-image"] }, { mediaAlt: ["My caption"] },
+    { videoId: "kept-video" }, { plannedDate: "2026-11-02" }, { currentDraftId: "saved-draft" },
+    { editorOrigin: "new" },
+  ]) {
+    assert.equal(isUntouchedStarterCache({ ...starter, ...changed }, samples, channels), false);
+  }
 });
