@@ -41,7 +41,7 @@ export function buildHandoffPackage(userId: string, id: string): { bytes: Uint8A
       throw new HandoffPackageError("A saved image is unavailable. Check this handoff before downloading.", 409);
     }
     const name = `images/${String(index + 1).padStart(2, "0")}.${extension[found.media.mimeType]}`;
-    files[name] = new Uint8Array(found.bytes);
+    files[name] = found.bytes;
     notes.push("", `Image ${index + 1}: ${name}`, `Description: ${item.mediaAlt?.[index] || "(none saved)"}`);
   }
   if (item.videoId) {
@@ -50,7 +50,7 @@ export function buildHandoffPackage(userId: string, id: string): { bytes: Uint8A
       throw new HandoffPackageError("The saved video is unavailable. Check this handoff before downloading.", 409);
     }
     const path = `video/clip.${found.video.name.split(".").at(-1)}`;
-    files[path] = new Uint8Array(found.bytes);
+    files[path] = found.bytes;
     notes.push("", `Video: ${path}`, `Original name: ${found.video.name}`);
   } else if (item.destination === "youtube" || item.destination === "tiktok") {
     notes.push("", "No video is attached to this handoff. Bring your video separately.");
