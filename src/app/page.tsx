@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { adaptDraft, characterCount, isPlatformId, platformDisplayIds, platformIds, platforms, type PlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
+import { compareAiLiterals } from "@/lib/ai-literal-check";
 import { DraftLibraryPanel } from "@/components/workspace-panels";
 import { ServerSchedulePanel } from "@/components/server-schedule-panel";
 import { StrategyPanel } from "@/components/strategy-panel";
@@ -680,8 +681,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         return;
       }
       setAiReview({ source, original: previousVariants, suggestions: data.variants, platforms: requested, overLimit: data.overLimit ?? [], revision: revisionAtStart });
-      setAiApplyIds(selected.length ? requested : []);
-      setNotice({ kind: "success", text: `${requested.length} ${requested.length === 1 ? "suggestion is" : "suggestions are"} ready. Compare below and choose what to apply.` });
+      const preselected = selected.length ? requested.filter((id) => {
+        const details = compareAiLiterals(source, data.variants?.[id] ?? "");
+        return details.missing.length === 0 && details.added.length === 0;
+      }) : [];
+      setAiApplyIds(preselected);
+      setNotice({ kind: "success", text: `${requested.length} ${requested.length === 1 ? "suggestion is" : "suggestions are"} ready. ${selected.length && preselected.length < requested.length ? "Versions with changed details start unchecked. " : ""}Compare below and choose what to apply.` });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "AI adaptation failed." });
     } finally {

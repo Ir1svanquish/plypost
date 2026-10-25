@@ -3,6 +3,7 @@
 import { adaptDraft, platforms, type PlatformId } from "@/lib/platforms";
 import type { OverLimitVariant } from "@/lib/generated-variants";
 import { compareText, type TextPart } from "@/lib/text-diff";
+import { AiLiteralNotice } from "@/components/ai-literal-notice";
 
 type Props = {
   source: string;
@@ -29,7 +30,7 @@ export function AIReviewPanel({ source, original, suggestions, available, overLi
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div>
         <h3 className="text-[13px] font-bold text-[var(--text)]">Review before replacing</h3>
-        <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Choose the versions to use. Applying a version also selects its platform; your drafts stay in place until then.</p>
+        <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Choose the versions to use. Suggestions with changed numbers, weekdays or links start unchecked. Applying a version also selects its platform; your drafts stay in place until then.</p>
       </div>
       <button type="button" onClick={onDiscard} disabled={busy} className="text-[12px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text)] disabled:opacity-45">Discard suggestions</button>
     </div>
@@ -49,6 +50,7 @@ export function AIReviewPanel({ source, original, suggestions, available, overLi
               {warning && <span className="text-[11px] font-semibold text-[var(--danger)]">Too long · {warning.byteCount !== undefined && warning.byteLimit !== undefined ? `${warning.byteCount}/${warning.byteLimit} bytes` : `${warning.count}/${warning.limit} characters`}</span>}
             </div>
           </div>
+          <AiLiteralNotice source={source} suggestion={suggestions[id] ?? ""} />
           <details className="mt-2">
             <summary className="cursor-pointer text-[11px] font-semibold text-[var(--accent-text)]">Compare versions</summary>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
