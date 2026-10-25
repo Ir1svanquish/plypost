@@ -178,8 +178,8 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
     const draft = row && validDraft(JSON.parse(row.payload));
     if (!draft || draft.id !== draftId) throw new Error("Saved draft not found.");
     if (expectedUpdatedAt !== undefined && draft.updatedAt !== expectedUpdatedAt) throw new DraftConflictError();
-    if (requested.some((item) => isPlatformId(item.destination) && !draft.selected.includes(item.destination))) {
-      throw new Error("Choose destinations selected in this saved draft.");
+    if (requested.some((item) => isPlatformId(item.destination) && !draft.selected.includes(item.destination) && item.text === undefined)) {
+      throw new Error("Review text for every platform added after saving this draft.");
     }
     if (requireFreeSlots && requested.some((item) =>
       isPlatformId(item.destination) && item.reminderEnabled !== false && (Date.parse(item.scheduledFor) < Date.now() + 10_000 ||

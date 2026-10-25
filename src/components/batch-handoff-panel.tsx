@@ -54,10 +54,11 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     if (startExpanded) reviewRef.current?.focus({ preventScroll: true });
   }, [startExpanded]);
   const savedPlatforms = platformDisplayIds.filter((id) => draft.selected.includes(id));
+  const additionalPlatforms = platformDisplayIds.filter((id) => !draft.selected.includes(id));
   const availableDestinations: AssistedDestinationId[] = [
-    ...savedPlatforms, ...assistedOnlyDisplayIds,
+    ...platformDisplayIds, ...assistedOnlyDisplayIds,
   ];
-  const selectedSlotPlatforms = savedPlatforms.filter((id) => destinations.includes(id));
+  const selectedSlotPlatforms = platformDisplayIds.filter((id) => destinations.includes(id));
   const activeDestination = focusedDestination && destinations.includes(focusedDestination)
     ? focusedDestination : destinations[0] ?? null;
   const priorHandoffs = existing.filter((item) => item.sourceDraftId === draft.id);
@@ -179,10 +180,12 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
 
   function destinationOption(id: AssistedDestinationId) {
     const selected = destinations.includes(id);
+    const wasPrepared = priorHandoffs.some((item) => item.destination === id);
     return <label key={id} className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)]">
       <input type="checkbox" checked={selected} onChange={() => toggleDestination(id)} disabled={attempted || submitting || editorDirty} className="h-4 w-4 shrink-0 accent-[var(--accent)]" />
       <span className="truncate">{assistedDestinations[id].name}</span>
-      {priorHandoffs.some((item) => item.destination === id) && <span className="ml-auto shrink-0 text-[10px] font-normal text-[var(--text-muted)]">Prepared</span>}
+      {wasPrepared ? <span className="ml-auto shrink-0 text-[10px] font-normal text-[var(--text-muted)]">Prepared</span> :
+        isPlatformId(id) && !draft.selected.includes(id) && <span className="ml-auto shrink-0 text-[10px] font-normal text-[var(--text-muted)]">From base draft</span>}
     </label>;
   }
 
@@ -206,7 +209,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
             {savedPlatforms.length > 0 && <div className="grid gap-2">{savedPlatforms.map(destinationOption)}</div>}
             <details className={savedPlatforms.length ? "mt-2" : ""} open={savedPlatforms.length === 0 ? true : undefined}>
               <summary className="cursor-pointer py-1 text-[12px] font-semibold text-[var(--accent-text)]">{savedPlatforms.length ? "More photo & text platforms" : "Choose a platform"}</summary>
-              <div className="mt-2 grid gap-2">{assistedTextImageOnlyDisplayIds.map(destinationOption)}</div>
+              <div className="mt-2 grid gap-2">{additionalPlatforms.map(destinationOption)}{assistedTextImageOnlyDisplayIds.map(destinationOption)}</div>
             </details>
           </div>
           <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">

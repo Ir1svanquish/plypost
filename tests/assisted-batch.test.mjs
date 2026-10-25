@@ -106,8 +106,13 @@ test("reviewed handoffs cover every assisted destination without changing the sa
   const batchId = randomUUID();
   const ids = ["bluesky", "linkedin", "x", "facebook", "instagram", "tiktok", "youtube", "pinterest", "reddit", "mastodon", "threads"];
   assert.throws(() => prepareAssistedBatch(owner, limited.id, randomUUID(), [
-    { destination: "mastodon", scheduledFor: new Date().toISOString(), text: "Unselected" },
-  ], false, limited.updatedAt), /selected in this saved draft/);
+    { destination: "mastodon", scheduledFor: new Date().toISOString() },
+  ], false, limited.updatedAt), /Review text for every platform added/);
+  const [added] = prepareAssistedBatch(owner, limited.id, randomUUID(), [
+    { destination: "mastodon", scheduledFor: new Date().toISOString(), text: "Reviewed Mastodon copy" },
+  ], false, limited.updatedAt);
+  assert.equal(added.text, "Reviewed Mastodon copy");
+  assert.deepEqual(listWorkspace(owner).drafts.find((item) => item.id === limited.id).selected, ["bluesky", "linkedin"]);
   const items = ids.map((destination, index) => ({
     destination, scheduledFor: new Date(Date.now() + 60_000 + index * 60_000).toISOString(),
     text: `Reviewed for ${destination}`,
@@ -271,7 +276,7 @@ test("invalid member, duplicates, missing media, and list-cap overflow roll back
   assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), items), /Fix the saved bluesky text/);
   assert.deepEqual(listWorkspace(other).assisted, []);
   assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), [items[0], items[0]]), /only once/);
-  assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), [{ destination: "threads", scheduledFor: items[0].scheduledFor }]), /selected in this saved draft/);
+  assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), [{ destination: "threads", scheduledFor: items[0].scheduledFor }]), /Review text for every platform added/);
   assert.throws(() => prepareAssistedBatch(other, tooLong.id, randomUUID(), [{ ...items[0], scheduledFor: "2026-02-30T12:00:00.000Z" }]), /UTC timestamps/);
   const missingMedia = saveDraft(other, draft("Okay", ["bluesky"], {}, []));
   database().prepare("UPDATE drafts SET payload=? WHERE id=? AND user_id=?")
