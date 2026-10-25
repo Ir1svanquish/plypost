@@ -38,7 +38,7 @@ import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import type { OverLimitVariant } from "@/lib/generated-variants";
-import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
   "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.";
@@ -124,6 +124,10 @@ function sameItems(left: readonly string[], right: readonly string[]): boolean {
 
 function samePlatforms(left: readonly PlatformId[], right: readonly PlatformId[]): boolean {
   return platformIds.every((id) => left.includes(id) === right.includes(id));
+}
+
+function editorTitleSource(source: string, variants: Partial<Record<PlatformId, string>>): string {
+  return source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "";
 }
 
 function sameEditorContent(left: EditorContent, right: EditorContent | SavedDraft): boolean {
@@ -763,7 +767,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
     const stamp = new Date().toISOString();
     const existing = drafts.find((draft) => draft.id === currentDraftId);
-    const titleSource = source.trim() || platformDisplayIds.map((id) => variants[id]?.trim()).find(Boolean) || "";
+    const titleSource = editorTitleSource(source, variants);
     const savedTitle = draftTitle(title, titleSource);
     const saved: SavedDraft = {
       id: !asCopy && currentDraftId ? currentDraftId : crypto.randomUUID(),
@@ -1548,7 +1552,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                 </div>
                 <div className="px-5 pb-5 pt-6 sm:px-7 sm:pb-7">
                   <label htmlFor="source-draft" className="sr-only">Your message</label>
-                  <textarea id="source-draft" value={source} onChange={(event) => { editorRevision.current += 1; setSource(event.target.value); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[210px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                  <textarea id="source-draft" value={source} onChange={(event) => { const nextSource = event.target.value; editorRevision.current += 1; setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(nextSource, variants))); setSource(nextSource); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[210px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
                   <div className="mt-2 flex justify-end text-[12px] text-[var(--text-soft)]"><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
                   <AIWritingPanel source={source} mediaIds={mediaIds} generating={generating} hasReview={Boolean(aiReview)}
                     onGenerate={(useVoice) => { void generateVariants(useVoice); }}
@@ -1556,6 +1560,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                       const next = source.trim() ? `${source.trim()}\n\n${caption}` : caption;
                       if (next.length > 3000) { setNotice({ kind: "error", text: "This caption would take the draft over 3,000 characters. Shorten it before adding." }); return false; }
                       editorRevision.current += 1;
+                      setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(next, variants)));
                       setSource(next);
                       setAiReview(null);
                       setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." });
@@ -1641,8 +1646,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   </p>)}
                 </div>}
                 <div className="px-5 pb-5 pt-5 sm:px-7 sm:pb-7">
-                  <div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">{platforms[active].name} text</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div>
-                  <textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                  <div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">{platforms[active].name} text</label><button type="button" onClick={() => { const next = { ...variants }; delete next[active]; editorRevision.current += 1; setAiUndo(null); setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(source, next))); setVariants(next); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div>
+                  <textarea id="platform-draft" value={currentText} onChange={(event) => { const next = { ...variants, [active]: event.target.value }; editorRevision.current += 1; setAiUndo(null); setTitle((current) => followAutoTitle(current, editorTitleSource(source, variants), editorTitleSource(source, next))); setVariants(next); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
                   <div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${!currentValidation.valid ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{!currentValidation.valid ? "Needs attention" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${!currentValidation.valid ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div>
                   <button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button>
                   <details className="mt-4 text-[12px]"><summary className="cursor-pointer font-semibold text-[var(--accent-text)]">See visual preview</summary><div className="dot-grid mt-3 rounded-xl bg-[var(--surface-muted)] p-4"><PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} mediaIds={mediaIds} mediaAlt={mediaAlt} /></div></details>

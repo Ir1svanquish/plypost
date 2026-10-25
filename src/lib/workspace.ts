@@ -327,6 +327,10 @@ export function draftTitle(title: string, source: string): string {
   return (title.trim() || source.trim().split(/\r?\n/)[0] || "Untitled draft").slice(0, 120);
 }
 
+export function followAutoTitle(title: string, previousText: string, nextText: string): string {
+  return title === draftTitle("", previousText) ? (nextText.trim() ? draftTitle("", nextText) : "") : title;
+}
+
 export function scheduleState(post: ScheduledPost, now: number): "upcoming" | "due" | "running" | "failed" | "simulated" {
   if (post.status === "simulated") return "simulated";
   if (post.status === "running") return "running";

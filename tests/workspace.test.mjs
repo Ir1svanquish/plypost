@@ -1,8 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assistedState, draftTitle, emptyWorkspace, hasDraftContent, localDateTimeValue, normalizePublicPostUrl, parseWorkspace, scheduleState, validCalendarDate } from "../src/lib/workspace.ts";
+import { assistedState, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, localDateTimeValue, normalizePublicPostUrl, parseWorkspace, scheduleState, validCalendarDate } from "../src/lib/workspace.ts";
 
 const stamp = "2026-10-22T12:00:00.000Z";
+
+test("generated draft names follow edited text while custom names remain fixed", () => {
+  assert.equal(followAutoTitle("First line", "First line\nMore detail", "Revised opening\nMore detail"), "Revised opening");
+  assert.equal(followAutoTitle("Untitled draft", "", "New caption"), "New caption");
+  assert.equal(followAutoTitle("First line", "First line", ""), "");
+  assert.equal(followAutoTitle("Campaign name", "First line", "Revised opening"), "Campaign name");
+  assert.equal(followAutoTitle("", "", "New caption"), "");
+});
 
 test("a draft target is a real calendar day and does not become a publishing job", () => {
   const draft = { id: "dated-draft", title: "Launch idea", source: "Later", selected: [], variants: {},
