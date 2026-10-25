@@ -1,0 +1,26 @@
+# Optional judging demo. Creating this Blueprint starts a paid Render service.
+services:
+  - type: web
+    name: plypost-judging-demo
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    disk:
+      name: plypost-data
+      mountPath: /opt/render/project/src/storage
+      sizeGB: 1
+    envVars:
+      - key: PLYPOST_DB_PATH
+        value: /opt/render/project/src/storage/plypost.sqlite
+      - key: PLYPOST_MASTODON_SCHEDULE_ENABLED
+        value: "false"
+      - key: PLYPOST_OWNER_EMAIL
+        sync: false
+      - key: PLYPOST_OWNER_PASSWORD_HASH
+        sync: false
+      - key: NEBIUS_API_KEY
+        sync: false

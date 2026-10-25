@@ -2,7 +2,7 @@
 
 This demo uses a separate SQLite database and a fictional brand. It never connects a social account or sends a post. The one item marked posted is an example of a **manual status update**, not a real publication. The calendar job is a simulation.
 
-From the repository root, with Node.js 24.14+ and dependencies installed:
+From the repository root, with Node.js 24.14 or newer in the 24.x series and dependencies installed:
 
 ```powershell
 npm install

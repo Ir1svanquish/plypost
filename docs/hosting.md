@@ -13,10 +13,18 @@ Prices and limits checked 2026-10-25; confirm them in the provider dashboard bef
 
 Render's free web service cannot attach a persistent disk and can restart with an empty filesystem, so it is unsuitable for an editable demo that must survive until judging ends. See [Render's free-service limits](https://render.com/docs/free). These are hosting options, not services already created or paid for.
 
+## Prepared Render setup
+
+The repository includes [`render.yaml`](../render.yaml) for an optional judging copy. It specifies one Starter web service in Singapore, a 1 GB persistent disk for SQLite, `/api/health`, and manual deploys after the first deployment. The service uses `npm ci && npm run build` and `npm start`; Next.js reads Render's `PORT` environment variable. The Node engine range is limited to Node 24 so a future major release cannot be selected silently.
+
+The Blueprint prompts for a dedicated owner email, password hash and Nebius key when it is first created. Their values are absent from Git. Render does not re-prompt for `sync: false` values on later Blueprint updates, so rotate or replace them in the service settings. The Blueprint turns Mastodon scheduling off and does not start a worker. A disk-backed service uses a paid plan; merely keeping this file in Git does not create a service. The Blueprint has not been validated against a Render account or deployed there.
+
+Local checks on 2026-10-25: `render.yaml` passes [Render's published JSON Schema](https://render.com/docs/blueprint-spec#validating-blueprints). With a separate fictional SQLite database, `npm start` picked up `PORT`, served `/api/health`, accepted the demo login, and returned the saved workspace. A new test draft remained available after stopping and restarting the production server. This checks the app's single-process deployment shape; it does not measure Render's memory limit or prove the hosted service works.
+
 ## Deployment shape
 
-1. Connect a **copy of the repository** to the chosen host. Keep source visibility private until the public-release review. The repository now includes an MIT license.
-2. Use Node.js 24.14+, `npm ci` and `npm run build`. Start one instance with `next start` listening on `0.0.0.0` and the host's `PORT`. Set health check path to `/api/health`.
+1. Connect the repository to the chosen host only after reviewing its requested GitHub access and cost. Keep source visibility private until the public-release review. The repository includes an MIT license.
+2. Use Node.js 24.14.x or newer within major version 24, `npm ci` and `npm run build`. Start one instance with `next start` listening on `0.0.0.0` and the host's `PORT`. Set health check path to `/api/health`.
 3. Attach persistent storage before first start. Set `PLYPOST_DB_PATH` to a file inside that mount. On Render's native Node runtime, a disk mounted at `/opt/render/project/src/storage` can use `/opt/render/project/src/storage/plypost.sqlite`; on Railway, a volume mounted at `/app/data` can use `/app/data/plypost.sqlite`.
 4. Set a dedicated `PLYPOST_OWNER_EMAIL`, a fresh `PLYPOST_OWNER_PASSWORD_HASH` and `NEBIUS_API_KEY` as server-side secrets. The random local demo password in `data/demo/login.txt` is not a hosted credential. Do not set `PLYPOST_LOCAL_DEMO_HTTP` on the host. Use the HTTPS address in judging instructions and provide the dedicated login details there.
 5. Start without the background worker or social account keys. Create or import only fictional sample content, then check login, editing, Nebius generation, persistence after restart, mobile layout and `/api/health` from a network outside the host. Record the public URL only after these checks pass.
