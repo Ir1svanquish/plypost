@@ -25,10 +25,14 @@ function tokenHash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+function credentialFingerprint(): string {
+  return createHash("sha256").update(process.env.PLYPOST_OWNER_PASSWORD_HASH || "").digest("hex");
+}
+
 export function createSession(userId: string): string {
   const token = randomBytes(32).toString("base64url");
-  database().prepare("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES (?,?,?)")
-    .run(tokenHash(token), userId, new Date(Date.now() + SESSION_SECONDS * 1000).toISOString());
+  database().prepare("INSERT INTO sessions(token_hash,user_id,expires_at,credential_fingerprint) VALUES (?,?,?,?)")
+    .run(tokenHash(token), userId, new Date(Date.now() + SESSION_SECONDS * 1000).toISOString(), credentialFingerprint());
   return token;
 }
 
@@ -47,9 +51,9 @@ export function currentUser(request: Request): string | null {
   const token = readToken(request);
   const configured = owner();
   if (!token || !configured) return null;
-  const row = database().prepare("SELECT user_id FROM sessions WHERE token_hash=? AND expires_at > ?")
-    .get(tokenHash(token), new Date().toISOString()) as { user_id: string } | undefined;
-  return row?.user_id === configured ? configured : null;
+  const row = database().prepare("SELECT user_id,credential_fingerprint FROM sessions WHERE token_hash=? AND expires_at > ?")
+    .get(tokenHash(token), new Date().toISOString()) as { user_id: string; credential_fingerprint: string | null } | undefined;
+  return row?.user_id === configured && row.credential_fingerprint === credentialFingerprint() ? configured : null;
 }
 
 export function sameOrigin(request: Request): boolean {

@@ -145,6 +145,10 @@ export function database(): DatabaseSync {
       ON bluesky_publish_attempts(user_id, created_at DESC);
   `);
   const oauthColumns = db.prepare("PRAGMA table_info(mastodon_oauth_states)").all() as { name: string }[];
+  const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+  if (!sessionColumns.some((column) => column.name === "credential_fingerprint")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN credential_fingerprint TEXT");
+  }
   if (!oauthColumns.some((column) => column.name === "session_hash")) {
     db.exec("ALTER TABLE mastodon_oauth_states ADD COLUMN session_hash TEXT");
   }
