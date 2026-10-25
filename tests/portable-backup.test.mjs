@@ -11,7 +11,7 @@ import { createMedia, getMedia, listMedia } from "../src/lib/server/media.ts";
 import { createVideo, getVideo, listVideos } from "../src/lib/server/video.ts";
 import { addAssisted, addSchedule, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
-import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
+import { exportPortableBackup, importPortableBackup, streamPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { approveStrategyIdea, createWeeklyPlan, listStrategy, saveBrandBrief } from "../src/lib/server/strategy.ts";
 import { getSlotSettings, saveSlotSettings } from "../src/lib/server/slots.ts";
 import { GET, POST } from "../src/app/api/backup/route.ts";
@@ -194,6 +194,9 @@ test("portable backup route enforces owner session, origin, type, and private re
   assert.match(download.headers.get("content-disposition"), /plypost-portable/);
   assert.match(download.headers.get("cache-control"), /no-store/);
   const archive = await download.json();
+  const expected = JSON.parse(exportPortableBackup(owner));
+  expected.exportedAt = archive.exportedAt;
+  assert.deepEqual(archive, expected);
   assert.equal((await POST(backupRequest(archive, { cookie, origin: "https://evil.example" }))).status, 403);
   assert.equal((await POST(backupRequest(archive, { cookie, contentType: "text/plain" }))).status, 415);
   assert.equal((await POST(backupRequest("not-json", { cookie }))).status, 400);
@@ -223,6 +226,9 @@ test("full backup restores video bytes and remaps draft and handoff references",
   const handoff = addAssisted(sourceOwner, { id: randomUUID(), title: "Video launch", destination: "youtube",
     text: "Watch this", videoId: video.id, scheduledFor: createdAt, createdAt, status: "queued" });
   const archive = JSON.parse(exportPortableBackup(sourceOwner));
+  const streamed = JSON.parse(await new globalThis.Response(streamPortableBackup(sourceOwner)).text());
+  archive.exportedAt = streamed.exportedAt;
+  assert.deepEqual(streamed, archive);
   assert.equal(archive.videos.length, 1);
   assert.equal(archive.drafts[0].videoId, video.id);
   assert.equal(archive.assisted[0].videoId, video.id);

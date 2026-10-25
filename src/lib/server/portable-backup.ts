@@ -397,11 +397,11 @@ function ownerDataFingerprint(db: ReturnType<typeof database>, userId: string): 
   return hash.digest("hex");
 }
 
-export function exportPortableBackup(userId: string): string {
+function preparePortableSnapshot(userId: string) {
   // Create asset tables before the snapshot transaction; no schema DDL is run inside it.
   listMedia(userId);
   listVideos(userId);
-  const snapshot = transaction((db) => {
+  return transaction((db) => {
     const rows = db.prepare("SELECT id,payload,timezone,status,attempts,next_attempt_at,last_error,completed_at,receipts FROM jobs WHERE user_id=? ORDER BY scheduled_for,id")
       .all(userId) as StoredJob[];
     if (rows.some((row) => row.status === "running")) throw new BackupError("Wait for running planned items before exporting a backup.", 409);
@@ -440,13 +440,17 @@ export function exportPortableBackup(userId: string): string {
     const slotSettings = slotRow ? JSON.parse(slotRow.payload) as SlotSettings : null;
     return { drafts, assisted, jobs, media, videos, brandBrief, voiceProfile, weeklyPlans, slotSettings };
   });
+}
+
+export function exportPortableBackup(userId: string): string {
+  const snapshot = preparePortableSnapshot(userId);
   const archive: PortableBackup = {
     format: "plypost-portable", version: 5, exportedAt: new Date().toISOString(),
     drafts: snapshot.drafts, jobs: snapshot.jobs, assisted: snapshot.assisted,
     brandBrief: snapshot.brandBrief, voiceProfile: snapshot.voiceProfile, weeklyPlans: snapshot.weeklyPlans,
     slotSettings: snapshot.slotSettings,
     media: snapshot.media.map((row) => {
-      const body = Buffer.from(row.body);
+      const body = Buffer.from(row.body.buffer as ArrayBuffer, row.body.byteOffset, row.body.byteLength);
       if (body.length !== row.byte_size || createHash("sha256").update(body).digest("hex") !== row.sha256) {
         invalid("Stored image integrity check failed; backup was not created.");
       }
@@ -457,7 +461,7 @@ export function exportPortableBackup(userId: string): string {
       };
     }),
     videos: snapshot.videos.map((row) => {
-      const body = Buffer.from(row.body);
+      const body = Buffer.from(row.body.buffer as ArrayBuffer, row.body.byteOffset, row.body.byteLength);
       if (body.length !== row.byte_size || !validVideoBytes(row.mime_type, body) ||
           createHash("sha256").update(body).digest("hex") !== row.sha256) {
         invalid("Stored video integrity check failed; backup was not created.");
@@ -466,6 +470,15 @@ export function exportPortableBackup(userId: string): string {
         sizeBytes: row.byte_size, createdAt: row.created_at, sha256: row.sha256, base64: body.toString("base64") };
     }),
   };
+  validateExportArchive(archive);
+  const serialized = JSON.stringify(archive);
+  if (Buffer.byteLength(serialized) > MAX_PORTABLE_BACKUP_BYTES) {
+    throw new BackupError("Backup exceeds the 192 MiB portable archive limit.", 413);
+  }
+  return serialized;
+}
+
+function validateExportArchive(archive: PortableBackup): void {
   const validated = validateWorkspace(archive);
   validateStrategy(archive);
   validateVoiceProfile(archive);
@@ -491,11 +504,86 @@ export function exportPortableBackup(userId: string): string {
   for (const item of [...validated.drafts, ...validated.assisted]) {
     if (item.videoId && !videoIds.has(item.videoId)) invalid("Stored work references a video that is missing from the library.");
   }
-  const serialized = JSON.stringify(archive);
-  if (Buffer.byteLength(serialized) > MAX_PORTABLE_BACKUP_BYTES) {
+}
+
+/** Prepare the full snapshot and validate it before sending any response bytes. */
+export function streamPortableBackup(userId: string): ReadableStream<Uint8Array> {
+  const snapshot = preparePortableSnapshot(userId);
+  const media = snapshot.media.map((row): PortableMedia => {
+    const body = Buffer.from(row.body.buffer as ArrayBuffer, row.body.byteOffset, row.body.byteLength);
+    if (body.length !== row.byte_size || createHash("sha256").update(body).digest("hex") !== row.sha256) {
+      invalid("Stored image integrity check failed; backup was not created.");
+    }
+    return { id: row.id, name: row.original_name, mimeType: row.mime_type, sizeBytes: row.byte_size,
+      width: row.width, height: row.height, createdAt: row.created_at, sha256: row.sha256, base64: "" };
+  });
+  const videos = snapshot.videos.map((row): PortableVideo => {
+    const body = Buffer.from(row.body.buffer as ArrayBuffer, row.body.byteOffset, row.body.byteLength);
+    if (body.length !== row.byte_size || !validVideoBytes(row.mime_type, body) ||
+        createHash("sha256").update(body).digest("hex") !== row.sha256) {
+      invalid("Stored video integrity check failed; backup was not created.");
+    }
+    return { id: row.id, name: row.original_name, mimeType: row.mime_type,
+      sizeBytes: row.byte_size, createdAt: row.created_at, sha256: row.sha256, base64: "" };
+  });
+  const archive: PortableBackup = {
+    format: "plypost-portable", version: 5, exportedAt: new Date().toISOString(),
+    drafts: snapshot.drafts, jobs: snapshot.jobs, assisted: snapshot.assisted,
+    brandBrief: snapshot.brandBrief, voiceProfile: snapshot.voiceProfile, weeklyPlans: snapshot.weeklyPlans,
+    slotSettings: snapshot.slotSettings, media, videos,
+  };
+  validateExportArchive(archive);
+
+  const { media: unusedMedia, videos: unusedVideos, ...header } = archive;
+  void unusedMedia;
+  void unusedVideos;
+  const head = JSON.stringify(header).slice(0, -1) + ',"media":[';
+  const mediaPrefixes = media.map((item) => JSON.stringify(item).slice(0, -2));
+  const videoPrefixes = videos.map((item) => JSON.stringify(item).slice(0, -2));
+  const base64Size = (bytes: number) => Math.ceil(bytes / 3) * 4;
+  let byteLength = Buffer.byteLength(head) + Buffer.byteLength('],"videos":[]}');
+  for (let index = 0; index < media.length; index++) {
+    byteLength += Buffer.byteLength(mediaPrefixes[index]) + base64Size(media[index].sizeBytes) + 2 + (index ? 1 : 0);
+  }
+  for (let index = 0; index < videos.length; index++) {
+    byteLength += Buffer.byteLength(videoPrefixes[index]) + base64Size(videos[index].sizeBytes) + 2 + (index ? 1 : 0);
+  }
+  if (byteLength > MAX_PORTABLE_BACKUP_BYTES) {
     throw new BackupError("Backup exceeds the 192 MiB portable archive limit.", 413);
   }
-  return serialized;
+
+  function* pieces(): Generator<Uint8Array> {
+    yield Buffer.from(head);
+    for (let index = 0; index < media.length; index++) {
+      yield Buffer.from((index ? "," : "") + mediaPrefixes[index]);
+      const row = snapshot.media[index];
+      const body = Buffer.from(row.body.buffer as ArrayBuffer, row.body.byteOffset, row.body.byteLength);
+      for (let offset = 0; offset < body.length; offset += 48 * 1024) {
+        yield Buffer.from(body.subarray(offset, offset + 48 * 1024).toString("base64"));
+      }
+      yield Buffer.from('"}');
+    }
+    yield Buffer.from('],"videos":[');
+    for (let index = 0; index < videos.length; index++) {
+      yield Buffer.from((index ? "," : "") + videoPrefixes[index]);
+      const row = snapshot.videos[index];
+      const body = Buffer.from(row.body.buffer as ArrayBuffer, row.body.byteOffset, row.body.byteLength);
+      for (let offset = 0; offset < body.length; offset += 48 * 1024) {
+        yield Buffer.from(body.subarray(offset, offset + 48 * 1024).toString("base64"));
+      }
+      yield Buffer.from('"}');
+    }
+    yield Buffer.from(']}');
+  }
+  const iterator = pieces();
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const next = iterator.next();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+    cancel() { iterator.return(undefined); },
+  }, { highWaterMark: 0 });
 }
 
 export async function importPortableBackup(userId: string, raw: unknown) {

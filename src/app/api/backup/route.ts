@@ -1,5 +1,5 @@
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { BackupError, exportPortableBackup, importPortableBackup, MAX_PORTABLE_BACKUP_BYTES } from "@/lib/server/portable-backup";
+import { BackupError, streamPortableBackup, importPortableBackup, MAX_PORTABLE_BACKUP_BYTES } from "@/lib/server/portable-backup";
 
 export const runtime = "nodejs";
 
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
   const user = currentUser(request);
   if (!user) return Response.json({ error: "Sign in to continue." }, { status: 401, headers: privateHeaders });
   try {
-    const backup = exportPortableBackup(user);
+    const backup = streamPortableBackup(user);
     const date = new Date().toISOString().slice(0, 10);
     return new Response(backup, {
       headers: {
