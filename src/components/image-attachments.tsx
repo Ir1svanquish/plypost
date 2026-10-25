@@ -41,8 +41,8 @@ function isMediaAsset(value: unknown): value is MediaAsset {
     typeof media.url === "string";
 }
 
-function imageUrl(id: string) {
-  return `/api/media/${encodeURIComponent(id)}`;
+function imageUrl(id: string, thumbnail = false) {
+  return `/api/media/${encodeURIComponent(id)}${thumbnail ? "?thumb=1" : ""}`;
 }
 
 function fileSize(bytes: number) {
@@ -217,7 +217,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
       {missingCount > 0 && libraryLoaded && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><p role="status">{missingCount} saved {missingCount === 1 ? "image is" : "images are"} unavailable.</p><button type="button" onClick={() => setSelection(selected.map((item) => item.id))} disabled={disabled || uploading || deletingId !== null} className="font-semibold underline underline-offset-2 disabled:opacity-50">Remove unavailable</button></div>}
       {selected.length > 0 && <ul className="mt-4 grid gap-3 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
         <div className="flex min-w-0 gap-3">
-          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id)} alt={descriptions[item.id] || item.name} fill sizes="80px" className="object-cover" /></div>
+          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={descriptions[item.id] || item.name} fill sizes="80px" className="object-cover" /></div>
           <div className="flex min-w-0 flex-1 flex-col justify-between">
             <span className="truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{index + 1}. {item.name}</span>
             <div className="flex items-center gap-1">
@@ -238,7 +238,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
         {loading ? <p role="status" className="text-[12px] text-[var(--text-muted)]">Loading images…</p> : media.length === 0 ? <p className="text-[12px] text-[var(--text-muted)]">No images uploaded yet.</p> : <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Image library">{media.map((item) => {
           const attached = selectedIds.includes(item.id);
           return <li key={item.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
-            <div className="relative aspect-square overflow-hidden bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id)} alt={item.name} fill sizes="(max-width: 640px) 50vw, 160px" className="object-cover" /></div>
+            <div className="relative aspect-square overflow-hidden bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={item.name} fill sizes="(max-width: 640px) 50vw, 160px" className="object-cover" /></div>
             <div className="p-2"><p className="truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{item.name}</p><p className="mt-0.5 text-[10px] text-[var(--text-soft)]">{fileSize(item.sizeBytes)} · {item.width} × {item.height}</p>
               <div className="mt-2 flex items-center justify-between gap-1"><button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null || (!attached && selectedIds.length >= MAX_IMAGES)} aria-pressed={attached} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">{attached ? <Check size={12} aria-hidden="true" /> : <ImagePlus size={12} aria-hidden="true" />}{attached ? "Added" : "Use"}</button><div className="flex items-center gap-0.5"><a href={imageUrl(item.id)} download={item.name} title={`Download ${item.name}`} aria-label={`Download ${item.name}`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><Download size={14} aria-hidden="true" /></a>{context === "draft" && <button type="button" onClick={() => { void deleteAsset(item); }} disabled={disabled || uploading || deletingId !== null} title={`Delete ${item.name} from library`} aria-label={`Delete ${item.name} from library`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50">{deletingId === item.id ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}</button>}</div></div>
             </div>

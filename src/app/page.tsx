@@ -14,6 +14,8 @@ import {
   RotateCcw,
   Send,
   UserRound,
+  Video,
+  X,
 } from "lucide-react";
 import { adaptDraft, characterCount, isPlatformId, platformDisplayIds, platformIds, platforms, type PlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
@@ -1691,6 +1693,15 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     <button type="button" aria-expanded={showAttachments} aria-controls="draft-media-panel" onClick={() => setShowAttachments((open) => !open)} className="absolute bottom-4 left-3 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 text-[12px] font-semibold text-[var(--text-secondary)] shadow-sm hover:bg-[var(--surface-hover)]"><Plus size={16} aria-hidden="true" />{mediaIds.length || videoId ? `${mediaIds.length} ${mediaIds.length === 1 ? "photo" : "photos"}${videoId ? " · 1 video" : ""}` : "Add photo or video"}</button>
                   </div>
                   <div className="mt-2 flex justify-end text-[12px] text-[var(--text-soft)]"><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
+                  {(mediaIds.length > 0 || videoId) && <ul aria-label="Attached media" className="mt-2 flex flex-wrap gap-2">
+                    {mediaIds.map((id, index) => <li key={id} className="relative h-16 w-16 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface-muted)]">
+                      <Image unoptimized src={`/api/media/${encodeURIComponent(id)}?thumb=1`} alt={`Attached photo ${index + 1}`} fill sizes="64px" className="object-cover" />
+                      <button type="button" aria-label={`Remove photo ${index + 1} from draft`} title="Remove from draft" disabled={mediaBusy || restoringBackup} onClick={() => { editorRevision.current += 1; setMediaIds((current) => current.filter((item) => item !== id)); }} className="absolute right-0.5 top-0.5 rounded-full bg-black/70 p-1 text-white hover:bg-black disabled:opacity-50"><X size={12} aria-hidden="true" /></button>
+                    </li>)}
+                    {videoId && <li className="relative flex h-16 min-w-24 items-center justify-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] px-3 text-[11px] font-semibold text-[var(--text-secondary)]"><Video size={17} aria-hidden="true" />Video
+                      <button type="button" aria-label="Remove video from draft" title="Remove from draft" disabled={videoBusy || restoringBackup} onClick={() => { editorRevision.current += 1; setVideoId(null); }} className="absolute right-0.5 top-0.5 rounded-full bg-[var(--surface)] p-1 text-[var(--text-secondary)] hover:text-[var(--danger)] disabled:opacity-50"><X size={12} aria-hidden="true" /></button>
+                    </li>}
+                  </ul>}
                   <div id="draft-media-panel" hidden={!showAttachments} className="mt-3 rounded-xl border border-[var(--line)] px-4 pb-4">
                     <div className="mt-3"><ImageAttachmentPicker
                     key={mediaPickerEpoch}

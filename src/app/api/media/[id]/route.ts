@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { deleteMedia, getMedia, MediaError } from "@/lib/server/media";
 
@@ -19,7 +20,17 @@ export async function GET(request: Request, context: Context) {
   const { id } = await context.params;
   const found = getMedia(user, id);
   if (!found) return NextResponse.json({ error: "Image not found." }, { status: 404, headers: noStore });
-  const download = new URL(request.url).searchParams.has("download");
+  const parameters = new URL(request.url).searchParams;
+  const download = parameters.has("download");
+  if (!download && parameters.has("thumb")) {
+    const thumbnail = await sharp(found.bytes)
+      .resize({ width: 256, height: 256, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 72 })
+      .toBuffer();
+    return new Response(new Uint8Array(thumbnail), {
+      headers: { ...noStore, "Content-Type": "image/webp", "Content-Length": String(thumbnail.length) },
+    });
+  }
   return new Response(new Uint8Array(found.bytes.buffer as ArrayBuffer, found.bytes.byteOffset, found.bytes.byteLength), {
     headers: {
       ...noStore,
