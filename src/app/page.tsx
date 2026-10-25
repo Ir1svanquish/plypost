@@ -27,6 +27,7 @@ import { BatchHandoffPanel, type BatchHandoffItem, type BatchPrepareResult } fro
 import { WeeklySlotsPanel } from "@/components/weekly-slots-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
+import { AIReviewPanel } from "@/components/ai-review-panel";
 import { PlatformPreview } from "@/components/platform-preview";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
 import { VideoAttachmentPicker } from "@/components/video-attachment-picker";
@@ -37,6 +38,7 @@ import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
+import type { OverLimitVariant } from "@/lib/generated-variants";
 import { WORKSPACE_KEY, draftTitle, emptyWorkspace, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 
 const sampleDraft =
@@ -49,6 +51,13 @@ const interimSampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nsoflow helps you shape one draft for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
 
 type Provider = "nvidia" | "nebius";
+type AIReview = {
+  source: string;
+  original: Partial<Record<PlatformId, string>>;
+  suggestions: Record<PlatformId, string>;
+  overLimit: OverLimitVariant[];
+  revision: number;
+};
 type WorkspaceView = "compose" | "drafts" | "schedule" | "assisted" | "account";
 const viewLabels: Record<WorkspaceView, string> = {
   compose: "Create", drafts: "Drafts", schedule: "Plan", assisted: "Assisted", account: "Account",
@@ -150,6 +159,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const mediaBusyRef = useRef(false);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [aiUndo, setAiUndo] = useState<Partial<Record<PlatformId, string>> | null>(null);
+  const [aiReview, setAiReview] = useState<AIReview | null>(null);
+  const [aiApplyIds, setAiApplyIds] = useState<PlatformId[]>([]);
   const editorRevision = useRef(0);
   const [provider, setProvider] = useState<Provider>("nebius");
   const [notice, setNotice] = useState<Notice>(null);
@@ -583,7 +594,6 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Add a source draft before asking AI to adapt it." });
       return;
     }
-    if (platformIds.some((id) => variants[id] !== undefined) && !window.confirm("Replace the current platform drafts with new AI versions? You can undo this change afterward.")) return;
     const revisionAtStart = editorRevision.current;
     const previousVariants = { ...variants };
     setGenerating(true);
@@ -594,29 +604,46 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source, provider }),
       });
-      const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: { platform: PlatformId; count: number; limit: number; byteCount?: number; byteLimit?: number }[] } = await response.json();
+      const data: { error?: string; variants?: Record<PlatformId, string>; overLimit?: OverLimitVariant[] } = await response.json();
       if (!response.ok) throw new Error(data.error || "AI adaptation failed.");
       if (!data.variants) throw new Error("AI adaptation returned no drafts.");
       if (editorRevision.current !== revisionAtStart) {
         setNotice({ kind: "error", text: "The editor changed while AI was working, so your edits were kept. Generate again when ready." });
         return;
       }
-      setAiUndo(previousVariants);
-      editorRevision.current += 1;
-      setVariants(data.variants);
-      const overLimit = data.overLimit ?? [];
-      setNotice(overLimit.length ? {
-        kind: "error",
-        text: `AI drafts are ready, but ${overLimit.map(({ platform, count, limit, byteCount, byteLimit }) =>
-          byteCount !== undefined && byteLimit !== undefined
-            ? `${platforms[platform].name} is ${byteCount}/${byteLimit} bytes`
-            : `${platforms[platform].name} is ${count}/${limit} characters`).join("; ")}. Shorten them before sharing.`,
-      } : { kind: "success", text: "Four platform drafts are ready. Check facts and tone before sharing." });
+      setAiReview({ source, original: previousVariants, suggestions: data.variants, overLimit: data.overLimit ?? [], revision: revisionAtStart });
+      setAiApplyIds(platformDisplayIds.filter((id) => selected.includes(id)));
+      setNotice({ kind: "success", text: "Four suggestions are ready. Compare them below and choose what to apply." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "AI adaptation failed." });
     } finally {
       setGenerating(false);
     }
+  }
+
+  function applyAIReview() {
+    if (!aiReview || generating || aiApplyIds.length === 0) return;
+    if (editorRevision.current !== aiReview.revision || source !== aiReview.source ||
+        platformIds.some((id) => variants[id] !== aiReview.original[id])) {
+      setNotice({ kind: "error", text: "The editor changed after AI generated these suggestions. Generate again before applying them." });
+      return;
+    }
+    const chosen = platformDisplayIds.filter((id) => aiApplyIds.includes(id));
+    const previous = { ...variants };
+    const next = { ...variants };
+    for (const id of chosen) next[id] = aiReview.suggestions[id];
+    editorRevision.current += 1;
+    setAiUndo(previous);
+    setVariants(next);
+    setAiReview(null);
+    const overLimit = aiReview.overLimit.filter(({ platform }) => chosen.includes(platform));
+    setNotice(overLimit.length ? {
+      kind: "error",
+      text: `Applied ${chosen.length} selected versions. ${overLimit.map(({ platform, count, limit, byteCount, byteLimit }) =>
+        byteCount !== undefined && byteLimit !== undefined
+          ? `${platforms[platform].name} is ${byteCount}/${byteLimit} bytes`
+          : `${platforms[platform].name} is ${count}/${limit} characters`).join("; ")}. Shorten them before sharing.`,
+    } : { kind: "success", text: `Applied ${chosen.length} selected ${chosen.length === 1 ? "version" : "versions"}. Check facts and tone before sharing.` });
   }
 
   async function simulatePublish() {
@@ -727,6 +754,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     editorRevision.current += 1;
     resetMediaPicker();
     setAiUndo(null);
+    setAiReview(null);
     const prepareHandoffs = next.kind === "draft" && Boolean(next.prepareHandoffs);
     if (prepareHandoffs && next.kind === "draft") {
       batchLaunchCounter.current += 1;
@@ -1447,8 +1475,23 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                   </div>
                   <details className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
                     <summary className="cursor-pointer text-[13px] font-bold text-[var(--text-secondary)]">Adapt with AI <span className="ml-1 text-[11px] font-normal text-[var(--text-soft)]">Optional · Nemotron</span></summary>
-                    <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nebius">Nebius Token Factory · Nemotron</option><option value="nvidia">NVIDIA API · separate key</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : "Generate variants"}</button></div>
-                    {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
+                    <div className="mt-4 flex flex-col gap-3 border-t border-[var(--line)] pt-4 sm:flex-row sm:items-end"><div className="relative min-w-0 flex-1"><label htmlFor="provider" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">AI provider</label><select id="provider" value={provider} onChange={(event) => setProvider(event.target.value as Provider)} className="w-full appearance-none rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 pr-9 text-[14px] font-semibold text-[var(--text)] outline-none focus:border-[var(--accent-border)]"><option value="nebius">Nebius Token Factory · Nemotron</option><option value="nvidia">NVIDIA API · separate key</option></select><ChevronDown size={15} className="pointer-events-none absolute bottom-3.5 right-3.5 text-[var(--text-soft)]" /></div><button type="button" onClick={generateVariants} disabled={generating || !source.trim()} className="gradient-button inline-flex h-[45px] shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-[13px] font-bold text-white"><WandSparkles size={16} /> {generating ? "Adapting..." : aiReview ? "Regenerate suggestions" : "Generate variants"}</button></div>
+                    {aiReview && <AIReviewPanel
+                      source={aiReview.source}
+                      original={aiReview.original}
+                      suggestions={aiReview.suggestions}
+                      overLimit={aiReview.overLimit}
+                      selected={aiApplyIds}
+                      stale={editorRevision.current !== aiReview.revision || source !== aiReview.source ||
+                        platformIds.some((id) => variants[id] !== aiReview.original[id])}
+                      busy={generating}
+                      onToggle={(id) => setAiApplyIds((current) => current.includes(id)
+                        ? current.filter((item) => item !== id)
+                        : platformDisplayIds.filter((item) => current.includes(item) || item === id))}
+                      onApply={applyAIReview}
+                      onDiscard={() => { setAiReview(null); setNotice(null); }}
+                    />}
+                    {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setAiReview(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   </details>
                   <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3" open={plannedDate ? true : undefined}>
                     <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Draft target date · {plannedDate || "optional"}</summary>
