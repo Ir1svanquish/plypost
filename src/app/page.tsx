@@ -1178,7 +1178,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     try {
       await changeWorkspace("add-schedule", { item: post, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
       setScheduleTime("");
-      setNotice({ kind: "success", text: "Added to this computer's plan. The worker will simulate it when due." });
+      setNotice({ kind: "success", text: "Added to the publishing plan. A running worker will simulate it when due." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not add plan item." });
     }
@@ -1673,7 +1673,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         </header>
 
         <main className="app-main mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
-          {view === "schedule" && schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Start <code>npm run worker</code> on this computer to process scheduled items.</div>}
+          {view === "schedule" && schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Scheduled items will wait until a worker runs for this Plypost installation.</div>}
           {legacyStorageError && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Older browser data could not be validated. It was left unchanged; check it before clearing this browser's storage.</div>}
           {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} drafts, {legacyWorkspace.schedule.length} planned items and {legacyWorkspace.assisted.length} assisted items in older browser storage. Review before moving them into this account.</span><button type="button" onClick={() => { setLegacyImportError(null); setLegacyReviewOpen(true); }} className="font-bold text-[var(--accent-text)]">Review migration →</button></div>}
           {view === "compose" && <div id="compose" className="section-anchor mx-auto max-w-[850px]">
@@ -1718,7 +1718,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                     /></div>
                     <div className="mt-4"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { editorRevision.current += 1; setVideoId(id); }} onBusyChange={(busy) => { videoBusyRef.current = busy; setVideoBusy(busy); }} disabled={restoringBackup} /></div>
                   </div>
-                  <CaptionComposer source={source} revision={editorRevision.current} mediaIds={mediaIds} videoId={videoId} selectedCount={selected.length} generating={generating} hasReview={Boolean(aiReview)}
+                  <CaptionComposer source={source} revision={editorRevision.current} editorEpoch={mediaPickerEpoch} profileRefreshEpoch={strategyRefreshEpoch} mediaIds={mediaIds} videoId={videoId} selectedCount={selected.length} generating={generating} hasReview={Boolean(aiReview)}
                     onGenerate={(useVoice) => { void generateVariants(useVoice); }}
                     onUseDraft={(draft, expectedSource, expectedRevision) => {
                       if (source !== expectedSource || editorRevision.current !== expectedRevision || !draft || characterCount(draft) > 3000) return false;
@@ -1914,7 +1914,7 @@ export default function Home() {
   return <div className="app-shell flex min-h-screen items-center justify-center px-5 py-10"><div className="panel-border soft-shadow w-full max-w-md rounded-[22px] bg-[var(--surface)] p-8">
     <div className="mb-7 flex items-center gap-3"><Image src="/plypost-mark.svg" alt="" width={44} height={44} className="h-11 w-11 shrink-0" /><span className="text-[25px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
     <h1 className="text-[22px] font-bold text-[var(--text)]">Your workspace, ready when you are.</h1>
-    <p className="mt-2 text-[13px] leading-5 text-[var(--text-muted)]">Sign in to save drafts and run scheduled simulations on this computer.</p>
+    <p className="mt-2 text-[13px] leading-5 text-[var(--text-muted)]">Sign in to save drafts and manage scheduled simulations in this Plypost installation.</p>
     {!session?.configured && session !== null ? <p role="alert" className="mt-5 rounded-xl bg-[var(--warning-soft)] p-3 text-[13px] text-[var(--warning)]">Owner sign-in is not configured. Follow the setup steps in README.md.</p> : <form onSubmit={signIn} className="mt-7 space-y-4">
       <div><label htmlFor="login-email" className="mb-1.5 block text-[12px] font-bold text-[var(--text-secondary)]">Email</label><input id="login-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" /></div>
       <div><label htmlFor="login-password" className="mb-1.5 block text-[12px] font-bold text-[var(--text-secondary)]">Password</label><input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" /></div>

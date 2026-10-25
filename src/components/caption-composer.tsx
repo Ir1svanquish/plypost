@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Sparkles } from "lucide-react";
 import { AiLiteralNotice } from "@/components/ai-literal-notice";
 import type { VoiceProfile } from "@/lib/ai-studio";
@@ -9,6 +9,8 @@ import { captionStyles, type CaptionStyleId } from "@/lib/caption-styles";
 type Props = {
   source: string;
   revision: number;
+  editorEpoch: number;
+  profileRefreshEpoch: number;
   mediaIds: readonly string[];
   videoId: string | null;
   selectedCount: number;
@@ -32,7 +34,7 @@ async function responseError(response: Response, fallback: string) {
   return body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : fallback;
 }
 
-export function CaptionComposer({ source, revision, mediaIds, videoId, selectedCount, generating, hasReview, onGenerate, onUseDraft }: Props) {
+export function CaptionComposer({ source, revision, editorEpoch, profileRefreshEpoch, mediaIds, videoId, selectedCount, generating, hasReview, onGenerate, onUseDraft }: Props) {
   const [profile, setProfile] = useState<VoiceProfile | null>(null);
   const [style, setStyle] = useState<CaptionStyleId>("default");
   const [guideDraft, setGuideDraft] = useState<string | null>(null);
@@ -42,6 +44,23 @@ export function CaptionComposer({ source, revision, mediaIds, videoId, selectedC
   const [busy, setBusy] = useState<"voice" | "caption" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const captionRequest = useRef<AbortController | null>(null);
+  const captionRequestId = useRef(0);
+  const currentEditorEpoch = useRef(editorEpoch);
+  currentEditorEpoch.current = editorEpoch;
+
+  useEffect(() => {
+    captionRequestId.current += 1;
+    captionRequest.current?.abort();
+    captionRequest.current = null;
+    setBusy((current) => current === "caption" ? null : current);
+    setSuggestion(null);
+    setSelectedImageId("");
+    setError("");
+    setNotice("");
+  }, [editorEpoch]);
+
+  useEffect(() => () => captionRequest.current?.abort(), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -50,10 +69,13 @@ export function CaptionComposer({ source, revision, mediaIds, videoId, selectedC
         if (!response.ok) throw new Error(await responseError(response, "Could not load your writing style."));
         return response.json() as Promise<{ voiceProfile: VoiceProfile | null }>;
       })
-      .then((data) => { if (!controller.signal.aborted) setProfile(data.voiceProfile); })
+      .then((data) => { if (!controller.signal.aborted) {
+        setProfile(data.voiceProfile);
+        if (!data.voiceProfile) setStyle("default");
+      } })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not load your writing style."); });
     return () => controller.abort();
-  }, []);
+  }, [profileRefreshEpoch]);
 
   async function analyze() {
     const examples = examplesFromText(oldPosts);
@@ -114,24 +136,34 @@ export function CaptionComposer({ source, revision, mediaIds, videoId, selectedC
     if (!canGenerate || working) return;
     const sourceAtStart = source;
     const revisionAtStart = revision;
+    const editorEpochAtStart = editorEpoch;
     const voiceUpdatedAt = style === "personal" ? profile?.updatedAt ?? null : null;
+    const controller = new AbortController();
+    const requestId = ++captionRequestId.current;
+    captionRequest.current = controller;
     setBusy("caption"); setError(""); setNotice(""); setSuggestion(null);
     try {
       const response = await fetch("/api/ai-studio", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", cache: "no-store",
+        signal: controller.signal,
         body: JSON.stringify(imageId
           ? { action: "caption-image", mediaId: imageId, context: source.trim(), style }
           : { action: "draft-from-notes", notes: source.trim(), style }),
       });
       if (!response.ok) throw new Error(await responseError(response, "Could not generate a caption."));
       const data = await response.json() as { draft?: string; caption?: string; observations?: string };
+      if (controller.signal.aborted || captionRequestId.current !== requestId || currentEditorEpoch.current !== editorEpochAtStart) return;
       const draft = imageId ? data.caption : data.draft;
       if (!draft?.trim()) throw new Error("No usable caption was returned.");
       setSuggestion({ source: sourceAtStart, revision: revisionAtStart, imageId, style,
         voiceUpdatedAt, observations: imageId ? data.observations ?? null : null, draft });
       setNotice("Check the facts and edit the suggestion before using it.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not generate a caption."); }
-    finally { setBusy(null); }
+    } catch (cause) {
+      if (!controller.signal.aborted && captionRequestId.current === requestId && currentEditorEpoch.current === editorEpochAtStart)
+        setError(cause instanceof Error ? cause.message : "Could not generate a caption.");
+    } finally {
+      if (captionRequestId.current === requestId) { captionRequest.current = null; setBusy(null); }
+    }
   }
 
   return <section aria-label="AI writing tools" className="mt-3">

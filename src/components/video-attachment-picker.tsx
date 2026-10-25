@@ -93,7 +93,7 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
   const selected = videos.find((item) => item.id === selectedId);
   return <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div><p className="text-[12px] font-bold text-[var(--text-secondary)]">Video clip · optional</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">Private on this device. MP4, WebM or MOV · up to 32 MiB. You upload it on the platform yourself.</p></div>
+      <div><p className="text-[12px] font-bold text-[var(--text-secondary)]">Video clip · optional</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">Saved privately in Plypost. MP4, WebM or MOV · up to 32 MiB. You upload it on the platform yourself.</p></div>
       <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] ${disabled || busy ? "opacity-50" : "hover:bg-[var(--accent-soft)]"}`}><Upload size={13} aria-hidden="true" /> {busy ? "Saving…" : "Add video"}<input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" disabled={disabled || busy} className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} /></label>
     </div>
     {error && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">{error}</p>}
