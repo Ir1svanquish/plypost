@@ -674,7 +674,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         return;
       }
       setAiReview({ source, original: previousVariants, suggestions: data.variants, overLimit: data.overLimit ?? [], revision: revisionAtStart });
-      setAiApplyIds(platformDisplayIds.filter((id) => selected.includes(id)));
+      setAiApplyIds(selected.length ? platformDisplayIds.filter((id) => selected.includes(id)) : [...platformDisplayIds]);
       setNotice({ kind: "success", text: "Four suggestions are ready. Compare them below and choose what to apply." });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "AI adaptation failed." });
@@ -697,6 +697,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     editorRevision.current += 1;
     setAiUndo(previous);
     setVariants(next);
+    const nextSelected = platformDisplayIds.filter((id) => selected.includes(id) || chosen.includes(id));
+    setSelected(nextSelected);
+    if (!nextSelected.includes(active)) setActive(nextSelected[0]);
     setAiReview(null);
     const overLimit = aiReview.overLimit.filter(({ platform }) => chosen.includes(platform));
     setNotice(overLimit.length ? {
@@ -1533,62 +1536,20 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           {view === "schedule" && schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Start <code>npm run worker</code> on this computer to process scheduled items.</div>}
           {legacyStorageError && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Older browser data could not be validated. It was left unchanged; check it before clearing this browser's storage.</div>}
           {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} drafts, {legacyWorkspace.schedule.length} planned items and {legacyWorkspace.assisted.length} assisted items in older browser storage. Review before moving them into this account.</span><button type="button" onClick={() => { setLegacyImportError(null); setLegacyReviewOpen(true); }} className="font-bold text-[var(--accent-text)]">Review migration →</button></div>}
-          {view === "compose" && <div id="compose" className="section-anchor">
-          <div className="mb-6">
-            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Create</p>
-            <h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Write a post</h1>
-            <p className="mt-1 text-[14px] text-[var(--text-muted)]">Edit a version for each platform you select.</p>
+          {view === "compose" && <div id="compose" className="section-anchor mx-auto max-w-[850px]">
+          <div className="mb-5">
+            <h1 className="text-[28px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[32px]">Create a post</h1>
           </div>
-          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(370px,.95fr)]">
-            <div className="min-w-0 space-y-6">
+          <div className="space-y-5">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
-                <div className="flex flex-col items-start gap-3 border-b border-[var(--line)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-                  <div className="min-w-0"><h2 id="draft-heading" className="text-[17px] font-bold tracking-[-0.025em]">Draft editor</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Your message and its destinations, in one place.</p></div>
+                <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-4 sm:px-7">
+                  <h2 id="draft-heading" className="text-[14px] font-bold text-[var(--text)]">{currentDraftId ? "Edit draft" : "New post"}</h2>
                   <div className="flex shrink-0 items-center gap-3">{editorDirty && <span role="status" className="rounded-full bg-[var(--warning-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--warning)]">Unsaved changes</span>}<button type="button" onClick={newDraft} className="text-[12px] font-semibold text-[var(--accent-text)]">New draft</button></div>
                 </div>
-                <div className="p-6 sm:p-7">
-                  <label htmlFor="draft-name" className="mb-2 block text-[12px] font-bold text-[var(--text-secondary)]">Draft name <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
-                  <input id="draft-name" value={title} onChange={(event) => { editorRevision.current += 1; setTitle(event.target.value); }} maxLength={120} placeholder="Give this idea a name" className="mb-5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" />
-                  <label htmlFor="source-draft" className="mb-2 block text-[13px] font-bold text-[var(--text)]">Your message</label>
-                  <textarea id="source-draft" value={source} onChange={(event) => { editorRevision.current += 1; setSource(event.target.value); setNotice(null); }} placeholder="What's on your mind? Add a launch update, insight, or idea to share..." maxLength={3000} className="min-h-[194px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[15px] leading-[1.75] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
-                  <div className="mt-2 flex items-center justify-between text-[12px] text-[var(--text-soft)]"><span>Fine-tune each version in the preview.</span><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
-                  <ImageAttachmentPicker
-                    key={mediaPickerEpoch}
-                    selectedIds={mediaIds}
-                    descriptions={mediaAltById}
-                    disabled={restoringBackup}
-                    onChange={(ids) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) { editorRevision.current += 1; setMediaIds(ids); } }}
-                    onDescriptionChange={(id, description) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) { editorRevision.current += 1; setMediaAltById((current) => ({ ...current, [id]: description })); } }}
-                    onBusyChange={(busy) => {
-                      if (mediaPickerEpochRef.current !== mediaPickerEpoch) return;
-                      mediaBusyRef.current = busy;
-                      setMediaBusy(busy);
-                    }}
-                  />
-                  <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3" open={videoId ? true : undefined}>
-                    <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Video for manual posts · {videoId ? "attached" : "optional"}</summary>
-                    <div className="mt-3"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { editorRevision.current += 1; setVideoId(id); }} onBusyChange={(busy) => { videoBusyRef.current = busy; setVideoBusy(busy); }} disabled={restoringBackup} /></div>
-                  </details>
-                  <div className="mt-6 border-t border-[var(--line)] pt-5">
-                    <div className="mb-3 flex items-center justify-between"><h3 className="text-[13px] font-bold text-[var(--text)]">Photo &amp; text-first</h3><span className="text-[12px] text-[var(--text-muted)]">{selected.length} previews selected</span></div>
-                    <p className="mb-2 text-[11px] font-semibold text-[var(--text-muted)]">Edit a preview for each platform</p>
-                    <div role="group" aria-label="Editable photo and text destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                      {platformDisplayIds.map((id) => {
-                        const isSelected = selected.includes(id);
-                        return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition sm:gap-2 sm:px-3 ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" /><span className="min-w-0 truncate">{platforms[id].name}</span><span className={`ml-auto hidden h-4 w-4 shrink-0 items-center justify-center rounded border sm:flex ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
-                      })}
-                    </div>
-                    <p className="mb-2 mt-4 text-[11px] font-semibold text-[var(--text-muted)]">More platforms · prepare a manual post</p>
-                    <div role="group" aria-label="Manual photo and text destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                      {assistedTextImageOnlyDisplayIds.map((id) => <button key={id} type="button" onClick={() => openManualComposer(id)} aria-label={`Prepare a manual post for ${assistedDestinations[id].name}`} className="inline-flex min-w-0 items-center justify-between gap-1.5 rounded-xl border border-[var(--line)] bg-[var(--field)] px-2 py-2 text-[11px] font-semibold text-[var(--text-secondary)] transition hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] sm:px-3 sm:text-[12px]"><span className="truncate">{id === "facebook" ? "Facebook" : assistedDestinations[id].name}</span><ArrowRight size={13} className="shrink-0" aria-hidden="true" /></button>)}
-                    </div>
-                    <div className="mt-4 border-t border-[var(--line)] pt-4">
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="text-[13px] font-bold text-[var(--text)]">Video-first</h3><span className="text-[11px] text-[var(--text-muted)]">Manual post preparation</span></div>
-                      <div role="group" aria-label="Video-first destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                        {assistedVideoDisplayIds.map((id) => <button key={id} type="button" onClick={() => openManualComposer(id)} className="inline-flex min-w-0 items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] transition hover:border-[var(--accent-border)] hover:text-[var(--accent-text)]"><span className="truncate">{assistedDestinations[id].name}</span><ArrowRight size={13} className="shrink-0" aria-hidden="true" /></button>)}
-                      </div>
-                    </div>
-                  </div>
+                <div className="px-5 pb-5 pt-6 sm:px-7 sm:pb-7">
+                  <label htmlFor="source-draft" className="sr-only">Your message</label>
+                  <textarea id="source-draft" value={source} onChange={(event) => { editorRevision.current += 1; setSource(event.target.value); setNotice(null); }} placeholder="What would you like to share?" maxLength={3000} className="min-h-[210px] w-full resize-y rounded-[15px] border border-[var(--line)] bg-[var(--field)] px-4 py-4 text-[16px] leading-[1.7] text-[var(--text)] outline-none transition placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)] focus:bg-[var(--surface)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                  <div className="mt-2 flex justify-end text-[12px] text-[var(--text-soft)]"><span className="tabular-nums">{characterCount(source)} / 3,000</span></div>
                   <AIWritingPanel source={source} mediaIds={mediaIds} generating={generating} hasReview={Boolean(aiReview)}
                     onGenerate={(useVoice) => { void generateVariants(useVoice); }}
                     onInsertCaption={(caption) => {
@@ -1600,65 +1561,97 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
                       setNotice({ kind: "success", text: "Image caption added to the draft. Check details before sharing." });
                       return true;
                     }} />
-                    {aiReview && <AIReviewPanel
-                      source={aiReview.source}
-                      original={aiReview.original}
-                      suggestions={aiReview.suggestions}
-                      overLimit={aiReview.overLimit}
-                      selected={aiApplyIds}
-                      stale={editorRevision.current !== aiReview.revision || source !== aiReview.source ||
-                        platformIds.some((id) => variants[id] !== aiReview.original[id])}
-                      busy={generating}
-                      onToggle={(id) => setAiApplyIds((current) => current.includes(id)
-                        ? current.filter((item) => item !== id)
-                        : platformDisplayIds.filter((item) => current.includes(item) || item === id))}
-                      onApply={applyAIReview}
-                      onDiscard={() => { setAiReview(null); setNotice(null); }}
-                    />}
-                    {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setAiReview(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
-                  <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3" open={plannedDate ? true : undefined}>
-                    <summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Draft target date · {plannedDate || "optional"}</summary>
+                  {aiReview && <AIReviewPanel
+                    source={aiReview.source}
+                    original={aiReview.original}
+                    suggestions={aiReview.suggestions}
+                    overLimit={aiReview.overLimit}
+                    selected={aiApplyIds}
+                    stale={editorRevision.current !== aiReview.revision || source !== aiReview.source ||
+                      platformIds.some((id) => variants[id] !== aiReview.original[id])}
+                    busy={generating}
+                    onToggle={(id) => setAiApplyIds((current) => current.includes(id)
+                      ? current.filter((item) => item !== id)
+                      : platformDisplayIds.filter((item) => current.includes(item) || item === id))}
+                    onApply={applyAIReview}
+                    onDiscard={() => { setAiReview(null); setNotice(null); }}
+                  />}
+                  {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setAiReview(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
+                  <details className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
+                    <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Add photos or video{mediaIds.length || videoId ? ` · ${mediaIds.length} ${mediaIds.length === 1 ? "photo" : "photos"}${videoId ? ", 1 video" : ""}` : ""}</summary>
+                    <div className="mt-3"><ImageAttachmentPicker
+                    key={mediaPickerEpoch}
+                    selectedIds={mediaIds}
+                    descriptions={mediaAltById}
+                    disabled={restoringBackup}
+                    onChange={(ids) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) { editorRevision.current += 1; setMediaIds(ids); } }}
+                    onDescriptionChange={(id, description) => { if (mediaPickerEpochRef.current === mediaPickerEpoch) { editorRevision.current += 1; setMediaAltById((current) => ({ ...current, [id]: description })); } }}
+                    onBusyChange={(busy) => {
+                      if (mediaPickerEpochRef.current !== mediaPickerEpoch) return;
+                      mediaBusyRef.current = busy;
+                      setMediaBusy(busy);
+                    }}
+                    /></div>
+                    <div className="mt-4"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { editorRevision.current += 1; setVideoId(id); }} onBusyChange={(busy) => { videoBusyRef.current = busy; setVideoBusy(busy); }} disabled={restoringBackup} /></div>
+                  </details>
+                  <div className="mt-5 border-t border-[var(--line)] pt-5">
+                    <div className="mb-3 flex items-center justify-between"><h3 className="text-[13px] font-bold text-[var(--text)]">Post to</h3><span className="text-[12px] text-[var(--text-muted)]">{selected.length} selected</span></div>
+                    <div role="group" aria-label="Editable photo and text destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                      {platformDisplayIds.map((id) => {
+                        const isSelected = selected.includes(id);
+                        return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition sm:gap-2 sm:px-3 ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" /><span className="min-w-0 truncate">{platforms[id].name}</span><span className={`ml-auto hidden h-4 w-4 shrink-0 items-center justify-center rounded border sm:flex ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
+                      })}
+                    </div>
+                    <details className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
+                      <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Other networks · manual posting</summary>
+                      <p className="mb-2 mt-4 text-[11px] font-semibold text-[var(--text-muted)]">Photo and text</p>
+                    <div role="group" aria-label="Manual photo and text destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                      {assistedTextImageOnlyDisplayIds.map((id) => <button key={id} type="button" onClick={() => openManualComposer(id)} aria-label={`Prepare a manual post for ${assistedDestinations[id].name}`} className="inline-flex min-w-0 items-center justify-between gap-1.5 rounded-xl border border-[var(--line)] bg-[var(--field)] px-2 py-2 text-[11px] font-semibold text-[var(--text-secondary)] transition hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] sm:px-3 sm:text-[12px]"><span className="truncate">{id === "facebook" ? "Facebook" : assistedDestinations[id].name}</span><ArrowRight size={13} className="shrink-0" aria-hidden="true" /></button>)}
+                    </div>
+                    <div className="mt-4 border-t border-[var(--line)] pt-4">
+                      <h4 className="mb-2 text-[11px] font-semibold text-[var(--text-muted)]">Video</h4>
+                      <div role="group" aria-label="Video-first destinations" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                        {assistedVideoDisplayIds.map((id) => <button key={id} type="button" onClick={() => openManualComposer(id)} className="inline-flex min-w-0 items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] transition hover:border-[var(--accent-border)] hover:text-[var(--accent-text)]"><span className="truncate">{assistedDestinations[id].name}</span><ArrowRight size={13} className="shrink-0" aria-hidden="true" /></button>)}
+                      </div>
+                    </div>
+                    </details>
+                  </div>
+                  <details className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
+                    <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Draft details{plannedDate ? ` · ${plannedDate}` : ""}</summary>
+                    <label htmlFor="draft-name" className="mb-2 mt-4 block text-[12px] font-bold text-[var(--text-secondary)]">Draft name <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
+                    <input id="draft-name" value={title} onChange={(event) => { editorRevision.current += 1; setTitle(event.target.value); }} maxLength={120} placeholder="Give this idea a name" className="w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[14px] outline-none focus:border-[var(--accent-border)]" />
                     <div className="mt-3"><LocalDateField id="draft-planned-date" label="Target day" value={plannedDate} onChange={(next) => { editorRevision.current += 1; setPlannedDate(next); }} /></div>
                   </details>
                   {needsDraftRecovery && currentDraftId && <div role="alert" className="mt-6 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]"><p className="font-bold">This draft changed in another window or was deleted.</p><p className="mt-1">Your current editor text is still here. Save it as a new draft, or open the latest saved version after reviewing any unsaved changes.</p><div className="mt-3 flex flex-wrap gap-3"><button type="button" onClick={() => { void saveDraft(false, true); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Save as new draft</button><button type="button" onClick={() => { void openLatestDraft(); }} disabled={draftSaveBusy} className="font-bold underline underline-offset-2 disabled:opacity-50">Open latest saved version</button></div></div>}
-                  <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-5"><button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"><FilePenLine size={15} />{mediaBusy ? "Working with images…" : videoBusy ? "Working with video…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button><button type="button" onClick={() => openView("drafts")} className="text-[12px] font-semibold text-[var(--accent-text)]">View draft library →</button></div>
+                  {invalidSelected.length > 0 && <p className="mt-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}
+                  <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-5">
+                    <button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy || needsDraftRecovery} className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-[13px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">{mediaBusy ? "Working with images…" : videoBusy ? "Working with video…" : draftSaveBusy ? "Saving…" : currentDraftId ? "Update draft" : "Save draft"}</button>
+                    <button type="button" onClick={() => void prepareEditorHandoffs()} disabled={!canSaveEditor || !(source.trim() || platformDisplayIds.some((id) => variants[id]?.trim())) || mediaBusy || videoBusy || draftSaveBusy || restoringBackup || needsDraftRecovery} className="gradient-button inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-45"><Send size={15} />{draftSaveBusy ? "Saving…" : "Review posts"}<ArrowRight size={14} /></button>
+                  </div>
+                  <p className="mt-2 text-[11px] text-[var(--text-muted)]">Review each post before publishing. Nothing is posted yet.</p>
                 </div>
               </section>
-            </div>
-
-            <div className="min-w-0 space-y-6">
-              <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="preview-heading">
-                <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-5 sm:px-7"><div><h2 id="preview-heading" className="text-[17px] font-bold tracking-[-0.025em]">Platform preview</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review your text before sharing.</p></div>{selected.length > 0 && <span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--accent-text)]">EXAMPLE</span>}</div>
-                {selected.length === 0 ? <p className="px-6 py-10 text-center text-[13px] text-[var(--text-muted)] sm:px-7">Select a platform in the draft editor to see its preview.</p> : <>
+              {selected.length > 0 && <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="preview-heading">
+                <div className="border-b border-[var(--line)] px-5 py-4 sm:px-7"><h2 id="preview-heading" className="text-[14px] font-bold text-[var(--text)]">Platform versions</h2></div>
                 <div className="mobile-x-scroll flex gap-1 border-b border-[var(--line)] px-4 sm:px-6" role="tablist" aria-label="Platform previews">{platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <button key={id} type="button" role="tab" aria-selected={active === id} onClick={() => setActive(id)} className={`relative flex shrink-0 items-center gap-1.5 px-3 py-4 text-[12px] font-semibold transition sm:text-[13px] ${active === id ? "text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>{platforms[id].name}{active === id && <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--accent)]" />}</button>)}</div>
-                <div className="dot-grid bg-[var(--surface-muted)] p-5 sm:p-7"><PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} mediaIds={mediaIds} mediaAlt={mediaAlt} /></div>
                 {currentValidation.issues.length > 0 && <div role="status" className="space-y-2 px-6 pt-5 sm:px-7">
                   {currentValidation.issues.map((issue) => <p key={issue.code} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${issue.severity === "error" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--warning-soft)] text-[var(--warning)]"}`}>
                     <CircleAlert size={14} className="mt-0.5 shrink-0" />
                     <span>{issue.message}{issue.sourceUrl && <a href={issue.sourceUrl} target="_blank" rel="noopener noreferrer" className="ml-1 underline underline-offset-2">Platform guidance</a>}</span>
                   </p>)}
                 </div>}
-                <div className="px-6 pb-6 pt-5 sm:px-7 sm:pb-7"><div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">Edit {platforms[active].name} draft</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div><textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" /><div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${!currentValidation.valid ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{!currentValidation.valid ? "Needs attention" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${!currentValidation.valid ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div><button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button></div>
-                </>}
-              </section>
-
-              <section className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-labelledby="publish-heading">
-                <div className="mb-5 flex items-center justify-between"><div><h2 id="publish-heading" className="text-[17px] font-bold tracking-[-0.025em]">Ready to share?</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Review a separate post for each destination, then publish from your own accounts.</p></div><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><Send size={17} /></span></div>
-                <div className="mb-5 flex flex-wrap gap-2">{selected.length ? platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)]"><PlatformMark id={id} size="small" /> {platforms[id].name}</span>) : <span className="text-[13px] text-[var(--text-soft)]">Choose destinations in the draft editor when you are ready.</span>}</div>
-                {invalidSelected.length > 0 && <p className="mb-4 flex items-start gap-1.5 text-[12px] leading-5 text-[var(--danger)]"><CircleAlert size={14} className="mt-0.5 shrink-0" /> Review empty or over-limit drafts: {invalidSelected.map((id) => platforms[id].name).join(", ")}.</p>}
-                <button type="button" onClick={() => void prepareEditorHandoffs()} disabled={!canSaveEditor || !(source.trim() || platformDisplayIds.some((id) => variants[id]?.trim())) || mediaBusy || videoBusy || draftSaveBusy || restoringBackup || needsDraftRecovery} className="gradient-button flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-[14px] font-bold text-white shadow-lg shadow-indigo-300/40 transition disabled:opacity-45"><Send size={16} />{draftSaveBusy ? "Saving draft…" : editorDirty || !currentSavedDraft ? "Save and review posts" : "Review posts"}<ArrowRight size={15} className="ml-1" /></button>
-                <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">Selected platforms are ready for review. You can add other networks before confirming; nothing is posted yet.</p>
-                <button type="button" onClick={() => openManualComposer()} className="mt-3 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Prepare just one post instead</button>
-                <details className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
-                  <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Try a demo simulation</summary>
-                  <p className="mt-3 text-[12px] leading-5 text-[var(--text-muted)]">Creates a sample receipt for selected previews. No post is sent to a social platform.</p>
-                  <button type="button" onClick={simulatePublish} disabled={!canPublish} className="mt-3 w-full rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-45">{publishing ? "Simulating..." : "Run simulation"}</button>
-                </details>
-              </section>
+                <div className="px-5 pb-5 pt-5 sm:px-7 sm:pb-7">
+                  <div className="mb-2 flex items-center justify-between"><label htmlFor="platform-draft" className="text-[13px] font-bold text-[var(--text-secondary)]">{platforms[active].name} text</label><button type="button" onClick={() => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => { const next = { ...current }; delete next[active]; return next; }); }} disabled={variants[active] === undefined} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><RotateCcw size={12} /> Reset</button></div>
+                  <textarea id="platform-draft" value={currentText} onChange={(event) => { editorRevision.current += 1; setAiUndo(null); setVariants((current) => ({ ...current, [active]: event.target.value })); }} className="min-h-[115px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3.5 py-3 text-[13px] leading-[1.65] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-border)] focus:ring-[3px] focus:ring-[var(--accent-soft)]" />
+                  <div className="mt-2 flex items-center justify-between"><span className={`text-[12px] ${!currentValidation.valid ? "font-semibold text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>{!currentValidation.valid ? "Needs attention" : variants[active] !== undefined ? "Custom version" : "Adapted from your draft"}</span><span className={`text-[12px] tabular-nums ${!currentValidation.valid ? "font-bold text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{currentCount} / {platforms[active].limit}</span></div>
+                  <button type="button" onClick={copyCurrent} disabled={!currentText} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-40"><Copy size={13} /> Copy this draft</button>
+                  <details className="mt-4 text-[12px]"><summary className="cursor-pointer font-semibold text-[var(--accent-text)]">See visual preview</summary><div className="dot-grid mt-3 rounded-xl bg-[var(--surface-muted)] p-4"><PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} mediaIds={mediaIds} mediaAlt={mediaAlt} /></div></details>
+                </div>
+              </section>}
               {showBlueskyLive && selected.includes("bluesky") && active === "bluesky" && <BlueskyLivePanel connection={blueskyConnection} connectionLoading={blueskyLoading} connectionError={blueskyError} selected active text={textFor("bluesky")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
               {showMastodonLive && selected.includes("mastodon") && active === "mastodon" && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[12px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
-            </div>
-            {currentSavedDraft && <div className="xl:col-span-2"><BatchHandoffPanel key={`${currentSavedDraft.id}:${currentSavedDraft.updatedAt}:${batchLaunch?.draftId === currentSavedDraft.id ? batchLaunch.token : 0}`} startExpanded={batchLaunch?.draftId === currentSavedDraft.id} draft={currentSavedDraft} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy || videoBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} /></div>}
+              {currentSavedDraft && batchLaunch?.draftId === currentSavedDraft.id && <BatchHandoffPanel key={`${currentSavedDraft.id}:${currentSavedDraft.updatedAt}:${batchLaunch.token}`} startExpanded draft={currentSavedDraft} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy || videoBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} />}
+              <details className="px-1 text-[12px] text-[var(--text-muted)]"><summary className="cursor-pointer font-semibold">More actions</summary><div className="mt-3 flex flex-wrap items-center gap-4"><button type="button" onClick={() => openView("drafts")} className="font-semibold text-[var(--accent-text)]">Draft library</button><button type="button" onClick={() => openManualComposer()} className="font-semibold text-[var(--accent-text)]">Prepare one manual post</button><button type="button" onClick={simulatePublish} disabled={!canPublish} className="font-semibold text-[var(--accent-text)] disabled:opacity-45">{publishing ? "Simulating…" : "Run demo simulation"}</button></div></details>
           </div>
           </div>}
 

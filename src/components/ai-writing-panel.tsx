@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Sparkles } from "lucide-react";
 import type { VoiceProfile } from "@/lib/ai-studio";
 
 type Props = {
@@ -132,10 +133,15 @@ export function AIWritingPanel({ source, mediaIds, generating, hasReview, onGene
     imageSuggestion.voiceUpdatedAt === (useVoice && profile ? profile.updatedAt : null));
   const captionLength = imageSuggestion ? (source.trim()
     ? `${source.trim()}\n\n${imageSuggestion.caption.trim()}` : imageSuggestion.caption.trim()).length : 0;
-  return <details className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-3">
-    <summary className="cursor-pointer text-[13px] font-bold text-[var(--text-secondary)]">Write with AI <span className="ml-1 text-[11px] font-normal text-[var(--text-soft)]">Optional · Nebius Nemotron</span></summary>
-    <div className="mt-4 space-y-4 border-t border-[var(--line)] pt-4">
-      <p className="text-[12px] leading-5 text-[var(--text-muted)]">Analyze your writing style or draft from a selected image. Content is sent to Nebius only when you press an AI button; review every suggestion before using it.</p>
+  return <div className="mt-4 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 items-start gap-2.5"><Sparkles size={19} className="mt-0.5 shrink-0 text-[var(--accent-text)]" aria-hidden="true" /><div><h3 className="text-[13px] font-bold text-[var(--text)]">Write with AI</h3><p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Create versions for each platform with Nemotron.</p></div></div>
+      <button type="button" onClick={() => onGenerate(useVoice && Boolean(profile))} disabled={working || !source.trim()} className="gradient-button inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-[12px] font-bold text-white disabled:opacity-50"><Sparkles size={14} aria-hidden="true" />{generating ? "Adapting…" : hasReview ? "Regenerate" : "Generate versions"}</button>
+    </div>
+    <details className="mt-3 border-t border-[var(--accent-border)] pt-3">
+      <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Image caption and writing style</summary>
+    <div className="mt-4 space-y-4">
+      <p className="text-[12px] leading-5 text-[var(--text-muted)]">Only content you choose is sent to Nebius when you use an AI action. Review suggestions before using them.</p>
 
       <details className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3.5">
         <summary className="cursor-pointer text-[13px] font-bold text-[var(--text)]">Your writing style {profile ? "· saved" : ""}</summary>
@@ -190,7 +196,8 @@ export function AIWritingPanel({ source, mediaIds, generating, hasReview, onGene
 
       {error && <p role="alert" className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</p>}
       {notice && <p role="status" className="rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] text-[var(--positive)]">{notice}</p>}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-4"><p className="text-[11px] leading-5 text-[var(--text-muted)]">Generate uses your current draft and, if selected, your saved writing style. Review all four versions before applying.</p><button type="button" onClick={() => onGenerate(useVoice && Boolean(profile))} disabled={working || !source.trim()} className="gradient-button inline-flex min-h-10 items-center justify-center rounded-xl px-4 text-[12px] font-bold text-white disabled:opacity-50">{generating ? "Adapting…" : hasReview ? "Regenerate variants" : "Generate platform variants"}</button></div>
+      <p className="border-t border-[var(--line)] pt-3 text-[11px] leading-5 text-[var(--text-muted)]">The version generator uses your current draft and, if selected, your saved writing style.</p>
     </div>
-  </details>;
+    </details>
+  </div>;
 }

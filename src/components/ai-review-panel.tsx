@@ -28,7 +28,7 @@ export function AIReviewPanel({ source, original, suggestions, overLimit, select
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div>
         <h3 className="text-[13px] font-bold text-[var(--text)]">Review before replacing</h3>
-        <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Choose the platform versions you want. Your current drafts stay in place until you apply them.</p>
+        <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Choose the versions to use. Applying a version also selects its platform; your drafts stay in place until then.</p>
       </div>
       <button type="button" onClick={onDiscard} disabled={busy} className="text-[12px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text)] disabled:opacity-45">Discard suggestions</button>
     </div>
