@@ -45,6 +45,7 @@ import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
+import { WorkspaceSnapshotGate } from "@/lib/workspace-snapshot-gate";
 import { WORKSPACE_KEY, assistedContentSnapshot, assistedDeletionSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type AssistedReceiptSnapshot, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 import { MAX_POST_IMAGES, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
@@ -237,6 +238,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const restoringBackupRef = useRef(false);
   const restoreOverlayRef = useRef<HTMLDivElement>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
+  const workspaceSnapshotGate = useRef(new WorkspaceSnapshotGate());
   const initialWorkspaceLoad = useRef(true);
   const pendingNotificationIds = useRef(new Set<string>());
   const [assistDestination, setAssistDestination] = useState<AssistedDestinationId>(assistedOnlyDisplayIds[0]);
@@ -459,6 +461,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }, [restoringBackup]);
 
   async function refreshWorkspace() {
+    const ticket = workspaceSnapshotGate.current.beginRead();
     const response = await fetch("/api/workspace", { cache: "no-store" });
     if (!response.ok) throw new Error("Could not load your server workspace.");
     const data = await response.json().catch(() => {
@@ -468,6 +471,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       failure.status = response.status;
       throw failure;
     });
+    if (!workspaceSnapshotGate.current.acceptRead(ticket)) {
+      throw new Error("Workspace changed while loading. Refresh and try again.");
+    }
     setDrafts(data.drafts);
     setSchedule(data.schedule);
     setAssisted(data.assisted);
@@ -478,29 +484,34 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   async function changeWorkspace(action: string, extra: Record<string, unknown>) {
     if (restoringBackupRef.current) throw new Error("Wait for the full backup restore to finish.");
-    const response = await fetch("/api/workspace", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ...extra }),
-    });
-    const data = await response.json().catch(() => {
-      const failure = new Error(response.status >= 500
-        ? "The server is temporarily unavailable. Your editor is unchanged; retry when it recovers."
-        : "The server returned an unreadable response. Your editor is unchanged.") as Error & { status?: number };
-      failure.status = response.status;
-      throw failure;
-    });
-    if (!response.ok) {
-      const failure = new Error(data.error || "Could not update workspace.") as Error & { code?: string; status?: number };
-      failure.status = response.status;
-      if (typeof data.code === "string") failure.code = data.code;
-      throw failure;
+    workspaceSnapshotGate.current.beginWrite();
+    try {
+      const response = await fetch("/api/workspace", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      const data = await response.json().catch(() => {
+        const failure = new Error(response.status >= 500
+          ? "The server is temporarily unavailable. Your editor is unchanged; retry when it recovers."
+          : "The server returned an unreadable response. Your editor is unchanged.") as Error & { status?: number };
+        failure.status = response.status;
+        throw failure;
+      });
+      if (!response.ok) {
+        const failure = new Error(data.error || "Could not update workspace.") as Error & { code?: string; status?: number };
+        failure.status = response.status;
+        if (typeof data.code === "string") failure.code = data.code;
+        throw failure;
+      }
+      setDrafts(data.drafts);
+      setSchedule(data.schedule);
+      setAssisted(data.assisted);
+      setAuditLog(data.log);
+      setWorkerLastSeen(data.workerLastSeen);
+      return data;
+    } finally {
+      workspaceSnapshotGate.current.endWrite();
     }
-    setDrafts(data.drafts);
-    setSchedule(data.schedule);
-    setAssisted(data.assisted);
-    setAuditLog(data.log);
-    setWorkerLastSeen(data.workerLastSeen);
-    return data;
   }
 
   useEffect(() => {
