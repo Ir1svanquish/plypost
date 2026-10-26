@@ -34,6 +34,13 @@ test("wrong passwords do not lock the owner out", async () => {
   assert.match(correct.headers.get("set-cookie") ?? "", /plypost_session=/);
 });
 
+test("parallel password checks keep login available after a temporary busy response", async () => {
+  const responses = await Promise.all(Array.from({ length: 3 }, () => POST(loginRequest())));
+  assert.deepEqual(responses.map((response) => response.status).sort(), [401, 401, 503]);
+  assert.equal(responses.find((response) => response.status === 503)?.headers.get("retry-after"), "1");
+  assert.equal((await POST(loginRequest("a-long-test-password"))).status, 200);
+});
+
 test("oversized login JSON is rejected before parsing", async () => {
   const oversized = JSON.stringify({ email: "owner@example.test", password: "x".repeat(5_000) });
   const response = await POST(loginRequest(undefined, oversized));

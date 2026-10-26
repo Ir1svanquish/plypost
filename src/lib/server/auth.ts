@@ -1,8 +1,10 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 import { database } from "./db";
 
 export const SESSION_COOKIE = "plypost_session";
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
+const MAX_ACTIVE_LOGIN_CHECKS = 2;
+let activeLoginChecks = 0;
 
 export function passwordHash(password: string, salt = randomBytes(16).toString("hex")): string {
   return `scrypt:${salt}:${scryptSync(password, salt, 64).toString("hex")}`;
@@ -13,6 +15,22 @@ export function verifyPassword(password: string, stored: string): boolean {
   if (algorithm !== "scrypt" || !/^[a-f0-9]{32}$/.test(salt || "") || !/^[a-f0-9]{128}$/.test(digest || "")) return false;
   const expected = Buffer.from(digest, "hex");
   return timingSafeEqual(scryptSync(password, salt, expected.length), expected);
+}
+
+export async function verifyLoginPassword(password: string, stored: string): Promise<boolean | "busy"> {
+  const [algorithm, salt, digest] = stored.split(":");
+  if (algorithm !== "scrypt" || !/^[a-f0-9]{32}$/.test(salt || "") || !/^[a-f0-9]{128}$/.test(digest || "")) return false;
+  if (activeLoginChecks >= MAX_ACTIVE_LOGIN_CHECKS) return "busy";
+  activeLoginChecks++;
+  try {
+    const expected = Buffer.from(digest, "hex");
+    const actual = await new Promise<Buffer>((resolve, reject) => {
+      scrypt(password, salt, expected.length, (error, result) => error ? reject(error) : resolve(result));
+    });
+    return timingSafeEqual(actual, expected);
+  } finally {
+    activeLoginChecks--;
+  }
 }
 
 export function owner(): string | null {

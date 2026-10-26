@@ -59,7 +59,7 @@ npm run hash-password
 
 把邮箱和命令输出的密码哈希填入 `.env.local` 的 `PLYPOST_OWNER_EMAIL`、`PLYPOST_OWNER_PASSWORD_HASH`，然后运行 `npm run dev`，打开 [http://localhost:3000](http://localhost:3000)。
 
-登录不会因连续输错而锁定；公开演示账号务必使用强随机密码。登录请求仍限制为 4 KiB。
+登录不会因连续输错而锁定；同时校验请求过多时会立即提示稍后重试，空闲后可直接登录。公开演示账号务必使用强随机密码。登录请求仍限制为 4 KiB。
 更换 `PLYPOST_OWNER_PASSWORD_HASH` 后，先前的登录会话会失效，需要用新密码重新登录。Render 演示站在 **Environment** 中替换该变量并部署；新哈希可在本机运行 `npm run hash-password` 生成，命令不会显示输入的明文密码。
 
 需要处理到期的模拟任务或已确认的 Mastodon 定时任务时，另开一个终端运行 `npm run worker`。数据默认存于 `data/plypost.sqlite`；请保管好数据库和导出的备份。`.env.local` 与 `data/` 不会提交到 Git。
