@@ -1717,6 +1717,21 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     if (permission !== "granted") setNotice({ kind: "error", text: "Browser alerts were not enabled. Due posts will still appear in this page." });
   }
 
+  async function requestSignOut() {
+    if (logoutBusy) return;
+    if (draftSaveBusy || switchSaving || assistedBusy || backupBusy || restoringBackup || mediaBusy || videoBusy || legacyImportBusy) {
+      setNotice({ kind: "error", text: "Wait for the current save, restore or upload to finish before signing out." });
+      return;
+    }
+    const unsaved = [
+      editorDirty && "draft edits",
+      strategyDirty && "brand profile or AI idea edits",
+      pendingDraftSave && "an unconfirmed draft save",
+    ].filter(Boolean);
+    if (unsaved.length && !window.confirm(`Sign out and leave ${unsaved.join(", ")}? These changes will not be saved automatically.`)) return;
+    await onLogout();
+  }
+
   return (
     <>
     <div inert={restoringBackup} className="app-shell min-h-screen lg:flex">
@@ -1920,7 +1935,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Manual posting</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Review your checklist and finish each post in its own app.</p></div>
             <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} startWithVideoGroup={openAssistedVideoGroup} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} sourceMediaIds={mediaIds} sourceMediaAlt={mediaAlt} initialVideoId={videoId} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
-          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} logoutBusy={logoutBusy} logoutError={logoutError} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />}
+          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={requestSignOut} logoutBusy={logoutBusy} logoutError={logoutError} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />}
         </main>
       </div>
     </div>
