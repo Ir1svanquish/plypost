@@ -36,6 +36,8 @@ export function PrivateVideoPreview({ id, name, preload = "none" }: { id: string
 export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disabled }: Props) {
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -47,15 +49,23 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok || !Array.isArray(data.videos)) throw new Error(data.error || "Could not load saved videos.");
-        if (active) setVideos(data.videos);
+        if (active) { setVideos(data.videos); setLoadFailed(false); setError(null); }
       })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "Could not load saved videos."); })
+      .catch((cause) => { if (active) { setLoadFailed(true); setError(cause instanceof Error ? cause.message : "Could not load saved videos."); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [loadAttempt]);
+
+  function retryLoad() {
+    if (disabled || loading || busy) return;
+    setLoading(true);
+    setLoadFailed(false);
+    setError(null);
+    setLoadAttempt((attempt) => attempt + 1);
+  }
 
   async function upload(file: File) {
-    if (busy || disabled) return;
+    if (busy || loading || disabled) return;
     setError(null);
     if (file.size > MAX_VIDEO_BYTES || file.size === 0) { setError("Choose a video up to 32 MiB."); return; }
     if (!["video/mp4", "video/webm", "video/quicktime"].includes(file.type)) { setError("Choose an MP4, WebM or MOV video."); return; }
@@ -77,7 +87,7 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
   }
 
   async function remove(id: string) {
-    if (busy || disabled || !window.confirm("Delete this saved video from your library? Detach it from saved drafts and handoffs first.")) return;
+    if (busy || loading || disabled || !window.confirm("Delete this saved video from your library? Detach it from saved drafts and handoffs first.")) return;
     setError(null); setBusy(true); onBusyChange(true);
     try {
       const response = await fetch(`/api/videos/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "same-origin" });
@@ -91,18 +101,19 @@ export function VideoAttachmentPicker({ selectedId, onChange, onBusyChange, disa
   }
 
   const selected = videos.find((item) => item.id === selectedId);
+  const controlsBusy = disabled || loading || busy;
   return <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div><p className="text-[12px] font-bold text-[var(--text-secondary)]">Video clip · optional</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">Saved privately in Plypost. MP4, WebM or MOV · up to 32 MiB. You upload it on the platform yourself.</p></div>
-      <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] ${disabled || busy ? "opacity-50" : "hover:bg-[var(--accent-soft)]"}`}><Upload size={13} aria-hidden="true" /> {busy ? "Saving…" : "Add video"}<input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" disabled={disabled || busy} className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} /></label>
+      <label className={`inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] ${controlsBusy ? "opacity-50" : "cursor-pointer hover:bg-[var(--accent-soft)]"}`}><Upload size={13} aria-hidden="true" /> {busy ? "Saving…" : "Add video"}<input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" disabled={controlsBusy} className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} /></label>
     </div>
-    {error && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">{error}</p>}
+    {error && <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--danger)]"><span>{error}</span>{loadFailed && <button type="button" onClick={retryLoad} disabled={controlsBusy} className="font-semibold underline underline-offset-2 disabled:opacity-50">Retry library</button>}</div>}
     {loading ? <p className="mt-2 text-[11px] text-[var(--text-muted)]">Loading saved videos…</p> : videos.length > 0 ? <>
       <label htmlFor={selectId} className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Attach a saved clip</label>
-      <select id={selectId} value={selectedId && selected ? selectedId : ""} disabled={disabled || busy} onChange={(event) => onChange(event.target.value || null)} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)]"><option value="">No video</option>{videos.map((item) => <option key={item.id} value={item.id}>{item.name} · {fileSize(item.sizeBytes)}</option>)}</select>
-      {selectedId && !selected && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">The attached clip is unavailable. Choose another clip or select No video.</p>}
-      {selected && <><PrivateVideoPreview key={selected.id} id={selected.id} name={selected.name} preload="metadata" /><div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]"><a href={`/api/videos/${encodeURIComponent(selected.id)}`} download className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]"><Download size={12} aria-hidden="true" /> Download {selected.name}</a><button type="button" disabled={disabled || busy} onClick={() => void remove(selected.id)} className="inline-flex items-center gap-1 text-[var(--danger)] disabled:opacity-50"><Trash2 size={12} aria-hidden="true" /> Delete from library</button></div></>}
-    </> : <p className="mt-2 text-[11px] text-[var(--text-muted)]">No saved video clips yet.</p>}
+      <select id={selectId} value={selectedId && selected ? selectedId : ""} disabled={controlsBusy} onChange={(event) => onChange(event.target.value || null)} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)]"><option value="">No video</option>{videos.map((item) => <option key={item.id} value={item.id}>{item.name} · {fileSize(item.sizeBytes)}</option>)}</select>
+      {selectedId && !selected && !loadFailed && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">The attached clip is unavailable. Choose another clip or select No video.</p>}
+      {selected && <><PrivateVideoPreview key={selected.id} id={selected.id} name={selected.name} preload="metadata" /><div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]"><a href={`/api/videos/${encodeURIComponent(selected.id)}`} download className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)]"><Download size={12} aria-hidden="true" /> Download {selected.name}</a><button type="button" disabled={controlsBusy} onClick={() => void remove(selected.id)} className="inline-flex items-center gap-1 text-[var(--danger)] disabled:opacity-50"><Trash2 size={12} aria-hidden="true" /> Delete from library</button></div></>}
+    </> : <p className="mt-2 text-[11px] text-[var(--text-muted)]">{loadFailed ? "The library could not be checked. Retry above." : "No saved video clips yet."}</p>}
     <p className="mt-2 text-[11px] text-[var(--text-soft)]">Library limit: 12 clips, 64 MiB total. Check the destination’s current format and size rules before posting.</p>
   </div>;
 }
