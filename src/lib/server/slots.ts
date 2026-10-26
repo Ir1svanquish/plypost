@@ -5,14 +5,37 @@ import { hasManualReminder, type AssistedPost, type ScheduledPost } from "../wor
 
 type Db = ReturnType<typeof database>;
 type ScheduledRow = { payload: string; scheduled_for: string };
+export type SlotSettingsSnapshot = { settings: SlotSettings | null; updatedAt: string | null };
+export class SlotSettingsConflictError extends Error {}
 
-export function getSlotSettings(userId: string): SlotSettings | null {
-  const row = database().prepare("SELECT payload FROM slot_settings WHERE user_id=?")
-    .get(userId) as { payload: string } | undefined;
-  if (!row) return null;
+export function loadSlotSettingsSnapshot(userId: string): SlotSettingsSnapshot {
+  const row = database().prepare("SELECT payload,updated_at FROM slot_settings WHERE user_id=?")
+    .get(userId) as { payload: string; updated_at: string } | undefined;
+  if (!row) return { settings: null, updatedAt: null };
   const settings = parseSlotSettings(JSON.parse(row.payload));
   if (!settings) throw new Error("Saved weekly slots are invalid. Restore a backup or remove this setting.");
-  return settings;
+  return { settings, updatedAt: row.updated_at };
+}
+
+export function getSlotSettings(userId: string): SlotSettings | null {
+  return loadSlotSettingsSnapshot(userId).settings;
+}
+
+export function saveSlotSettingsIfCurrent(userId: string, input: unknown, expectedUpdatedAt: string | null): SlotSettingsSnapshot {
+  const settings = parseSlotSettings(input);
+  if (!settings) throw new Error("Choose a valid time zone and up to 56 unique weekly slots.");
+  return transaction((db) => {
+    const updatedAt = new Date(Math.max(Date.now(), expectedUpdatedAt ? Date.parse(expectedUpdatedAt) + 1 : 0)).toISOString();
+    const payload = JSON.stringify(settings);
+    const result = expectedUpdatedAt === null
+      ? db.prepare("INSERT INTO slot_settings(user_id,payload,updated_at) VALUES (?,?,?) ON CONFLICT(user_id) DO NOTHING")
+        .run(userId, payload, updatedAt)
+      : db.prepare("UPDATE slot_settings SET payload=?,updated_at=? WHERE user_id=? AND updated_at=?")
+        .run(payload, updatedAt, userId, expectedUpdatedAt);
+    if (result.changes !== 1) throw new SlotSettingsConflictError("Weekly slots changed in another window. Review both versions before saving again.");
+    audit(userId, "slots.saved", undefined, `${settings.rules.length} weekly slots`);
+    return { settings, updatedAt };
+  });
 }
 
 export function saveSlotSettings(userId: string, input: unknown): SlotSettings {

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
-import { getSlotSettings, saveSlotSettings, slotIsFree, suggestWeeklySlots } from "../src/lib/server/slots.ts";
+import { getSlotSettings, loadSlotSettingsSnapshot, saveSlotSettings, saveSlotSettingsIfCurrent, SlotSettingsConflictError, slotIsFree, suggestWeeklySlots } from "../src/lib/server/slots.ts";
 import { prepareAssistedBatch, saveDraft } from "../src/lib/server/workspace.ts";
 import { GET, POST } from "../src/app/api/slots/route.ts";
 
@@ -75,21 +75,44 @@ test("an undated checklist item does not block a future posting slot", () => {
   assert.equal(slotIsFree(database(), owner, "bluesky", instant.toISOString()), true);
 });
 
+test("a stale weekly-slot window cannot replace newer settings, including a same-millisecond update", () => {
+  const user = `slots-${randomUUID()}@example.test`;
+  const first = saveSlotSettingsIfCurrent(user, { timeZone: "UTC", rules: [] }, null);
+  assert.ok(first.updatedAt);
+  assert.throws(() => saveSlotSettingsIfCurrent(user, utcRules, null), SlotSettingsConflictError);
+  const newer = saveSlotSettingsIfCurrent(user, utcRules, first.updatedAt);
+  assert.ok(newer.updatedAt > first.updatedAt);
+  const staleDelete = { timeZone: "UTC", rules: [] };
+  assert.throws(() => saveSlotSettingsIfCurrent(user, staleDelete, first.updatedAt), SlotSettingsConflictError);
+  assert.deepEqual(loadSlotSettingsSnapshot(user), newer);
+});
+
 test("slots API requires the owner and same-origin writes", async () => {
   assert.equal((await GET(new globalThis.Request("http://localhost/api/slots"))).status, 401);
   const session = createSession(owner);
   const cookie = `${SESSION_COOKIE}=${session}`;
   const unauthorized = new globalThis.Request("http://localhost/api/slots", { method: "POST", headers: {
     cookie, origin: "https://evil.example", "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", settings: utcRules }) });
+    body: JSON.stringify({ action: "save", settings: utcRules, expectedUpdatedAt: null }) });
   assert.equal((await POST(unauthorized)).status, 403);
+  const before = loadSlotSettingsSnapshot(owner);
   const authorized = new globalThis.Request("http://localhost/api/slots", { method: "POST", headers: {
     cookie, origin: "http://localhost", "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", settings: utcRules }) });
+    body: JSON.stringify({ action: "save", settings: utcRules, expectedUpdatedAt: before.updatedAt }) });
   const response = await POST(authorized);
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).settings, utcRules);
+  const saved = await response.json();
+  assert.deepEqual(saved.settings, utcRules);
+  assert.ok(saved.updatedAt);
   const read = await GET(new globalThis.Request("http://localhost/api/slots", { headers: { cookie } }));
   assert.equal(read.status, 200);
-  assert.deepEqual((await read.json()).settings, utcRules);
+  assert.deepEqual(await read.json(), saved);
+
+  const stale = new globalThis.Request("http://localhost/api/slots", { method: "POST", headers: {
+    cookie, origin: "http://localhost", "content-type": "application/json" },
+    body: JSON.stringify({ action: "save", settings: { timeZone: "UTC", rules: [] }, expectedUpdatedAt: before.updatedAt }) });
+  const conflict = await POST(stale);
+  assert.equal(conflict.status, 409);
+  assert.deepEqual((await conflict.json()).settings, utcRules);
+  assert.deepEqual(loadSlotSettingsSnapshot(owner), saved);
 });
