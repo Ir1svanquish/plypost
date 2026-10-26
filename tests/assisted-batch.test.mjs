@@ -203,34 +203,63 @@ test("queued handoff descriptions can be corrected without changing the draft or
   })).media;
   const saved = saveDraft(owner, { ...draft("Image note", undefined, undefined, [image.id]), mediaAlt: ["Original description"] });
   const [first, sibling] = prepareAssistedBatch(owner, saved.id, randomUUID(), handoffs());
-  assert.equal(updateAssistedMediaAlt(owner, first.id, ["Original description"], ["Corrected description"]), true);
+  assert.equal(updateAssistedMediaAlt(owner, first.id, [image.id], ["Original description"], ["Corrected description"]), true);
   const current = listWorkspace(owner);
   assert.deepEqual(current.assisted.find((item) => item.id === first.id).mediaAlt, ["Corrected description"]);
   assert.deepEqual(current.assisted.find((item) => item.id === sibling.id).mediaAlt, ["Original description"]);
   assert.deepEqual(current.drafts.find((item) => item.id === saved.id).mediaAlt, ["Original description"]);
   assert.equal(current.assisted.find((item) => item.id === first.id).scheduledFor, first.scheduledFor);
-  assert.throws(() => updateAssistedMediaAlt(owner, first.id, ["Original description"], ["Overwritten"]), /changed/);
-  assert.throws(() => updateAssistedMediaAlt(other, first.id, ["Corrected description"], ["Other owner"]), /no longer available/);
-  assert.throws(() => updateAssistedMediaAlt(owner, first.id, ["Corrected description"], ["x".repeat(501)]), /up to 500/);
+  assert.throws(() => updateAssistedMediaAlt(owner, first.id, [image.id], ["Original description"], ["Overwritten"]), /changed/);
+  assert.throws(() => updateAssistedMediaAlt(other, first.id, [image.id], ["Corrected description"], ["Other owner"]), /no longer available/);
+  assert.throws(() => updateAssistedMediaAlt(owner, first.id, [image.id], ["Corrected description"], ["x".repeat(501)]), /up to 500/);
 
   const token = createSession(owner);
   const request = (cookie, origin = "http://localhost:3000") => new globalThis.Request("http://localhost:3000/api/workspace", {
     method: "POST", headers: { origin, "content-type": "application/json", ...(cookie ? { cookie } : {}) },
     body: JSON.stringify({ action: "update-assisted-media-alt", id: first.id,
-      expectedMediaAlt: ["Corrected description"], mediaAlt: ["Final description"] }),
+      expectedMediaIds: [image.id], expectedMediaAlt: ["Corrected description"], mediaAlt: ["Final description"] }),
   });
   assert.equal((await workspacePost(request())).status, 401);
   assert.equal((await workspacePost(request(`${SESSION_COOKIE}=${token}`, "https://other.example"))).status, 403);
   assert.equal((await workspacePost(request(`${SESSION_COOKIE}=${token}`))).status, 200);
   assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === first.id).mediaAlt, ["Final description"]);
+  const staleClient = await workspacePost(new globalThis.Request("http://localhost:3000/api/workspace", {
+    method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json", cookie: `${SESSION_COOKIE}=${token}` },
+    body: JSON.stringify({ action: "update-assisted-media-alt", id: first.id,
+      expectedMediaAlt: ["Final description"], mediaAlt: ["Legacy change"] }),
+  }));
+  assert.equal(staleClient.status, 409);
+  assert.match((await staleClient.json()).error, /Reload the page/);
   assert.equal(setAssistedStatus(owner, first.id, "posted"), true);
-  assert.throws(() => updateAssistedMediaAlt(owner, first.id, ["Final description"], ["After posting"]), /marked posted/);
+  assert.throws(() => updateAssistedMediaAlt(owner, first.id, [image.id], ["Final description"], ["After posting"]), /marked posted/);
 
   const legacyDraft = saveDraft(owner, draft("Older image note", ["bluesky"], {}, [image.id]));
   const [legacyHandoff] = prepareAssistedBatch(owner, legacyDraft.id, randomUUID(), [handoffs()[0]]);
   assert.equal(legacyHandoff.mediaAlt, undefined);
-  assert.equal(updateAssistedMediaAlt(owner, legacyHandoff.id, [""], ["Added later"]), true);
+  assert.equal(updateAssistedMediaAlt(owner, legacyHandoff.id, [image.id], [""], ["Added later"]), true);
   assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === legacyHandoff.id).mediaAlt, ["Added later"]);
+});
+
+test("description edits reject images reordered elsewhere even when their descriptions match", async () => {
+  const ids = [];
+  for (const color of ["#bb3344", "#3355bb"]) {
+    const bytes = await sharp({ create: { width: 4, height: 4, channels: 3, background: color } }).png().toBuffer();
+    ids.push((await createMedia(owner, { name: `${color.slice(1)}.png`, type: "image/png", bytes })).media.id);
+  }
+  const descriptions = ["Same note", "Same note"];
+  const saved = saveDraft(owner, { ...draft("Reordered photos", undefined, undefined, ids), mediaAlt: descriptions });
+  const [handoff] = prepareAssistedBatch(owner, saved.id, randomUUID(), [handoffs()[0]]);
+  assert.equal(updateAssistedImages(owner, handoff.id, ids, descriptions, [...ids].reverse(), descriptions), true);
+  assert.throws(() => updateAssistedMediaAlt(owner, handoff.id, ids, descriptions, ["First", "Second"]), /images or descriptions changed/);
+  const token = createSession(owner);
+  const response = await workspacePost(new globalThis.Request("http://localhost:3000/api/workspace", {
+    method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json", cookie: `${SESSION_COOKIE}=${token}` },
+    body: JSON.stringify({ action: "update-assisted-media-alt", id: handoff.id, expectedMediaIds: ids,
+      expectedMediaAlt: descriptions, mediaAlt: ["First", "Second"] }),
+  }));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "ASSISTED_CONFLICT");
+  assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === handoff.id).mediaAlt, descriptions);
 });
 
 test("one queued handoff can replace and reorder images without changing its draft or sibling", async () => {

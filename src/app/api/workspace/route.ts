@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       case "update-assisted-text": if (typeof input.id !== "string" || !updateAssistedText(user, input.id, input.expectedText, input.text)) throw new Error("Assisted item not found."); break;
       case "update-assisted-video": if (typeof input.id !== "string" || !updateAssistedVideo(user, input.id, input.expectedVideoId, input.videoId)) throw new Error("Assisted item not found."); break;
       case "update-assisted-images": if (typeof input.id !== "string" || !updateAssistedImages(user, input.id, input.expectedMediaIds, input.expectedMediaAlt, input.mediaIds, input.mediaAlt)) throw new Error("Assisted item not found."); break;
-      case "update-assisted-media-alt": if (typeof input.id !== "string" || !updateAssistedMediaAlt(user, input.id, input.expectedMediaAlt, input.mediaAlt)) throw new Error("Assisted item not found."); break;
+      case "update-assisted-media-alt": if (typeof input.id !== "string" || !updateAssistedMediaAlt(user, input.id, input.expectedMediaIds, input.expectedMediaAlt, input.mediaAlt)) throw new Error("Assisted item not found."); break;
       case "mark-assisted-notified": markAssistedNotified(user, input.ids); break;
       case "delete-assisted": if (typeof input.id !== "string" || !deleteAssisted(user, input.id)) throw new Error("Assisted item not found."); break;
       case "migrate-assisted": assistedMigration = migrateAssisted(user, input.items); break;

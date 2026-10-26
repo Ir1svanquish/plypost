@@ -360,21 +360,26 @@ export function updateAssistedImages(userId: string, id: string, expectedMediaId
 }
 
 /** Correct descriptions on a queued manual handoff without changing its images or source draft. */
-export function updateAssistedMediaAlt(userId: string, id: string, expectedMediaAlt: unknown, mediaAlt: unknown): boolean {
+export function updateAssistedMediaAlt(userId: string, id: string, expectedMediaIds: unknown, expectedMediaAlt: unknown, mediaAlt: unknown): boolean {
   if (!validId(id)) throw new Error("Invalid handoff ID.");
+  if (!validMediaIds(expectedMediaIds)) {
+    throw new AssistedConflictError("This image editor is out of date. Reload the page before editing descriptions.");
+  }
+  if (!validMediaAlt(expectedMediaAlt, expectedMediaIds) || !validMediaAlt(mediaAlt, expectedMediaIds)) {
+    throw new Error("Provide one description of up to 500 characters for each saved image.");
+  }
   return transaction((db) => {
     const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
     if (!row) throw new AssistedConflictError("This handoff is no longer available. Refresh the list before editing.");
     const current = JSON.parse(row.payload) as AssistedPost;
-    if (!current.mediaIds?.length || !validMediaAlt(expectedMediaAlt, current.mediaIds) ||
-        !validMediaAlt(mediaAlt, current.mediaIds)) {
-      throw new Error("Provide one description of up to 500 characters for each saved image.");
-    }
-    const savedDescriptions = current.mediaAlt ?? current.mediaIds.map(() => "");
-    if (current.status !== "queued" ||
+    const savedIds = current.mediaIds ?? [];
+    const savedDescriptions = current.mediaAlt ?? savedIds.map(() => "");
+    if (current.status !== "queued" || savedIds.length !== expectedMediaIds.length ||
+        savedIds.some((imageId, index) => imageId !== expectedMediaIds[index]) ||
         savedDescriptions.some((description, index) => description !== expectedMediaAlt[index])) {
-      throw new AssistedConflictError("These image descriptions changed or the handoff was marked posted. Refresh the list before editing.");
+      throw new AssistedConflictError("The handoff images or descriptions changed, or it was marked posted. Refresh the list before editing.");
     }
+    if (!savedIds.length) throw new Error("This handoff has no saved images to describe.");
     if (savedDescriptions.every((description, index) => description === mediaAlt[index])) return true;
     const stamp = new Date().toISOString();
     db.prepare("UPDATE assisted SET payload=?,updated_at=? WHERE id=? AND user_id=?")

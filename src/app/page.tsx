@@ -1628,12 +1628,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function updateAssistedDescriptions(id: string, expectedMediaAlt: string[], nextMediaAlt: string[]): Promise<boolean> {
+  async function updateAssistedDescriptions(id: string, expectedMediaIds: string[], expectedMediaAlt: string[], nextMediaAlt: string[]): Promise<boolean> {
     if (assistedMutation.current) return false;
     assistedMutation.current = true;
     setAssistedBusy(true);
     try {
-      await changeWorkspace("update-assisted-media-alt", { id, expectedMediaAlt, mediaAlt: nextMediaAlt });
+      await changeWorkspace("update-assisted-media-alt", { id, expectedMediaIds, expectedMediaAlt, mediaAlt: nextMediaAlt });
       setNotice({ kind: "success", text: "Image descriptions updated for this handoff. Its images, reminder and source draft were kept." });
       return true;
     } catch (error) {

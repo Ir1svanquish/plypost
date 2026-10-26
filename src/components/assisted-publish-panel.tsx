@@ -42,7 +42,7 @@ type Props = {
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
   onUpdateVideo: (id: string, expectedVideoId: string | null, videoId: string | null) => Promise<boolean>;
   onUpdateImages: (id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaIds: string[], mediaAlt: string[]) => Promise<boolean>;
-  onUpdateDescriptions: (id: string, expectedMediaAlt: string[], mediaAlt: string[]) => Promise<boolean>;
+  onUpdateDescriptions: (id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdatePostUrl: (id: string, postUrl: string | null) => Promise<boolean>;
   onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null) => Promise<boolean>;
   onUndo: (id: string) => Promise<boolean>;
@@ -469,7 +469,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
               </div>}
               {item.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {item.placeLabel} <span className="text-[var(--text-soft)]">(add on the platform yourself)</span></p>}
               {imageLimitWarning(item.destination, item.mediaIds?.length ?? 0) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(item.destination, item.mediaIds?.length ?? 0)}</p>}
-              {!editingImages && <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expected, next) => onUpdateDescriptions(item.id, expected, next) : undefined} />}
+              {!editingImages && <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} />}
               {item.status === "queued" && !editingImages && <button type="button" onClick={() => startImageEdit(item)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedImageIds.length ? "Change images for this handoff" : "Attach images to this handoff"}</button>}
               {item.status === "queued" && editingImages && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
                 <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Images for {target.name}</p>
