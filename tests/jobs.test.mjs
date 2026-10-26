@@ -4,13 +4,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { addSchedule, importLibrary, listWorkspace, rescheduleSchedule, retrySchedule } from "../src/lib/server/workspace.ts";
+import { addSchedule, deleteSchedule, importLibrary, listWorkspace, rescheduleSchedule, retrySchedule } from "../src/lib/server/workspace.ts";
 import { claimDue, processOneDue } from "../src/lib/server/jobs.ts";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-jobs-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "jobs.sqlite");
 const user = "worker@example.test";
+const currentJob = (id) => listWorkspace(user).schedule.find((item) => item.id === id);
 
 after(() => { closeDatabase(); if (temporary.startsWith(tmpdir())) rmSync(temporary, { recursive: true, force: true }); });
 
@@ -59,7 +60,7 @@ test("queued jobs can move to another future UTC instant without firing at the o
   const moved = new Date(Date.now() + 180_000);
   const post = { id: randomUUID(), title: "Move me", source: "Hello", posts: { bluesky: "Hello" }, scheduledFor: original.toISOString(), createdAt: new Date().toISOString(), status: "queued" };
   addSchedule(user, post, "UTC");
-  assert.equal(rescheduleSchedule(user, post.id, moved.toISOString(), "Asia/Hong_Kong"), true);
+  assert.equal(rescheduleSchedule(user, post.id, moved.toISOString(), "Asia/Hong_Kong", currentJob(post.id).revision), true);
   const item = listWorkspace(user).schedule.find((job) => job.id === post.id);
   assert.equal(item.scheduledFor, moved.toISOString());
   assert.equal(item.nextAttemptAt, moved.toISOString());
@@ -82,7 +83,7 @@ test("moving a failed job keeps partial receipts and starts a fresh retry budget
   const receipt = { platform: "bluesky", content: "Blue", status: "simulated", id: `sim_${randomUUID()}`, publishedAt: new Date().toISOString() };
   database().prepare("UPDATE jobs SET payload=?,status='failed',attempts=3,receipts=?,last_error='Service unavailable' WHERE id=?")
     .run(JSON.stringify({ ...post, status: "failed", lastError: "Stale payload error", nextAttemptAt: original.toISOString(), simulatedAt: original.toISOString() }), JSON.stringify([receipt]), post.id);
-  assert.equal(rescheduleSchedule(user, post.id, moved.toISOString(), "UTC"), true);
+  assert.equal(rescheduleSchedule(user, post.id, moved.toISOString(), "UTC", currentJob(post.id).revision), true);
   const item = listWorkspace(user).schedule.find((job) => job.id === post.id);
   assert.equal(item.status, "queued");
   assert.equal(item.attempts, 0);
@@ -116,11 +117,38 @@ test("manual retry resets the automatic attempt budget", () => {
   const post = { id: randomUUID(), title: "Retry me", source: "Hello", posts: { threads: "Hello" }, scheduledFor: due.toISOString(), createdAt: new Date().toISOString(), status: "queued" };
   addSchedule(user, post, "UTC");
   database().prepare("UPDATE jobs SET status='failed',attempts=3,last_error='Service unavailable' WHERE id=?").run(post.id);
-  assert.equal(retrySchedule(user, post.id), true);
+  assert.equal(retrySchedule(user, post.id, currentJob(post.id).revision), true);
   const item = listWorkspace(user).schedule.find((job) => job.id === post.id);
   assert.equal(item.status, "queued");
   assert.equal(item.attempts, 0);
   assert.equal(item.lastError, undefined);
+});
+
+test("an older plan view cannot move or delete a job changed in another window", () => {
+  const original = new Date(Date.now() + 60_000).toISOString();
+  const moved = new Date(Date.now() + 180_000).toISOString();
+  const later = new Date(Date.now() + 300_000).toISOString();
+  const post = { id: randomUUID(), title: "Two windows", source: "Hello", posts: { bluesky: "Hello" }, scheduledFor: original, createdAt: new Date().toISOString(), status: "queued" };
+  addSchedule(user, post, "UTC");
+  const stale = currentJob(post.id);
+  assert.equal(rescheduleSchedule(user, post.id, moved, "UTC", stale.revision), true);
+  assert.throws(() => rescheduleSchedule(user, post.id, later, "UTC", stale.revision), /changed in another window/);
+  assert.throws(() => deleteSchedule(user, post.id, stale.revision), /changed in another window/);
+  assert.equal(currentJob(post.id).scheduledFor, moved);
+  assert.equal(deleteSchedule(user, post.id, currentJob(post.id).revision), true);
+});
+
+test("retry and delete reject a view from before job results changed", () => {
+  const post = { id: randomUUID(), title: "Result changed", source: "Hello", posts: { bluesky: "Hello" }, scheduledFor: new Date(Date.now() + 60_000).toISOString(), createdAt: new Date().toISOString(), status: "queued" };
+  addSchedule(user, post, "UTC");
+  const stale = currentJob(post.id);
+  database().prepare("UPDATE jobs SET status='failed',attempts=3,last_error='Temporary failure' WHERE id=?").run(post.id);
+  assert.throws(() => retrySchedule(user, post.id, stale.revision), /changed in another window/);
+  assert.throws(() => deleteSchedule(user, post.id, stale.revision), /changed in another window/);
+  const failed = currentJob(post.id);
+  assert.equal(retrySchedule(user, post.id, failed.revision), true);
+  assert.equal(currentJob(post.id).status, "queued");
+  assert.equal(deleteSchedule(user, post.id, currentJob(post.id).revision), true);
 });
 
 test("rescheduling rejects impossible, non-UTC, past and too-soon instants, unknown zones and unsafe states", () => {
@@ -129,14 +157,14 @@ test("rescheduling rejects impossible, non-UTC, past and too-soon instants, unkn
   const post = { id: randomUUID(), title: "Guarded", source: "Hello", posts: { threads: "Hello" }, scheduledFor: original.toISOString(), createdAt: new Date().toISOString(), status: "queued" };
   addSchedule(user, post, "UTC");
   for (const stamp of ["2026-02-30T12:00:00.000Z", "2026-01-01T24:00:00.000Z", "2026-01-01T12:00:00+08:00", new Date(Date.now() - 1000).toISOString(), new Date(Date.now() + 1000).toISOString()]) {
-    assert.throws(() => rescheduleSchedule(user, post.id, stamp, "UTC"), /valid UTC time/);
+    assert.throws(() => rescheduleSchedule(user, post.id, stamp, "UTC", currentJob(post.id).revision), /valid UTC time/);
   }
-  assert.throws(() => rescheduleSchedule(user, post.id, moved.toISOString(), "Mars/Olympus"), /recognized timezone/);
-  assert.equal(rescheduleSchedule("other@example.test", post.id, moved.toISOString(), "UTC"), false);
+  assert.throws(() => rescheduleSchedule(user, post.id, moved.toISOString(), "Mars/Olympus", currentJob(post.id).revision), /recognized timezone/);
+  assert.equal(rescheduleSchedule("other@example.test", post.id, moved.toISOString(), "UTC", currentJob(post.id).revision), false);
   assert.equal(listWorkspace(user).schedule.find((job) => job.id === post.id).scheduledFor, original.toISOString());
   database().prepare("UPDATE jobs SET status='running',lease_until=? WHERE id=?").run(new Date(Date.now() + 300_000).toISOString(), post.id);
-  assert.equal(rescheduleSchedule(user, post.id, moved.toISOString(), "UTC"), false);
+  assert.equal(rescheduleSchedule(user, post.id, moved.toISOString(), "UTC", currentJob(post.id).revision), false);
   database().prepare("UPDATE jobs SET status='simulated',lease_until=NULL WHERE id=?").run(post.id);
-  assert.equal(rescheduleSchedule(user, post.id, moved.toISOString(), "UTC"), false);
+  assert.equal(rescheduleSchedule(user, post.id, moved.toISOString(), "UTC", currentJob(post.id).revision), false);
   assert.equal(listWorkspace(user).schedule.find((job) => job.id === post.id).scheduledFor, original.toISOString());
 });

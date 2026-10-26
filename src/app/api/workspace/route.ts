@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
-import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, setAssistedOutcome, setAssistedStatus, setDraftTargetDate, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "@/lib/server/workspace";
+import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, ScheduleConflictError, setAssistedOutcome, setAssistedStatus, setDraftTargetDate, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 const MAX_WORKSPACE_REQUEST_BYTES = 16 * 1024 * 1024;
@@ -40,9 +40,9 @@ export async function POST(request: Request) {
       case "delete-assisted": if (typeof input.id !== "string" || !deleteAssisted(user, input.id, input.expectedState)) throw new Error("Assisted item not found."); break;
       case "migrate-assisted": assistedMigration = migrateAssisted(user, input.items); break;
       case "add-schedule": addSchedule(user, input.item, input.timezone); break;
-      case "reschedule-schedule": if (typeof input.id !== "string" || !rescheduleSchedule(user, input.id, input.scheduledFor, input.timezone)) throw new Error("Plan item not found or already running/completed."); break;
-      case "delete-schedule": if (typeof input.id !== "string" || !deleteSchedule(user, input.id)) throw new Error("Plan item not found or currently running."); break;
-      case "retry-schedule": if (typeof input.id !== "string" || !retrySchedule(user, input.id)) throw new Error("Failed item not found."); break;
+      case "reschedule-schedule": if (typeof input.id !== "string" || !rescheduleSchedule(user, input.id, input.scheduledFor, input.timezone, input.expectedRevision)) throw new Error("Plan item not found or already running/completed."); break;
+      case "delete-schedule": if (typeof input.id !== "string" || !deleteSchedule(user, input.id, input.expectedRevision)) throw new Error("Plan item not found or currently running."); break;
+      case "retry-schedule": if (typeof input.id !== "string" || !retrySchedule(user, input.id, input.expectedRevision)) throw new Error("Failed item not found."); break;
       case "import": importLibrary(user, input.backup); break;
       case "import-legacy": importLegacyLibrary(user, input.backup); break;
       case "migrate-browser-workspace": migrateLegacyBrowserWorkspace(user, input.backup); break;
@@ -51,6 +51,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof DraftConflictError) return NextResponse.json({ error: error.message, code: "DRAFT_CONFLICT" }, { status: 409 });
     if (error instanceof AssistedConflictError) return NextResponse.json({ error: error.message, code: "ASSISTED_CONFLICT" }, { status: 409 });
+    if (error instanceof ScheduleConflictError) return NextResponse.json({ error: error.message, code: "SCHEDULE_CONFLICT" }, { status: 409 });
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update workspace." }, { status: 400 });
   }
   return NextResponse.json({ ...listWorkspace(user), ...(savedDraftResult ? { savedDraft: savedDraftResult } : {}),

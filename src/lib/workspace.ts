@@ -26,6 +26,8 @@ export type SavedDraft = {
 
 export type ScheduledPost = {
   id: string;
+  /** Server revision used to reject changes from an outdated plan view. */
+  revision?: string;
   title: string;
   source: string;
   posts: Partial<Record<PlatformId, string>>;

@@ -184,8 +184,10 @@ test("reschedule route requires the owner session and validates UTC time and tim
   const original = new Date(Date.now() + 60_000);
   const moved = new Date(Date.now() + 180_000);
   const plan = { id: randomUUID(), title: "HTTP move", source: "Hello", posts: { bluesky: "Hello" }, scheduledFor: original.toISOString(), createdAt: new Date().toISOString(), status: "queued" };
-  assert.equal((await post("/api/workspace", { action: "add-schedule", item: plan, timezone: "UTC" })).status, 200);
-  const request = { action: "reschedule-schedule", id: plan.id, scheduledFor: moved.toISOString(), timezone: "Asia/Hong_Kong" };
+  const added = await post("/api/workspace", { action: "add-schedule", item: plan, timezone: "UTC" });
+  assert.equal(added.status, 200);
+  const expectedRevision = (await added.json()).schedule.find((item) => item.id === plan.id).revision;
+  const request = { action: "reschedule-schedule", id: plan.id, expectedRevision, scheduledFor: moved.toISOString(), timezone: "Asia/Hong_Kong" };
   assert.equal((await post("/api/workspace", request, false)).status, 401);
   assert.equal((await post("/api/workspace", { ...request, scheduledFor: "2026-02-30T12:00:00.000Z" })).status, 400);
   assert.equal((await post("/api/workspace", { ...request, timezone: "Mars/Olympus" })).status, 400);
@@ -195,6 +197,10 @@ test("reschedule route requires the owner session and validates UTC time and tim
   assert.equal(item.scheduledFor, moved.toISOString());
   assert.equal(item.nextAttemptAt, moved.toISOString());
   assert.deepEqual(item.receipts, []);
+  assert.notEqual(item.revision, expectedRevision);
+  assert.equal((await post("/api/workspace", request)).status, 409);
+  assert.equal((await post("/api/workspace", { action: "delete-schedule", id: plan.id, expectedRevision })).status, 409);
+  assert.equal((await post("/api/workspace", { action: "delete-schedule", id: plan.id })).status, 409);
 });
 
 test("stores assisted checklist actions behind the owner session", async () => {

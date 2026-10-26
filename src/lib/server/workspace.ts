@@ -12,6 +12,7 @@ import { slotIsFree } from "./slots";
 type DraftRow = { payload: string };
 type JobRow = {
   id: string; payload: string; status: string; attempts: number;
+  scheduled_for: string; timezone: string; lease_until: string | null;
   next_attempt_at: string; last_error: string | null; completed_at: string | null; receipts: string;
 };
 
@@ -27,6 +28,7 @@ function mapJob(row: JobRow): ServerSchedule {
   const post = JSON.parse(row.payload) as ScheduledPost;
   const mapped: ServerSchedule = {
     ...post,
+    revision: jobRevision(row),
     status: row.status as ServerSchedule["status"],
     attempts: row.attempts,
     receipts: JSON.parse(row.receipts) as ServerSchedule["receipts"],
@@ -40,13 +42,28 @@ function mapJob(row: JobRow): ServerSchedule {
   return mapped;
 }
 
+function jobRevision(row: JobRow): string {
+  return createHash("sha256").update(JSON.stringify([
+    row.payload, row.scheduled_for, row.timezone, row.status, row.attempts,
+    row.next_attempt_at, row.lease_until, row.last_error, row.completed_at, row.receipts,
+  ])).digest("hex");
+}
+
+function assertCurrentJob(row: JobRow, expectedRevision: unknown): void {
+  if (typeof expectedRevision !== "string" || expectedRevision !== jobRevision(row)) {
+    throw new ScheduleConflictError();
+  }
+}
+
+const jobColumns = "id,payload,scheduled_for,timezone,status,attempts,next_attempt_at,lease_until,last_error,completed_at,receipts";
+
 export function listWorkspace(userId: string) {
   const db = database();
   const drafts = db.prepare("SELECT payload FROM drafts WHERE user_id=? ORDER BY updated_at DESC LIMIT 100")
     .all(userId).map((row) => JSON.parse((row as DraftRow).payload) as SavedDraft);
   const assisted = db.prepare("SELECT payload FROM assisted WHERE user_id=? ORDER BY scheduled_for ASC,id LIMIT 100")
     .all(userId).map((row) => JSON.parse((row as DraftRow).payload) as AssistedPost);
-  const schedule = db.prepare("SELECT id,payload,status,attempts,next_attempt_at,last_error,completed_at,receipts FROM jobs WHERE user_id=? ORDER BY scheduled_for ASC LIMIT 100")
+  const schedule = db.prepare(`SELECT ${jobColumns} FROM jobs WHERE user_id=? ORDER BY scheduled_for ASC LIMIT 100`)
     .all(userId).map((row) => mapJob(row as JobRow));
   const log = (db.prepare("SELECT action,subject_id,detail,created_at FROM audit WHERE user_id=? ORDER BY id DESC LIMIT 30")
     .all(userId) as { action: string; subject_id: string | null; detail: string | null; created_at: string }[])
@@ -528,6 +545,10 @@ export class DraftConflictError extends Error {
   constructor(message = "This draft changed or was deleted in another window. Review the latest saved copy or save your edits as a new draft.") { super(message); }
 }
 
+export class ScheduleConflictError extends Error {
+  constructor() { super("This plan item changed in another window. Review the latest version before moving, retrying or deleting it."); }
+}
+
 export function saveDraft(userId: string, value: unknown, expectedUpdatedAt: unknown = null): SavedDraft {
   const draft = validDraft(value);
   if (!draft || !/^[a-f0-9-]{36}$/i.test(draft.id)) throw new Error("Invalid draft.");
@@ -607,27 +628,43 @@ export function addSchedule(userId: string, value: unknown, timezone: unknown): 
   return { ...post, createdAt: now, attempts: 0, receipts: [], nextAttemptAt: post.scheduledFor };
 }
 
-export function deleteSchedule(userId: string, id: string) {
-  const result = database().prepare("DELETE FROM jobs WHERE id=? AND user_id=? AND status != 'running'").run(id, userId);
-  if (result.changes) audit(userId, "schedule.deleted", id);
-  return Boolean(result.changes);
+export function deleteSchedule(userId: string, id: string, expectedRevision: unknown) {
+  if (!validId(id)) return false;
+  return transaction((db) => {
+    const row = db.prepare(`SELECT ${jobColumns} FROM jobs WHERE id=? AND user_id=?`).get(id, userId) as JobRow | undefined;
+    if (!row) return false;
+    assertCurrentJob(row, expectedRevision);
+    if (row.status === "running") return false;
+    db.prepare("DELETE FROM jobs WHERE id=? AND user_id=?").run(id, userId);
+    audit(userId, "schedule.deleted", id);
+    return true;
+  });
 }
 
-export function retrySchedule(userId: string, id: string) {
-  const result = database().prepare("UPDATE jobs SET status='queued',attempts=0,next_attempt_at=?,last_error=NULL WHERE id=? AND user_id=? AND status='failed'")
-    .run(new Date().toISOString(), id, userId);
-  if (result.changes) audit(userId, "schedule.retried", id);
-  return Boolean(result.changes);
+export function retrySchedule(userId: string, id: string, expectedRevision: unknown) {
+  if (!validId(id)) return false;
+  return transaction((db) => {
+    const row = db.prepare(`SELECT ${jobColumns} FROM jobs WHERE id=? AND user_id=?`).get(id, userId) as JobRow | undefined;
+    if (!row) return false;
+    assertCurrentJob(row, expectedRevision);
+    if (row.status !== "failed") return false;
+    db.prepare("UPDATE jobs SET status='queued',attempts=0,next_attempt_at=?,last_error=NULL WHERE id=? AND user_id=?")
+      .run(new Date().toISOString(), id, userId);
+    audit(userId, "schedule.retried", id);
+    return true;
+  });
 }
 
-export function rescheduleSchedule(userId: string, id: string, scheduledFor: unknown, timezone: unknown): boolean {
+export function rescheduleSchedule(userId: string, id: string, scheduledFor: unknown, timezone: unknown, expectedRevision: unknown): boolean {
   if (!validId(id) || !validFutureUtc(scheduledFor) || !validTimezone(timezone)) {
     throw new Error("Choose a valid UTC time at least 10 seconds ahead and a recognized timezone.");
   }
   return transaction((db) => {
-    const row = db.prepare("SELECT payload FROM jobs WHERE id=? AND user_id=? AND status IN ('queued','failed')")
-      .get(id, userId) as { payload: string } | undefined;
+    const row = db.prepare(`SELECT ${jobColumns} FROM jobs WHERE id=? AND user_id=?`)
+      .get(id, userId) as JobRow | undefined;
     if (!row) return false;
+    assertCurrentJob(row, expectedRevision);
+    if (row.status !== "queued" && row.status !== "failed") return false;
     const post = JSON.parse(row.payload) as ScheduledPost;
     const updated: ScheduledPost = { ...post, scheduledFor, status: "queued" };
     delete updated.nextAttemptAt;

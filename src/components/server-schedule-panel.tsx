@@ -12,7 +12,7 @@ import { MediaHandoff } from "@/components/media-handoff";
 type Props = {
   drafts: SavedDraft[]; schedule: ScheduledPost[]; assisted: AssistedPost[]; realMastodon: RealMastodonSchedule[]; showRealMastodon: boolean; realQueueError: string | null; value: string; now: number; canSchedule: boolean;
   runningId: string | null; onValueChange: (value: string) => void; onAdd: () => void;
-  onLoad: (post: ScheduledPost) => void; onRun: (post: ScheduledPost) => void; onRemove: (id: string) => void;
+  onLoad: (post: ScheduledPost) => void; onRun: (post: ScheduledPost) => void; onRemove: (post: ScheduledPost) => void;
   onReschedule: (post: ScheduledPost, scheduledForIso: string) => Promise<void>;
   onRescheduleAssisted: (post: AssistedPost, scheduledForIso: string) => Promise<void>;
   onOpenAssisted: (item: AssistedPost) => void;
@@ -239,6 +239,7 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
       await onReschedule(post, new Date(editValue).toISOString());
       setEditingId(null);
     } catch (cause) {
+      if ((cause as { code?: string }).code === "SCHEDULE_CONFLICT") setEditingId(null);
       setEditError(cause instanceof Error ? cause.message : "Could not move this item. Please try again.");
     } finally {
       setSaving(false);
@@ -428,7 +429,7 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
               <button type="button" onClick={() => onLoad(post)} className="rounded-lg px-2 py-1.5 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]">Open</button>
               {(post.status === "queued" || post.status === "failed") && <button type="button" onClick={() => beginReschedule(post)} disabled={saving || runningId === post.id} aria-expanded={editingId === post.id} className="rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-45">Move</button>}
               {state === "failed" && <button type="button" onClick={() => onRun(post)} disabled={runningId !== null || saving} className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-45"><RotateCcw size={12} /> Retry</button>}
-              <button type="button" disabled={state === "running" || saving} aria-label={`Remove ${post.title} from plan`} onClick={() => onRemove(post.id)} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-40"><Trash2 size={14} /></button>
+              <button type="button" disabled={state === "running" || saving} aria-label={`Remove ${post.title} from plan`} onClick={() => onRemove(post)} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-40"><Trash2 size={14} /></button>
             </div>
           </div>
           <MediaHandoff mediaIds={post.mediaIds} mediaAlt={post.mediaAlt} />

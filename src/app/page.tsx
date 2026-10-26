@@ -1241,9 +1241,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setRunningId(post.id);
     setNotice(null);
     try {
-      await changeWorkspace("retry-schedule", { id: post.id });
+      await changeWorkspace("retry-schedule", { id: post.id, expectedRevision: post.revision });
       setNotice({ kind: "success", text: "Queued for another simulation attempt." });
     } catch (error) {
+      if ((error as { code?: string }).code === "SCHEDULE_CONFLICT") void refreshWorkspace().catch(() => {});
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Simulation failed." });
     } finally {
       setRunningId(null);
@@ -1256,6 +1257,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     try {
       await changeWorkspace("reschedule-schedule", {
         id: post.id,
+        expectedRevision: post.revision,
         scheduledFor: scheduledForIso,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       });
@@ -1263,6 +1265,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         ? "Moved the remaining simulation to the new time. Existing simulated receipts were kept."
         : "Plan item moved to the new time." });
     } catch (error) {
+      if ((error as { code?: string }).code === "SCHEDULE_CONFLICT") await refreshWorkspace().catch(() => {});
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not move plan item." });
       throw error;
     } finally {
@@ -1291,12 +1294,13 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function removeScheduled(id: string) {
+  async function removeScheduled(post: ScheduledPost) {
     if (!window.confirm("Remove this item from your plan?")) return;
     try {
-      await changeWorkspace("delete-schedule", { id });
+      await changeWorkspace("delete-schedule", { id: post.id, expectedRevision: post.revision });
       setNotice({ kind: "success", text: "Item removed from your plan." });
     } catch (error) {
+      if ((error as { code?: string }).code === "SCHEDULE_CONFLICT") await refreshWorkspace().catch(() => {});
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not remove item." });
     }
   }

@@ -132,7 +132,7 @@ test("planned and assisted snapshots keep images after their source draft change
   assert.deepEqual(listWorkspace(owner).schedule.find((item) => item.id === plan.id)?.mediaIds, [image.id]);
   assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === assisted.id)?.mediaIds, [image.id]);
   assert.throws(() => deleteMedia(owner, image.id), /planned posts/);
-  assert.equal(deleteSchedule(owner, plan.id), true);
+  assert.equal(deleteSchedule(owner, plan.id, listWorkspace(owner).schedule.find((item) => item.id === plan.id).revision), true);
   assert.throws(() => deleteMedia(owner, image.id), /assisted items/);
   assert.equal(deleteAssisted(owner, assisted.id, assistedDeletionSnapshot(assisted)), true);
   assert.equal(deleteMedia(owner, image.id), true);
