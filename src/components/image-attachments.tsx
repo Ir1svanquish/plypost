@@ -47,7 +47,9 @@ function imageUrl(id: string, thumbnail = false) {
 }
 
 function fileSize(bytes: number) {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024) return "<1 KiB";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 async function responseError(response: Response, fallback: string) {
@@ -202,7 +204,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 id={`${inputId}-heading`} className="text-[13px] font-bold text-[var(--text)]">Images <span className="font-medium text-[var(--text-soft)]">· {selectedIds.length}/{MAX_IMAGES}</span></h3>
-          <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">JPEG, PNG or WebP · up to 5 MB each. Keep up to 20 in a draft; the platform may allow fewer.</p>
+          <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">JPEG, PNG or WebP · up to 5 MiB each. Keep up to 20 in a draft; the platform may allow fewer.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input ref={inputRef} id={inputId} type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={disabled || uploading || deletingId !== null || selectedIds.length >= MAX_IMAGES} onChange={(event) => { void uploadFiles(event.target.files); event.target.value = ""; }} />
@@ -241,7 +243,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
           return <li key={item.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
             <div className="relative aspect-square overflow-hidden bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={item.name} fill sizes="(max-width: 640px) 50vw, 160px" className="object-cover" /></div>
             <div className="p-2"><p className="truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{item.name}</p><p className="mt-0.5 text-[10px] text-[var(--text-soft)]">{fileSize(item.sizeBytes)} · {item.width} × {item.height}</p>
-              <div className="mt-2 flex items-center justify-between gap-1"><button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null || (!attached && selectedIds.length >= MAX_IMAGES)} aria-pressed={attached} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">{attached ? <Check size={12} aria-hidden="true" /> : <ImagePlus size={12} aria-hidden="true" />}{attached ? "Added" : "Use"}</button><div className="flex items-center gap-0.5"><a href={imageUrl(item.id)} download={item.name} title={`Download ${item.name}`} aria-label={`Download ${item.name}`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><Download size={14} aria-hidden="true" /></a>{context === "draft" && <button type="button" onClick={() => { void deleteAsset(item); }} disabled={disabled || uploading || deletingId !== null} title={`Delete ${item.name} from library`} aria-label={`Delete ${item.name} from library`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50">{deletingId === item.id ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}</button>}</div></div>
+              <div className="mt-2 flex items-center justify-between gap-1"><button type="button" onClick={() => toggleImage(item.id)} disabled={disabled || uploading || deletingId !== null || (!attached && selectedIds.length >= MAX_IMAGES)} aria-pressed={attached} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">{attached ? <Check size={12} aria-hidden="true" /> : <ImagePlus size={12} aria-hidden="true" />}{attached ? "Added" : "Use"}</button><div className="flex items-center gap-0.5"><a href={`${imageUrl(item.id)}?download=1`} download={item.name} title={`Download ${item.name}`} aria-label={`Download ${item.name}`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><Download size={14} aria-hidden="true" /></a>{context === "draft" && <button type="button" onClick={() => { void deleteAsset(item); }} disabled={disabled || uploading || deletingId !== null} title={`Delete ${item.name} from library`} aria-label={`Delete ${item.name} from library`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50">{deletingId === item.id ? <LoaderCircle size={14} aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}</button>}</div></div>
             </div>
           </li>;
         })}</ul>}
