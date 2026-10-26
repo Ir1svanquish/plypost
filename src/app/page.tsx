@@ -1359,16 +1359,18 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "error", text: "Choose a full backup no larger than 192 MiB." });
       return;
     }
-    const unsavedWarning = `${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Your unsaved brand profile or AI idea edits will be lost." : ""}`;
-    if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedWarning} This cannot be undone.`)) return;
     backupMutation.current = true;
     setBackupBusy(true);
-    restoringBackupRef.current = true;
-    setRestoringBackup(true);
     let restored = false;
     try {
+      const latest = await refreshWorkspace();
+      if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
+      const unsavedWarning = `${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Your unsaved brand profile or AI idea edits will be lost." : ""}`;
+      if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedWarning} This cannot be undone.`)) return;
+      restoringBackupRef.current = true;
+      setRestoringBackup(true);
       const response = await fetch("/api/backup", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: file,
+        method: "POST", headers: { "Content-Type": "application/json", "X-Plypost-Workspace-Revision": latest.workspaceRevision }, body: file,
         cache: "no-store", credentials: "same-origin",
       });
       if (!response.ok) {
@@ -1426,8 +1428,10 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
           (raw.version === 3 && (!Array.isArray(raw.assisted) || workspace.assisted.length !== raw.assisted.length))) {
         throw new Error("This backup has invalid or excess records. Nothing was replaced.");
       }
+      const latest = await refreshWorkspace();
+      if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
       if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`)) return;
-      await changeWorkspace("import", { backup: raw });
+      await changeWorkspace("import", { backup: raw, expectedRevision: latest.workspaceRevision });
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
       setCurrentDraftId(null);
@@ -1461,7 +1465,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     setLegacyImportBusy(true);
     setLegacyImportError(null);
     try {
-      await changeWorkspace("migrate-browser-workspace", { backup: legacyWorkspace });
+      const latest = await refreshWorkspace();
+      if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
+      await changeWorkspace("migrate-browser-workspace", { backup: legacyWorkspace, expectedRevision: latest.workspaceRevision });
       setLegacyWorkspace(null);
       setLegacyReviewOpen(false);
       if (replaceSaved) {

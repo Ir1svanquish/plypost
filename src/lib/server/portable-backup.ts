@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import sharp from "sharp";
-import { transaction, audit, database } from "./db";
+import { transaction, audit } from "./db";
 import { listMedia, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_OWNER_MEDIA_BYTES, MAX_OWNER_MEDIA_COUNT } from "./media";
 import { listVideos, MAX_OWNER_VIDEO_BYTES, MAX_OWNER_VIDEO_COUNT, MAX_VIDEO_BYTES, safeVideoName, validVideoBytes } from "./video";
 import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
@@ -9,6 +9,7 @@ import { parseBrandBrief, parseWeeklyPlan, type BrandBrief, type WeeklyPlan } fr
 import { parseSlotSettings, type SlotSettings } from "../slot-settings";
 import { parseVoiceProfile, type VoiceProfile } from "../ai-studio";
 import { MAX_POST_IMAGES } from "../media-policy";
+import { workspaceDataRevision } from "./workspace-revision";
 
 export const MAX_PORTABLE_BACKUP_BYTES = 192 * 1024 * 1024;
 
@@ -398,23 +399,6 @@ function remapMediaIds<T extends { id: string }>(item: T, mediaMap: Map<string, 
   };
 }
 
-function ownerDataFingerprint(db: ReturnType<typeof database>, userId: string): string {
-  const hash = createHash("sha256");
-  const tables = [
-    "SELECT id,payload,updated_at FROM drafts WHERE user_id=? ORDER BY id",
-    "SELECT id,payload,scheduled_for,timezone,status,attempts,next_attempt_at,last_error,completed_at,receipts FROM jobs WHERE user_id=? ORDER BY id",
-    "SELECT id,payload,scheduled_for,updated_at FROM assisted WHERE user_id=? ORDER BY id",
-    "SELECT id,sha256,byte_size FROM media WHERE user_id=? ORDER BY id",
-    "SELECT id,sha256,byte_size FROM videos WHERE user_id=? ORDER BY id",
-    "SELECT user_id,payload FROM brand_briefs WHERE user_id=?",
-    "SELECT user_id,guide,updated_at FROM voice_profiles WHERE user_id=?",
-    "SELECT id,payload,created_at FROM weekly_plans WHERE user_id=? ORDER BY id",
-    "SELECT user_id,payload,updated_at FROM slot_settings WHERE user_id=?",
-  ];
-  for (const query of tables) hash.update(JSON.stringify(db.prepare(query).all(userId)));
-  return hash.digest("hex");
-}
-
 function preparePortableSnapshot(userId: string) {
   // Create asset tables before the snapshot transaction; no schema DDL is run inside it.
   listMedia(userId);
@@ -604,7 +588,7 @@ export function streamPortableBackup(userId: string): ReadableStream<Uint8Array>
   }, { highWaterMark: 0 });
 }
 
-export async function importPortableBackup(userId: string, raw: unknown, signal?: AbortSignal) {
+export async function importPortableBackup(userId: string, raw: unknown, signal?: AbortSignal, expectedRevision?: string) {
   assertRestoreActive(signal);
   if (!isRecord(raw) || raw.format !== "plypost-portable" || (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4 && raw.version !== 5) ||
       !validInstant(raw.exportedAt)) invalid("This is not a supported Plypost portable backup.");
@@ -616,7 +600,10 @@ export async function importPortableBackup(userId: string, raw: unknown, signal?
   listMedia(userId);
   listVideos(userId);
   // Reject a restore if another tab or request changes this account while assets are prepared.
-  const startingData = transaction((db) => ownerDataFingerprint(db, userId));
+  const startingData = transaction((db) => workspaceDataRevision(db, userId));
+  if (expectedRevision !== undefined && startingData !== expectedRevision) {
+    throw new BackupError("Saved work changed before the restore began. Reload and confirm the latest workspace before retrying.", 409);
+  }
   const media = await prepareMedia(raw.media, signal);
   assertRestoreActive(signal);
   const videos = prepareVideos(raw.version === 4 || raw.version === 5 ? raw.videos : []);
@@ -657,7 +644,7 @@ export async function importPortableBackup(userId: string, raw: unknown, signal?
   // No user data is changed until every asset and reference has passed validation.
   transaction((db) => {
     assertRestoreActive(signal);
-    if (ownerDataFingerprint(db, userId) !== startingData) {
+    if (workspaceDataRevision(db, userId) !== startingData) {
       throw new BackupError("Saved work changed while the backup was being prepared. Reload and retry the restore.", 409);
     }
     const running = db.prepare("SELECT 1 FROM jobs WHERE user_id=? AND status='running' LIMIT 1").get(userId);

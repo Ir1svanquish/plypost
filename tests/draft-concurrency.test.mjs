@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase } from "../src/lib/server/db.ts";
-import { deleteDraft, DraftConflictError, importLibrary, listWorkspace, saveDraft, setDraftTargetDate } from "../src/lib/server/workspace.ts";
+import { deleteDraft, DraftConflictError, importLibrary, listWorkspace, saveDraft, setDraftTargetDate, WorkspaceConflictError } from "../src/lib/server/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-draft-concurrency-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "drafts.sqlite");
@@ -102,4 +102,16 @@ test("text backup replacement invalidates an already open editor version", () =>
   assert.equal(restored.source, "Restored from backup");
   assert.throws(() => saveDraft(owner, { ...saved, source: "Old window" }, saved.updatedAt), DraftConflictError);
   assert.equal(listWorkspace(owner).drafts.find((draft) => draft.id === saved.id)?.source, "Restored from backup");
+});
+
+test("text backup cannot erase work saved after the import view was read", () => {
+  const account = "backup-conflict@example.test";
+  const olderRevision = listWorkspace(account).workspaceRevision;
+  const newer = saveDraft(account, initial("Saved in another window"));
+  const emptyBackup = { version: 3, drafts: [], schedule: [], assisted: [] };
+  assert.throws(() => importLibrary(account, emptyBackup, olderRevision), WorkspaceConflictError);
+  assert.equal(listWorkspace(account).drafts[0].id, newer.id);
+  assert.ok(listWorkspace(account).workspaceRevision !== olderRevision);
+  importLibrary(account, emptyBackup, listWorkspace(account).workspaceRevision);
+  assert.deepEqual(listWorkspace(account).drafts, []);
 });

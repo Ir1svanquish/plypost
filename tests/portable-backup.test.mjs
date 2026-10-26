@@ -16,6 +16,7 @@ import { approveStrategyIdea, createWeeklyPlan, listStrategy, saveBrandBrief } f
 import { getSlotSettings, saveSlotSettings } from "../src/lib/server/slots.ts";
 import { assistedContentSnapshot } from "../src/lib/workspace.ts";
 import { GET, POST } from "../src/app/api/backup/route.ts";
+import { currentWorkspaceRevision } from "../src/lib/server/workspace-revision.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-portable-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "primary.sqlite");
@@ -35,10 +36,11 @@ function draft(id, mediaIds = []) {
 async function png(color = "#cc3388") {
   return sharp({ create: { width: 8, height: 6, channels: 3, background: color } }).png().toBuffer();
 }
-function backupRequest(body, { cookie, origin = "http://localhost", contentType = "application/json" } = {}) {
+function backupRequest(body, { cookie, origin = "http://localhost", contentType = "application/json", expectedRevision = currentWorkspaceRevision(owner) } = {}) {
   return new globalThis.Request(base, {
     method: "POST",
-    headers: { origin, "content-type": contentType, ...(cookie ? { cookie } : {}) },
+    headers: { origin, "content-type": contentType, ...(cookie ? { cookie } : {}),
+      ...(expectedRevision ? { "x-plypost-workspace-revision": expectedRevision } : {}) },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
@@ -217,8 +219,9 @@ test("portable backup route enforces owner session, origin, type, and private re
   assert.deepEqual(archive, expected);
   assert.equal((await POST(backupRequest(archive, { cookie, origin: "https://evil.example" }))).status, 403);
   assert.equal((await POST(backupRequest(archive, { cookie, contentType: "text/plain" }))).status, 415);
+  assert.equal((await POST(backupRequest(archive, { cookie, expectedRevision: null }))).status, 409);
   assert.equal((await POST(backupRequest("not-json", { cookie }))).status, 400);
-  const tooLarge = new globalThis.Request(base, { method: "POST", headers: { cookie, origin: "http://localhost", "content-type": "application/json", "content-length": String(193 * 1024 * 1024) }, body: "{}" });
+  const tooLarge = new globalThis.Request(base, { method: "POST", headers: { cookie, origin: "http://localhost", "content-type": "application/json", "content-length": String(193 * 1024 * 1024), "x-plypost-workspace-revision": currentWorkspaceRevision(owner) }, body: "{}" });
   assert.equal((await POST(tooLarge)).status, 413);
   const imported = await POST(backupRequest(archive, { cookie }));
   assert.equal(imported.status, 200);
@@ -232,7 +235,8 @@ test("an unfinished restore keeps another backup request from doubling memory us
     finish = () => { controller.enqueue(Buffer.from("{}")); controller.close(); };
   } });
   const pending = POST(new globalThis.Request(base, { method: "POST", duplex: "half",
-    headers: { origin: "http://localhost", "content-type": "application/json", cookie }, body }));
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie,
+      "x-plypost-workspace-revision": currentWorkspaceRevision(owner) }, body }));
   assert.equal((await GET(new globalThis.Request(base, { headers: { cookie } }))).status, 409);
   assert.equal((await POST(backupRequest({}, { cookie }))).status, 409);
   finish();
@@ -254,7 +258,8 @@ test("backup upload accepts fragmented UTF-8 and rejects malformed streams witho
     offset += 7;
   } });
   const uploaded = await POST(new globalThis.Request(base, { method: "POST", duplex: "half",
-    headers: { origin: "http://localhost", "content-type": "application/json", cookie }, body: fragmented }));
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie,
+      "x-plypost-workspace-revision": currentWorkspaceRevision(owner) }, body: fragmented }));
   assert.equal(uploaded.status, 200);
   assert.equal(listMedia(owner)[0].name, "封面🙂.png");
   const before = listWorkspace(owner);
@@ -266,7 +271,8 @@ test("backup upload accepts fragmented UTF-8 and rejects malformed streams witho
     '"format":"plypost-portable","format":"plypost-portable"');
   assert.equal((await POST(backupRequest(duplicate, { cookie }))).status, 400);
   const invalidUtf8 = new globalThis.Request(base, { method: "POST",
-    headers: { origin: "http://localhost", "content-type": "application/json", cookie },
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie,
+      "x-plypost-workspace-revision": currentWorkspaceRevision(owner) },
     body: Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]) });
   assert.equal((await POST(invalidUtf8)).status, 400);
   let sent = 0;
@@ -275,7 +281,8 @@ test("backup upload accepts fragmented UTF-8 and rejects malformed streams witho
     else controller.close();
   } });
   const unclaimedLength = new globalThis.Request(base, { method: "POST", duplex: "half",
-    headers: { origin: "http://localhost", "content-type": "application/json", cookie }, body: oversized });
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie,
+      "x-plypost-workspace-revision": currentWorkspaceRevision(owner) }, body: oversized });
   assert.equal((await POST(unclaimedLength)).status, 413);
   assert.deepEqual(listWorkspace(owner), before);
 });
@@ -336,6 +343,18 @@ test("restore rejects concurrent account edits instead of overwriting them", asy
   saveDraft(owner, draft(newId));
   await assert.rejects(pending, /Saved work changed while the backup/);
   assert.ok(listWorkspace(owner).drafts.some((item) => item.id === newId));
+});
+
+test("full restore rejects work saved after the reviewed version, before upload starts", async () => {
+  const cookie = `${SESSION_COOKIE}=${createSession(owner)}`;
+  const archive = JSON.parse(exportPortableBackup(owner));
+  const olderRevision = currentWorkspaceRevision(owner);
+  const newer = saveDraft(owner, draft(randomUUID()));
+  const response = await POST(backupRequest(archive, { cookie, expectedRevision: olderRevision }));
+  assert.equal(response.status, 409);
+  assert.ok(listWorkspace(owner).drafts.some((item) => item.id === newer.id));
+  await assert.rejects(importPortableBackup(owner, archive, undefined, olderRevision), /Saved work changed before the restore began/);
+  assert.equal(deleteDraft(owner, newer.id, newer.updatedAt), true);
 });
 
 test("portable backup restores a valid image larger than four MiB", async () => {

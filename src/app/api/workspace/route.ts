@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
-import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, ScheduleConflictError, setAssistedOutcome, setAssistedStatus, setDraftTargetDate, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "@/lib/server/workspace";
+import { addAssisted, addSchedule, AssistedConflictError, deleteAssisted, deleteDraft, deleteSchedule, DraftConflictError, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, prepareAssistedBatch, rescheduleAssisted, rescheduleSchedule, retrySchedule, saveDraft, ScheduleConflictError, setAssistedOutcome, setAssistedStatus, setDraftTargetDate, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo, WorkspaceConflictError } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 const MAX_WORKSPACE_REQUEST_BYTES = 16 * 1024 * 1024;
+const validRevision = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 
 export async function GET(request: Request) {
   const user = currentUser(request);
@@ -43,15 +44,16 @@ export async function POST(request: Request) {
       case "reschedule-schedule": if (typeof input.id !== "string" || !rescheduleSchedule(user, input.id, input.scheduledFor, input.timezone, input.expectedRevision)) throw new Error("Plan item not found or already running/completed."); break;
       case "delete-schedule": if (typeof input.id !== "string" || !deleteSchedule(user, input.id, input.expectedRevision)) throw new Error("Plan item not found or currently running."); break;
       case "retry-schedule": if (typeof input.id !== "string" || !retrySchedule(user, input.id, input.expectedRevision)) throw new Error("Failed item not found."); break;
-      case "import": importLibrary(user, input.backup); break;
-      case "import-legacy": importLegacyLibrary(user, input.backup); break;
-      case "migrate-browser-workspace": migrateLegacyBrowserWorkspace(user, input.backup); break;
+      case "import": if (!validRevision(input.expectedRevision)) throw new WorkspaceConflictError(); importLibrary(user, input.backup, input.expectedRevision); break;
+      case "import-legacy": if (!validRevision(input.expectedRevision)) throw new WorkspaceConflictError(); importLegacyLibrary(user, input.backup, input.expectedRevision); break;
+      case "migrate-browser-workspace": if (!validRevision(input.expectedRevision)) throw new WorkspaceConflictError(); migrateLegacyBrowserWorkspace(user, input.backup, input.expectedRevision); break;
       default: throw new Error("Unknown action.");
     }
   } catch (error) {
     if (error instanceof DraftConflictError) return NextResponse.json({ error: error.message, code: "DRAFT_CONFLICT" }, { status: 409 });
     if (error instanceof AssistedConflictError) return NextResponse.json({ error: error.message, code: "ASSISTED_CONFLICT" }, { status: 409 });
     if (error instanceof ScheduleConflictError) return NextResponse.json({ error: error.message, code: "SCHEDULE_CONFLICT" }, { status: 409 });
+    if (error instanceof WorkspaceConflictError) return NextResponse.json({ error: error.message, code: "WORKSPACE_CONFLICT" }, { status: 409 });
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update workspace." }, { status: 400 });
   }
   return NextResponse.json({ ...listWorkspace(user), ...(savedDraftResult ? { savedDraft: savedDraftResult } : {}),

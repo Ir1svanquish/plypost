@@ -250,11 +250,13 @@ test("stores assisted checklist actions behind the owner session", async () => {
   assert.equal(migrationData.assistedMigration, "imported");
   assert.equal(migrationData.assisted.length, 2);
   assert.equal((await (await post("/api/workspace", { action: "migrate-assisted", items: [migratedItem] })).json()).assistedMigration, "skipped");
-  const legacyImport = await post("/api/workspace", { action: "import-legacy", backup: { version: 3, drafts: [], schedule: [], assisted: [] } });
+  assert.equal((await post("/api/workspace", { action: "import-legacy", backup: { version: 3, drafts: [], schedule: [], assisted: [] } })).status, 409);
+  const legacyImport = await post("/api/workspace", { action: "import-legacy", backup: { version: 3, drafts: [], schedule: [], assisted: [] }, expectedRevision: migrationData.workspaceRevision });
   assert.equal(legacyImport.status, 200);
-  assert.equal((await legacyImport.json()).assisted.length, 2);
+  const legacyData = await legacyImport.json();
+  assert.equal(legacyData.assisted.length, 2);
   const reviewedItem = { ...assisted, id: randomUUID() };
-  const reviewedMigration = await post("/api/workspace", { action: "migrate-browser-workspace", backup: { version: 3, drafts: [], schedule: [], assisted: [reviewedItem] } });
+  const reviewedMigration = await post("/api/workspace", { action: "migrate-browser-workspace", backup: { version: 3, drafts: [], schedule: [], assisted: [reviewedItem] }, expectedRevision: legacyData.workspaceRevision });
   assert.equal(reviewedMigration.status, 200);
   assert.equal((await reviewedMigration.json()).assisted.length, 3);
   assert.equal((await post("/api/workspace", { action: "delete-assisted", id: assisted.id })).status, 409);
@@ -263,6 +265,23 @@ test("stores assisted checklist actions behind the owner session", async () => {
   assert.equal((await post("/api/workspace", { action: "delete-assisted", id: migratedItem.id, expectedState: assistedDeletionSnapshot(migratedItem) })).status, 200);
   assert.equal((await post("/api/workspace", { action: "delete-assisted", id: reviewedItem.id, expectedState: assistedDeletionSnapshot(reviewedItem) })).status, 200);
   assert.deepEqual((await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json()).assisted, []);
+});
+
+test("text backup import rejects a stale workspace revision", async () => {
+  const before = await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json();
+  const stamp = new Date().toISOString();
+  const draft = { id: randomUUID(), title: "Saved during review", source: "Keep this", selected: ["bluesky"], variants: {}, createdAt: stamp, updatedAt: stamp };
+  const saved = await post("/api/workspace", { action: "save-draft", item: draft, expectedUpdatedAt: null });
+  assert.equal(saved.status, 200);
+  const backup = { version: 3, drafts: [], schedule: [], assisted: [] };
+  const stale = await post("/api/workspace", { action: "import", backup, expectedRevision: before.workspaceRevision });
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).code, "WORKSPACE_CONFLICT");
+  const current = await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json();
+  assert.ok(current.drafts.some((item) => item.id === draft.id));
+  const imported = await post("/api/workspace", { action: "import", backup, expectedRevision: current.workspaceRevision });
+  assert.equal(imported.status, 200);
+  assert.deepEqual((await imported.json()).drafts, []);
 });
 
 test("rejects cross-origin changes and revokes logout session", async () => {

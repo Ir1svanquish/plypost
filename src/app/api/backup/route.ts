@@ -1,6 +1,7 @@
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { BackupError, streamPortableBackup, importPortableBackup } from "@/lib/server/portable-backup";
 import { parsePortableBackupRequest } from "@/lib/server/portable-backup-stream";
+import { currentWorkspaceRevision } from "@/lib/server/workspace-revision";
 
 export const runtime = "nodejs";
 
@@ -78,10 +79,16 @@ export async function POST(request: Request) {
     return Response.json({ error: "Upload a Plypost portable JSON backup." }, { status: 415, headers: privateHeaders });
   }
   if (backupOperationActive) return busyResponse();
+  const expectedRevision = request.headers.get("x-plypost-workspace-revision");
+  if (!expectedRevision || !/^[a-f0-9]{64}$/.test(expectedRevision) ||
+      currentWorkspaceRevision(user) !== expectedRevision) {
+    return Response.json({ error: "Saved work changed after you reviewed the backup. Reload the latest workspace before restoring again." },
+      { status: 409, headers: privateHeaders });
+  }
   backupOperationActive = true;
   try {
     const raw = await parsePortableBackupRequest(request);
-    const restored = await importPortableBackup(user, raw, request.signal);
+    const restored = await importPortableBackup(user, raw, request.signal, expectedRevision);
     return Response.json({ restored }, { headers: privateHeaders });
   } catch (error) {
     if (error instanceof BackupError) {

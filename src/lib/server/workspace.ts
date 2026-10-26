@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { audit, database, transaction } from "./db";
+import { audit, transaction } from "./db";
 import { assistedContentSnapshot, assistedDeletionSnapshot, assistedReceiptSnapshot, draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { imageLimitForDestination } from "../media-policy";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
 import { validatePlatformText } from "../platform-validation";
-import { assertOwnedMedia } from "./media";
-import { assertOwnedVideo } from "./video";
+import { assertOwnedMedia, listMedia } from "./media";
+import { assertOwnedVideo, listVideos } from "./video";
 import { slotIsFree } from "./slots";
+import { workspaceDataRevision } from "./workspace-revision";
 
 type DraftRow = { payload: string };
 type JobRow = {
@@ -58,7 +59,10 @@ function assertCurrentJob(row: JobRow, expectedRevision: unknown): void {
 const jobColumns = "id,payload,scheduled_for,timezone,status,attempts,next_attempt_at,lease_until,last_error,completed_at,receipts";
 
 export function listWorkspace(userId: string) {
-  const db = database();
+  // Keep the returned data and its revision on the same database snapshot.
+  listMedia(userId);
+  listVideos(userId);
+  return transaction((db) => {
   const drafts = db.prepare("SELECT payload FROM drafts WHERE user_id=? ORDER BY updated_at DESC LIMIT 100")
     .all(userId).map((row) => JSON.parse((row as DraftRow).payload) as SavedDraft);
   const assisted = db.prepare("SELECT payload FROM assisted WHERE user_id=? ORDER BY scheduled_for ASC,id LIMIT 100")
@@ -78,7 +82,9 @@ export function listWorkspace(userId: string) {
       }
     });
   const heartbeat = db.prepare("SELECT seen_at FROM worker_heartbeat WHERE id=1").get() as { seen_at: string } | undefined;
-  return { drafts, schedule, assisted, log, workerLastSeen: heartbeat?.seen_at ?? null };
+  return { drafts, schedule, assisted, log, workerLastSeen: heartbeat?.seen_at ?? null,
+    workspaceRevision: workspaceDataRevision(db, userId) };
+  });
 }
 
 function validDraft(value: unknown): SavedDraft | null {
@@ -549,6 +555,10 @@ export class ScheduleConflictError extends Error {
   constructor() { super("This plan item changed in another window. Review the latest version before moving, retrying or deleting it."); }
 }
 
+export class WorkspaceConflictError extends Error {
+  constructor() { super("Saved work changed after you reviewed the backup. Reload the latest workspace before importing again."); }
+}
+
 export function saveDraft(userId: string, value: unknown, expectedUpdatedAt: unknown = null): SavedDraft {
   const draft = validDraft(value);
   if (!draft || !/^[a-f0-9-]{36}$/i.test(draft.id)) throw new Error("Invalid draft.");
@@ -682,7 +692,7 @@ export function rescheduleSchedule(userId: string, id: string, scheduledFor: unk
 
 type ImportMode = "replace-all" | "preserve-assisted" | "merge-legacy";
 
-function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
+function importWorkspace(userId: string, raw: unknown, mode: ImportMode, expectedRevision?: unknown) {
   const workspace = parseWorkspace(raw);
   if (!workspace || !raw || typeof raw !== "object" || !Array.isArray((raw as { drafts?: unknown }).drafts) || !Array.isArray((raw as { schedule?: unknown }).schedule) ||
       workspace.drafts.length !== (raw as { drafts: unknown[] }).drafts.length ||
@@ -692,7 +702,13 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
   const ids = [...workspace.drafts, ...workspace.schedule, ...workspace.assisted].map((item) => item.id);
   if (new Set(ids).size !== ids.length || ids.some((id) => !/^[a-f0-9-]{36}$/i.test(id))) throw new Error("Backup has invalid IDs.");
   const replaceSaved = mode !== "merge-legacy" || workspace.drafts.length > 0 || workspace.schedule.length > 0;
+  listMedia(userId);
+  listVideos(userId);
   transaction((db) => {
+    if (expectedRevision !== undefined &&
+        (typeof expectedRevision !== "string" || workspaceDataRevision(db, userId) !== expectedRevision)) {
+      throw new WorkspaceConflictError();
+    }
     let missingAssisted: AssistedPost[] = [];
     if (mode === "merge-legacy") {
       for (const item of workspace.assisted) {
@@ -754,17 +770,17 @@ function importWorkspace(userId: string, raw: unknown, mode: ImportMode) {
   return workspace;
 }
 
-export function importLibrary(userId: string, raw: unknown) {
-  return importWorkspace(userId, raw, "replace-all");
+export function importLibrary(userId: string, raw: unknown, expectedRevision?: unknown) {
+  return importWorkspace(userId, raw, "replace-all", expectedRevision);
 }
 
-export function importLegacyLibrary(userId: string, raw: unknown) {
-  return importWorkspace(userId, raw, "preserve-assisted");
+export function importLegacyLibrary(userId: string, raw: unknown, expectedRevision?: unknown) {
+  return importWorkspace(userId, raw, "preserve-assisted", expectedRevision);
 }
 
 /** Explicitly merge the old browser handoffs with an optional draft/plan replacement. */
-export function migrateLegacyBrowserWorkspace(userId: string, raw: unknown) {
-  return importWorkspace(userId, raw, "merge-legacy");
+export function migrateLegacyBrowserWorkspace(userId: string, raw: unknown, expectedRevision?: unknown) {
+  return importWorkspace(userId, raw, "merge-legacy", expectedRevision);
 }
 
 type AiQuotaDecision = { allowed: true } | { allowed: false; status: 429 | 503; error: string };
