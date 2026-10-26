@@ -155,6 +155,18 @@ test("tampered or incomplete archives fail without changing saved work", async (
   assert.deepEqual(listMedia(owner).map((item) => item.id), original.media.map((item) => item.id));
 });
 
+test("cancelled restore does not replace saved work after asset preparation begins", async () => {
+  const archive = JSON.parse(exportPortableBackup(owner));
+  const beforeDrafts = listWorkspace(owner).drafts;
+  const beforeMediaIds = listMedia(owner).map((item) => item.id);
+  const controller = new globalThis.AbortController();
+  const restoring = importPortableBackup(owner, archive, controller.signal);
+  globalThis.queueMicrotask(() => controller.abort());
+  await assert.rejects(restoring, /Backup restore was cancelled/);
+  assert.deepEqual(listWorkspace(owner).drafts, beforeDrafts);
+  assert.deepEqual(listMedia(owner).map((item) => item.id), beforeMediaIds);
+});
+
 test("owner restore remaps all IDs without overwriting another owner's matching records", async () => {
   const source = JSON.parse(exportPortableBackup(owner));
   const before = listWorkspace(owner);

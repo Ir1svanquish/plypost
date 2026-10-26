@@ -93,6 +93,10 @@ export class BackupError extends Error {
 
 function invalid(message = "Invalid portable backup."): never { throw new BackupError(message); }
 
+function assertRestoreActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new BackupError("Backup restore was cancelled.");
+}
+
 function validTimezone(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 64 ||
       !/^(?:UTC|[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){1,3})$/.test(value)) return false;
@@ -277,7 +281,7 @@ function decodeCanonicalBase64(value: unknown, maxBytes = MAX_IMAGE_BYTES, label
   return body;
 }
 
-async function prepareMedia(raw: unknown): Promise<PreparedMedia[]> {
+async function prepareMedia(raw: unknown, signal?: AbortSignal): Promise<PreparedMedia[]> {
   if (!Array.isArray(raw) || raw.length > MAX_OWNER_MEDIA_COUNT) invalid("Backup contains too many images.");
   const prepared: PreparedMedia[] = [];
   let totalBytes = 0;
@@ -285,6 +289,7 @@ async function prepareMedia(raw: unknown): Promise<PreparedMedia[]> {
   const digests = new Set<string>();
   const ids = new Set<string>();
   for (const entry of raw) {
+    assertRestoreActive(signal);
     if (!isRecord(entry) || !validId(entry.id) || typeof entry.name !== "string" || entry.name.length > 120 ||
         (entry.mimeType !== "image/jpeg" && entry.mimeType !== "image/png" && entry.mimeType !== "image/webp") ||
         !Number.isInteger(entry.sizeBytes) || (entry.sizeBytes as number) < 1 || (entry.sizeBytes as number) > MAX_IMAGE_BYTES ||
@@ -309,6 +314,7 @@ async function prepareMedia(raw: unknown): Promise<PreparedMedia[]> {
     try {
       const image = sharp(body, { limitInputPixels: MAX_IMAGE_PIXELS, failOn: "error", animated: false });
       const metadata = await image.metadata();
+      assertRestoreActive(signal);
       const format = metadata.format;
       if ((format !== "jpeg" && format !== "png" && format !== "webp") ||
           entry.mimeType !== `image/${format}` || !metadata.width || !metadata.height ||
@@ -321,6 +327,7 @@ async function prepareMedia(raw: unknown): Promise<PreparedMedia[]> {
       const result = await (format === "jpeg" ? output.jpeg({ quality: 88 }) :
         format === "webp" ? output.webp({ quality: 88 }) : output.png({ compressionLevel: 9 }))
         .toBuffer({ resolveWithObject: true });
+      assertRestoreActive(signal);
       encoded = result.data;
       width = result.info.width;
       height = result.info.height;
@@ -597,7 +604,8 @@ export function streamPortableBackup(userId: string): ReadableStream<Uint8Array>
   }, { highWaterMark: 0 });
 }
 
-export async function importPortableBackup(userId: string, raw: unknown) {
+export async function importPortableBackup(userId: string, raw: unknown, signal?: AbortSignal) {
+  assertRestoreActive(signal);
   if (!isRecord(raw) || raw.format !== "plypost-portable" || (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4 && raw.version !== 5) ||
       !validInstant(raw.exportedAt)) invalid("This is not a supported Plypost portable backup.");
   const workspace = validateWorkspace(raw);
@@ -609,7 +617,8 @@ export async function importPortableBackup(userId: string, raw: unknown) {
   listVideos(userId);
   // Reject a restore if another tab or request changes this account while assets are prepared.
   const startingData = transaction((db) => ownerDataFingerprint(db, userId));
-  const media = await prepareMedia(raw.media);
+  const media = await prepareMedia(raw.media, signal);
+  assertRestoreActive(signal);
   const videos = prepareVideos(raw.version === 4 || raw.version === 5 ? raw.videos : []);
   const allIds = [
     ...workspace.drafts.map((item) => item.id), ...workspace.jobs.map((item) => item.post.id),
@@ -647,6 +656,7 @@ export async function importPortableBackup(userId: string, raw: unknown) {
   }));
   // No user data is changed until every asset and reference has passed validation.
   transaction((db) => {
+    assertRestoreActive(signal);
     if (ownerDataFingerprint(db, userId) !== startingData) {
       throw new BackupError("Saved work changed while the backup was being prepared. Reload and retry the restore.", 409);
     }

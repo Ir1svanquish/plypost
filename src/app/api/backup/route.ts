@@ -81,7 +81,7 @@ export async function POST(request: Request) {
   backupOperationActive = true;
   try {
     const raw = await parsePortableBackupRequest(request);
-    const restored = await importPortableBackup(user, raw);
+    const restored = await importPortableBackup(user, raw, request.signal);
     return Response.json({ restored }, { headers: privateHeaders });
   } catch (error) {
     if (error instanceof BackupError) {
