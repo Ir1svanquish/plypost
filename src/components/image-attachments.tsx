@@ -72,7 +72,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
   const [media, setMedia] = useState<MediaAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [libraryLoaded, setLibraryLoaded] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -93,14 +93,13 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
         }
         setMedia(payload.media.filter(isMediaAsset));
         setLibraryLoaded(true);
-        setLoadFailed(false);
+        setLoadError("");
         setError("");
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) {
           setLibraryLoaded(false);
-          setLoadFailed(true);
-          setError(cause instanceof Error ? cause.message : "Could not load your images.");
+          setLoadError(cause instanceof Error ? cause.message : "Could not load your images.");
         }
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
@@ -110,7 +109,6 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
   function retryLoad() {
     if (disabled || loading || uploading || deletingId) return;
     setLoading(true);
-    setLoadFailed(false);
     setError("");
     setLoadAttempt((attempt) => attempt + 1);
   }
@@ -215,6 +213,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
   const selected = selectedIds.map((id) => media.find((item) => item.id === id)).filter((item): item is MediaAsset => Boolean(item));
   const missingCount = selectedIds.length - selected.length;
   const controlsBusy = disabled || loading || uploading || deletingId !== null;
+  const loadFailed = Boolean(loadError);
 
   return (
     <section className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 sm:p-5" aria-labelledby={`${inputId}-heading`} aria-busy={loading || uploading || deletingId !== null}>
@@ -233,7 +232,8 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
         </div>
       </div>
 
-      {error && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]"><span>{error}</span>{loadFailed && <button type="button" onClick={retryLoad} disabled={disabled || uploading || deletingId !== null} className="font-semibold underline underline-offset-2 disabled:opacity-50">Retry library</button>}</div>}
+      {loadFailed && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><span>{loadError} Your saved image list may be incomplete.</span><button type="button" onClick={retryLoad} disabled={controlsBusy} className="font-semibold underline underline-offset-2 disabled:opacity-50">Retry library</button></div>}
+      {error && <div role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</div>}
       {missingCount > 0 && libraryLoaded && !loading && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><p role="status">{missingCount} saved {missingCount === 1 ? "image is" : "images are"} unavailable.</p><button type="button" onClick={() => setSelection(selected.map((item) => item.id))} disabled={controlsBusy} className="font-semibold underline underline-offset-2 disabled:opacity-50">Remove unavailable</button></div>}
       {selected.length > 0 && <ul className="mt-4 grid max-h-[430px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
         <div className="flex min-w-0 gap-3">
