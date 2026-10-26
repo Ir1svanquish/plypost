@@ -130,7 +130,6 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   const [imageSelections, setImageSelections] = useState<Partial<Record<AssistedDestinationId, string[]>>>({});
   const [videoBusy, setVideoBusy] = useState(false);
   const handledFocusRef = useRef<string | null>(null);
-  const dueCount = items.filter((item) => assistedState(item, now) === "due").length;
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
   const selectedMediaIds = (imageSelections[destination] ?? sourceMediaIds.slice(0, imageLimitForDestination(destination)))
@@ -339,17 +338,10 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   }
 
   return (
-    <section id="assisted" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="assisted-heading">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
-        <div>
-          <h2 id="assisted-heading" className="text-[17px] font-bold tracking-[-0.025em]">Assisted publishing</h2>
-          <p className="mt-1 text-[13px] text-[var(--text-muted)]">Prepare a post for any platform, then finish it in your own account.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {futureReminderCount > 0 && <button type="button" onClick={downloadCalendar} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download {futureReminderCount} calendar {futureReminderCount === 1 ? "reminder" : "reminders"}</button>}
-          <button type="button" onClick={() => setComposerOpen((current) => !current)} disabled={!composerInitialized} aria-expanded={composerOpen} aria-controls="assisted-compose-form" className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-50">{composerOpen ? "Hide new post" : "New manual post"}</button>
-          <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${dueCount ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-muted)]"}`}>{dueCount ? `${dueCount} due now` : "Manual publishing"}</span>
-        </div>
+    <section id="assisted" className="section-anchor panel-border soft-shadow mt-6 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-label="Manual posting checklist">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[var(--line)] px-6 py-4 sm:px-7">
+        {futureReminderCount > 0 && <button type="button" onClick={downloadCalendar} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download {futureReminderCount} calendar {futureReminderCount === 1 ? "reminder" : "reminders"}</button>}
+        <button type="button" onClick={() => setComposerOpen((current) => !current)} disabled={!composerInitialized} aria-expanded={composerOpen} aria-controls="assisted-compose-form" className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-50">{composerOpen ? "Hide new post" : "New manual post"}</button>
       </div>
       {calendarError && <p role="alert" className="mx-6 mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)] sm:mx-7">{calendarError}</p>}
 
@@ -411,6 +403,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
             const reminder = hasManualReminder(item);
             const editingReminder = reminderEdit?.itemId === item.id ? reminderEdit : null;
             const target = assistedDestinations[item.destination];
+            const accessiblePostPreview = item.text.replace(/\s+/g, " ").trim();
             const missingMedia = missingHandoffMedia(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId));
             const enteredUrl = postUrls[item.id] ?? "";
             const normalizedUrl = enteredUrl ? normalizePublicPostUrl(enteredUrl) : undefined;
@@ -453,7 +446,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
             return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Due now · publish manually" : state === "posted" ? "Marked posted by you" : state === "unscheduled" ? "No reminder" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{reminder ? formatLocalDateTime(item.scheduledFor) : "Publish when you are ready"}{item.status === "queued" && <> · <button type="button" onClick={() => setReminderEdit({ itemId: item.id, value: reminder ? localDateTimeValue(new Date(item.scheduledFor)) : "", error: "" })} disabled={busy || reminderSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{reminder ? "Change reminder" : "Add reminder"}</button></>}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && missingMedia && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{missingMedia === "video" ? "No video attached here. Bring one when posting." : "No photo or video attached here. Bring one when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
-                <button type="button" aria-label={`Remove ${target.name} handoff: ${item.title}`} onClick={() => onRemove(item)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
+                <button type="button" aria-label={`Remove ${target.name} handoff: ${accessiblePostPreview.slice(0, 80)}${accessiblePostPreview.length > 80 ? "…" : ""}`} onClick={() => onRemove(item)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
               {item.status === "queued" && editingReminder && <form onSubmit={(event) => { event.preventDefault(); if (!isValidLocalDateTime(editingReminder.value, Date.now() + 10_000)) { setReminderEdit({ ...editingReminder, error: "Choose a future local date and time." }); return; } void saveReminder(item, new Date(editingReminder.value).toISOString()); }} className="mt-3 max-w-xl rounded-xl border border-[var(--accent-border)] bg-[var(--surface-muted)] p-3">
                 <LocalDateTimeField id={`assisted-reminder-${item.id}`} label="Reminder time" value={editingReminder.value} minTimestamp={now + 10_000} onChange={(value) => setReminderEdit((current) => current?.itemId === item.id ? { ...current, value, error: "" } : current)} />
