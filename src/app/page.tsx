@@ -45,7 +45,7 @@ import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
-import { WORKSPACE_KEY, assistedContentSnapshot, assistedDeletionSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, assistedContentSnapshot, assistedDeletionSnapshot, assistedReceiptSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type AssistedReceiptSnapshot, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 import { MAX_POST_IMAGES, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
 const sampleDraft =
@@ -1568,8 +1568,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       ...(postUrl ? { postUrl } : {}) }, "Marked as posted by you. Plypost did not verify the platform post.");
   }
 
-  async function updateAssistedPostUrl(id: string, postUrl: string | null): Promise<boolean> {
-    return runAssistedAction("set-assisted-status", { id, status: "posted", postUrl }, postUrl === null
+  async function updateAssistedPostUrl(id: string, postUrl: string | null, expectedReceipt: AssistedReceiptSnapshot): Promise<boolean> {
+    return runAssistedAction("set-assisted-status", { id, status: "posted", postUrl, expectedReceipt }, postUrl === null
       ? "Recorded link removed. Your posted mark and completion time were kept."
       : "Recorded link saved. Plypost did not verify the platform post.");
   }
@@ -1648,14 +1648,14 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function updateAssistedOutcome(id: string, outcome: AssistedOutcomeInput | null): Promise<boolean> {
-    return runAssistedAction("set-assisted-outcome", { id, outcome }, outcome
+  async function updateAssistedOutcome(id: string, outcome: AssistedOutcomeInput | null, expectedReceipt: AssistedReceiptSnapshot): Promise<boolean> {
+    return runAssistedAction("set-assisted-outcome", { id, outcome, expectedReceipt }, outcome
       ? "Your self-reported result was saved. Plypost did not verify these metrics with the platform."
       : "Your self-reported result was removed.");
   }
 
-  async function undoAssistedPosted(id: string) {
-    return runAssistedAction("set-assisted-status", { id, status: "queued" }, "Post returned to your assisted publishing checklist.");
+  async function undoAssistedPosted(post: AssistedPost) {
+    return runAssistedAction("set-assisted-status", { id: post.id, status: "queued", expectedReceipt: assistedReceiptSnapshot(post) }, "Post returned to your assisted publishing checklist.");
   }
 
   async function removeAssisted(post: AssistedPost) {

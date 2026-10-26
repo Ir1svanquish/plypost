@@ -29,8 +29,8 @@ export async function POST(request: Request) {
       case "delete-draft": if (typeof input.id !== "string" || !deleteDraft(user, input.id, input.expectedUpdatedAt)) throw new Error("Draft not found."); break;
       case "add-assisted": addAssisted(user, input.item); break;
       case "prepare-assisted-batch": prepareAssistedBatch(user, input.draftId, input.batchId, input.items, input.requireFreeSlots, input.expectedUpdatedAt); break;
-      case "set-assisted-status": if (typeof input.id !== "string" || !setAssistedStatus(user, input.id, input.status, input.postUrl, input.expectedContent)) throw new Error("Assisted item not found."); break;
-      case "set-assisted-outcome": if (typeof input.id !== "string" || !setAssistedOutcome(user, input.id, input.outcome)) throw new Error("Assisted item not found."); break;
+      case "set-assisted-status": if (typeof input.id !== "string" || !setAssistedStatus(user, input.id, input.status, input.postUrl, input.expectedContent, input.expectedReceipt)) throw new Error("Assisted item not found."); break;
+      case "set-assisted-outcome": if (typeof input.id !== "string" || !setAssistedOutcome(user, input.id, input.outcome, input.expectedReceipt)) throw new Error("Assisted item not found."); break;
       case "reschedule-assisted": if (typeof input.id !== "string" || !rescheduleAssisted(user, input.id, input.expectedScheduledFor, input.scheduledFor)) throw new Error("Assisted item not found."); break;
       case "update-assisted-text": if (typeof input.id !== "string" || !updateAssistedText(user, input.id, input.expectedText, input.text)) throw new Error("Assisted item not found."); break;
       case "update-assisted-video": if (typeof input.id !== "string" || !updateAssistedVideo(user, input.id, input.expectedVideoId, input.videoId)) throw new Error("Assisted item not found."); break;

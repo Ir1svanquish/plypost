@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { assistedContentSnapshot, assistedDeletionSnapshot, draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { assistedContentSnapshot, assistedDeletionSnapshot, assistedReceiptSnapshot, draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { imageLimitForDestination } from "../media-policy";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
@@ -251,7 +251,7 @@ function matchesReviewedAssistedContent(value: unknown, current: AssistedPost): 
     value.mediaAlt.every((description, index) => description === saved.mediaAlt[index]);
 }
 
-export function setAssistedStatus(userId: string, id: string, status: unknown, postUrl?: unknown, expectedContent?: unknown): boolean {
+export function setAssistedStatus(userId: string, id: string, status: unknown, postUrl?: unknown, expectedContent?: unknown, expectedReceipt?: unknown): boolean {
   if (!validId(id) || (status !== "posted" && status !== "queued")) throw new Error("Invalid assisted status.");
   if (status === "queued" && postUrl !== undefined) throw new Error("A post link requires a posted item.");
   // Omission preserves the current link; only an explicit null removes it.
@@ -265,6 +265,10 @@ export function setAssistedStatus(userId: string, id: string, status: unknown, p
     if (status === "posted" && (current.status === "queued" || expectedContent !== undefined) &&
         !matchesReviewedAssistedContent(expectedContent, current)) {
       throw new AssistedConflictError("This handoff content changed. Review its latest text and media before marking it posted.");
+    }
+    if ((status === "queued" || current.status === "posted") &&
+        (!isRecord(expectedReceipt) || JSON.stringify(expectedReceipt) !== JSON.stringify(assistedReceiptSnapshot(current)))) {
+      throw new AssistedConflictError("This posted record changed in another window. Review its latest link and results before editing it.");
     }
     if (current.status === status && (postUrl === undefined ||
         (postUrl === null && current.postUrl === undefined) || normalizedUrl === current.postUrl)) return true;
@@ -427,7 +431,7 @@ export function rescheduleAssisted(userId: string, id: string, expectedScheduled
 }
 
 /** Saves or clears owner-entered feedback without changing the human posting receipt. */
-export function setAssistedOutcome(userId: string, id: string, outcome: unknown): boolean {
+export function setAssistedOutcome(userId: string, id: string, outcome: unknown, expectedReceipt?: unknown): boolean {
   if (!validId(id)) throw new Error("Invalid assisted item ID.");
   const parsed = outcome === null ? null : parseAssistedOutcomeInput(outcome);
   if (outcome !== null && !parsed) {
@@ -438,6 +442,9 @@ export function setAssistedOutcome(userId: string, id: string, outcome: unknown)
     if (!row) return false;
     const current = JSON.parse(row.payload) as AssistedPost;
     if (current.status !== "posted") throw new Error("Mark the item posted before recording results.");
+    if (!isRecord(expectedReceipt) || JSON.stringify(expectedReceipt) !== JSON.stringify(assistedReceiptSnapshot(current))) {
+      throw new AssistedConflictError("This posted record changed in another window. Review its latest link and results before editing it.");
+    }
     if (parsed === null && !current.outcome) return true;
     if (parsed !== null && current.outcome) {
       const existing = Object.fromEntries(Object.entries(current.outcome).filter(([key]) => key !== "recordedAt"));

@@ -26,6 +26,23 @@ function item() {
     scheduledFor: new Date(Date.now() + 60_000).toISOString(), createdAt: new Date().toISOString(), status: "queued" };
 }
 
+function receipt(post) {
+  return { status: post.status, postedAt: post.postedAt ?? null, postUrl: post.postUrl ?? null,
+    outcome: post.outcome ?? null };
+}
+
+function currentReceipt(id) {
+  return receipt(listWorkspace(owner).assisted.find((entry) => entry.id === id));
+}
+
+function saveOutcome(id, outcome) {
+  return setAssistedOutcome(owner, id, outcome, currentReceipt(id));
+}
+
+function changePostedStatus(id, status, postUrl) {
+  return setAssistedStatus(owner, id, status, postUrl, undefined, currentReceipt(id));
+}
+
 function request(body, { token, origin = "http://localhost" } = {}) {
   return new globalThis.Request("http://localhost/api/workspace", { method: "POST",
     headers: { origin, "content-type": "application/json", ...(token ? { cookie: `${SESSION_COOKIE}=${token}` } : {}) },
@@ -62,31 +79,52 @@ test("only posted owner items accept self-reported results; post receipt survive
     { views: 1, recordedAt: new Date().toISOString() }]) {
     assert.throws(() => setAssistedOutcome(owner, post.id, invalid), /Enter at least one result/);
   }
-  assert.equal(setAssistedOutcome(owner, post.id, { views: 0, likes: 12, notes: "Good discussion" }), true);
+  assert.equal(saveOutcome(post.id, { views: 0, likes: 12, notes: "Good discussion" }), true);
   const first = listWorkspace(owner).assisted[0];
   assert.deepEqual({ ...first.outcome, recordedAt: undefined },
     { views: 0, likes: 12, notes: "Good discussion", recordedAt: undefined });
   assert.ok(Number.isFinite(Date.parse(first.outcome.recordedAt)));
   assert.equal(first.postedAt, postedAt);
   assert.equal(first.postUrl, postUrl);
-  assert.equal(setAssistedOutcome(owner, post.id, { views: 0, likes: 12, notes: "Good discussion" }), true);
+  assert.equal(saveOutcome(post.id, { views: 0, likes: 12, notes: "Good discussion" }), true);
   assert.equal(listWorkspace(owner).assisted[0].outcome.recordedAt, first.outcome.recordedAt);
-  assert.equal(setAssistedOutcome(owner, post.id, { views: 3, replies: 1 }), true);
+  assert.equal(saveOutcome(post.id, { views: 3, replies: 1 }), true);
   assert.deepEqual(Object.keys(listWorkspace(owner).assisted[0].outcome).sort(), ["recordedAt", "replies", "views"]);
-  assert.equal(setAssistedOutcome(owner, post.id, null), true);
+  assert.equal(saveOutcome(post.id, null), true);
   assert.equal(listWorkspace(owner).assisted[0].outcome, undefined);
   assert.equal(listWorkspace(owner).assisted[0].postedAt, postedAt);
   assert.equal(listWorkspace(owner).assisted[0].postUrl, postUrl);
-  setAssistedOutcome(owner, post.id, { notes: "Worth repeating" });
-  setAssistedStatus(owner, post.id, "queued");
+  saveOutcome(post.id, { notes: "Worth repeating" });
+  changePostedStatus(post.id, "queued");
   assert.equal(listWorkspace(owner).assisted[0].outcome, undefined);
   assert.equal(listWorkspace(owner).assisted[0].postedAt, undefined);
+});
+
+test("stale posted-record actions cannot erase or replace newer links and results", () => {
+  const post = addAssisted(owner, item());
+  setAssistedStatus(owner, post.id, "posted", postUrl, assistedContentSnapshot(post));
+  const first = listWorkspace(owner).assisted.find((entry) => entry.id === post.id);
+  const oldReceipt = receipt(first);
+
+  setAssistedOutcome(owner, post.id, { views: 12 }, oldReceipt);
+  assert.throws(() => setAssistedStatus(owner, post.id, "queued", undefined, undefined, oldReceipt), /changed/i);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).outcome.views, 12);
+
+  const second = listWorkspace(owner).assisted.find((entry) => entry.id === post.id);
+  setAssistedStatus(owner, post.id, "posted", "https://social.example/creator/post/new", undefined, receipt(second));
+  assert.throws(() => setAssistedStatus(owner, post.id, "posted", "https://social.example/creator/post/stale", undefined, receipt(second)), /changed/i);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).postUrl, "https://social.example/creator/post/new");
+
+  const third = listWorkspace(owner).assisted.find((entry) => entry.id === post.id);
+  setAssistedOutcome(owner, post.id, { views: 25 }, receipt(third));
+  assert.throws(() => setAssistedOutcome(owner, post.id, { views: 2 }, receipt(third)), /changed/i);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).outcome.views, 25);
 });
 
 test("workspace route requires same-origin owner session and exposes saved results", async () => {
   const post = addAssisted(owner, item());
   setAssistedStatus(owner, post.id, "posted", postUrl, assistedContentSnapshot(post));
-  const body = { action: "set-assisted-outcome", id: post.id, outcome: { views: 42, notes: "Clicked through" } };
+  const body = { action: "set-assisted-outcome", id: post.id, outcome: { views: 42, notes: "Clicked through" }, expectedReceipt: currentReceipt(post.id) };
   assert.equal((await POST(request(body))).status, 401);
   const token = createSession(owner);
   assert.equal((await POST(request(body, { token, origin: "https://elsewhere.example" }))).status, 403);
@@ -96,6 +134,10 @@ test("workspace route requires same-origin owner session and exposes saved resul
   assert.equal(saved.outcome.views, 42);
   assert.equal(saved.outcome.notes, "Clicked through");
   assert.equal(saved.postUrl, postUrl);
+  const stale = await POST(request({ ...body, outcome: { views: 2 } }, { token }));
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).code, "ASSISTED_CONFLICT");
+  assert.equal((await POST(request({ action: "set-assisted-status", id: post.id, status: "queued" }, { token }))).status, 409);
   assert.equal((await POST(request({ ...body, outcome: { views: -1 } }, { token }))).status, 400);
   assert.equal(listWorkspace(owner).assisted.find((item) => item.id === post.id).outcome.views, 42);
 });
@@ -119,7 +161,7 @@ test("portable backup round-trips outcomes, accepts old items, and rejects tampe
   await importPortableBackup(owner, old);
   assert.equal(listWorkspace(owner).assisted.some((post) => post.outcome), false);
   await importPortableBackup(owner, archive);
-  const restored = listWorkspace(owner).assisted.find((post) => post.postUrl === postUrl && post.outcome);
+  const restored = listWorkspace(owner).assisted.find((post) => post.postUrl === withOutcome.postUrl && post.outcome);
   assert.ok(restored);
   assert.deepEqual(restored.outcome, withOutcome.outcome);
   assert.equal(restored.postedAt, withOutcome.postedAt);

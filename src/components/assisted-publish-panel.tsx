@@ -6,7 +6,7 @@ import { assistedDestinations, assistedTextImageDisplayIds, assistedVideoDisplay
 import { characterCount, isPlatformId } from "@/lib/platforms";
 import { buildManualReminderCalendar, upcomingManualReminders } from "@/lib/calendar-export";
 import { validatePlatformText } from "@/lib/platform-validation";
-import { assistedState, hasManualReminder, localDateTimeValue, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type SavedDraft } from "@/lib/workspace";
+import { assistedReceiptSnapshot, assistedState, hasManualReminder, localDateTimeValue, MAX_ASSISTED_OUTCOME_COUNT, MAX_ASSISTED_OUTCOME_NOTES, normalizePublicPostUrl, type AssistedOutcomeInput, type AssistedPost, type AssistedReceiptSnapshot, type SavedDraft } from "@/lib/workspace";
 import { formatLocalDateTime, isValidLocalDateTime, LocalDateTimeField } from "@/components/local-date-time-field";
 import { MediaHandoff } from "@/components/media-handoff";
 import { ImageAttachmentPicker } from "@/components/image-attachments";
@@ -43,9 +43,9 @@ type Props = {
   onUpdateVideo: (id: string, expectedVideoId: string | null, videoId: string | null) => Promise<boolean>;
   onUpdateImages: (id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaIds: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdateDescriptions: (id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaAlt: string[]) => Promise<boolean>;
-  onUpdatePostUrl: (id: string, postUrl: string | null) => Promise<boolean>;
-  onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null) => Promise<boolean>;
-  onUndo: (id: string) => Promise<boolean>;
+  onUpdatePostUrl: (id: string, postUrl: string | null, expectedReceipt: AssistedReceiptSnapshot) => Promise<boolean>;
+  onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null, expectedReceipt: AssistedReceiptSnapshot) => Promise<boolean>;
+  onUndo: (post: AssistedPost) => Promise<boolean>;
   onRemove: (post: AssistedPost) => void;
   onEnableNotifications: () => void;
   onEditImages: () => void;
@@ -110,10 +110,10 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   const [imageEdit, setImageEdit] = useState<ImageEdit | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
   const [imageSavingId, setImageSavingId] = useState<string | null>(null);
-  const [editingLinks, setEditingLinks] = useState<Record<string, boolean>>({});
+  const [editingLinks, setEditingLinks] = useState<Record<string, AssistedReceiptSnapshot>>({});
   const [linkSavingId, setLinkSavingId] = useState<string | null>(null);
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, OutcomeForm>>({});
-  const [editingOutcomes, setEditingOutcomes] = useState<Record<string, boolean>>({});
+  const [editingOutcomes, setEditingOutcomes] = useState<Record<string, AssistedReceiptSnapshot>>({});
   const [outcomeSavingId, setOutcomeSavingId] = useState<string | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(startExpanded);
@@ -245,10 +245,11 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   }
 
   async function updateLink(id: string, postUrl: string | null) {
-    if (busy || linkSavingId) return;
+    const expectedReceipt = editingLinks[id];
+    if (busy || linkSavingId || !expectedReceipt) return;
     setLinkSavingId(id);
     try {
-      if (await onUpdatePostUrl(id, postUrl)) closeLinkEditor(id);
+      if (await onUpdatePostUrl(id, postUrl, expectedReceipt)) closeLinkEditor(id);
     } finally {
       setLinkSavingId(null);
     }
@@ -284,10 +285,11 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   }
 
   async function updateOutcome(id: string, outcome: AssistedOutcomeInput | null) {
-    if (busy || outcomeSavingId) return;
+    const expectedReceipt = editingOutcomes[id];
+    if (busy || outcomeSavingId || !expectedReceipt) return;
     setOutcomeSavingId(id);
     try {
-      if (await onUpdateOutcome(id, outcome)) closeOutcomeEditor(id);
+      if (await onUpdateOutcome(id, outcome, expectedReceipt)) closeOutcomeEditor(id);
     } finally {
       setOutcomeSavingId(null);
     }
@@ -325,12 +327,12 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
     setPendingStatusFocus({ id: post.id, status: "posted" });
   }
 
-  async function undoPosted(id: string) {
-    if (busy || !await onUndo(id)) return;
-    closeOutcomeEditor(id);
+  async function undoPosted(post: AssistedPost) {
+    if (busy || !await onUndo(post)) return;
+    closeOutcomeEditor(post.id);
     setDestinationFilter("all");
     setStatusFilter("to-post");
-    setPendingStatusFocus({ id, status: "queued" });
+    setPendingStatusFocus({ id: post.id, status: "queued" });
   }
 
   return (
@@ -412,10 +414,12 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
             const invalidUrl = normalizedUrl === null;
             const savedUrl = item.postUrl && normalizePublicPostUrl(item.postUrl) === item.postUrl ? item.postUrl : undefined;
             const editingLink = item.status === "posted" && Boolean(editingLinks[item.id]);
+            const linkEditStale = editingLink && JSON.stringify(editingLinks[item.id]) !== JSON.stringify(assistedReceiptSnapshot(item));
             const editedLink = postUrls[item.id] ?? savedUrl ?? "";
             const normalizedEditedLink = editedLink ? normalizePublicPostUrl(editedLink) : undefined;
             const invalidEditedLink = normalizedEditedLink === null;
             const editingOutcome = item.status === "posted" && Boolean(editingOutcomes[item.id]);
+            const outcomeEditStale = editingOutcome && JSON.stringify(editingOutcomes[item.id]) !== JSON.stringify(assistedReceiptSnapshot(item));
             const resultDraft = outcomeDrafts[item.id] ?? outcomeForm(item);
             const resultValidation = readOutcomeForm(resultDraft);
             const resultSummary = item.outcome && (["views", "likes", "replies"] as const)
@@ -507,7 +511,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
-                {item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { void undoPosted(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+              {item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { void undoPosted(item); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
               {item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
               {item.status === "posted" && <details id={`assisted-posted-record-${item.id}`} className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
@@ -516,15 +520,16 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
                 <p>Marked posted by you{item.postedAt ? ` · ${formatLocalDateTime(item.postedAt)}` : ""} · not verified by Plypost.</p>
                 <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
                   {savedUrl && <a href={savedUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)] underline underline-offset-2"><ExternalLink size={11} /> Link you recorded · not verified</a>}
-                  {!editingLink && <button type="button" onClick={() => { setPostUrls((current) => ({ ...current, [item.id]: savedUrl ?? "" })); setEditingLinks((current) => ({ ...current, [item.id]: true })); }} disabled={busy || linkSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedUrl ? "Edit recorded link" : "Add recorded link"}</button>}
+                  {!editingLink && <button type="button" onClick={() => { setPostUrls((current) => ({ ...current, [item.id]: savedUrl ?? "" })); setEditingLinks((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || linkSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedUrl ? "Edit recorded link" : "Add recorded link"}</button>}
                 </div>
                 {editingLink && <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
                   <label htmlFor={`assisted-edit-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Public post link · self-reported</label>
                   <input id={`assisted-edit-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={editedLink} placeholder="https://social.example/your-post" aria-invalid={invalidEditedLink} aria-describedby={`assisted-edit-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} disabled={busy || linkSavingId === item.id} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
                   <p id={`assisted-edit-post-url-hint-${item.id}`} className={`mt-1 text-[11px] leading-4 ${invalidEditedLink ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{invalidEditedLink ? "Use a public HTTPS post link with no embedded username or password." : "Plypost checks the link format, not the post or account. Your posted mark and completion time stay unchanged."}</p>
+                  {linkEditStale && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">This posted record changed elsewhere. Copy your link if needed, then cancel and reopen the latest version.</p>}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={() => { if (normalizedEditedLink) void updateLink(item.id, normalizedEditedLink); }} disabled={busy || linkSavingId !== null || !normalizedEditedLink || normalizedEditedLink === savedUrl} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{linkSavingId === item.id ? "Saving…" : "Save link"}</button>
-                    {savedUrl && <button type="button" onClick={() => { void updateLink(item.id, null); }} disabled={busy || linkSavingId !== null} className="text-[12px] font-semibold text-[var(--danger)] disabled:opacity-50">Remove recorded link</button>}
+                    <button type="button" onClick={() => { if (normalizedEditedLink) void updateLink(item.id, normalizedEditedLink); }} disabled={busy || linkSavingId !== null || linkEditStale || !normalizedEditedLink || normalizedEditedLink === savedUrl} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{linkSavingId === item.id ? "Saving…" : "Save link"}</button>
+                    {savedUrl && <button type="button" onClick={() => { void updateLink(item.id, null); }} disabled={busy || linkSavingId !== null || linkEditStale} className="text-[12px] font-semibold text-[var(--danger)] disabled:opacity-50">Remove recorded link</button>}
                     <button type="button" onClick={() => closeLinkEditor(item.id)} disabled={busy || linkSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                   </div>
                 </div>}
@@ -532,7 +537,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
               <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 text-[12px]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-semibold text-[var(--text-secondary)]">Results you entered <span className="font-normal text-[var(--text-muted)]">· self-reported, not verified</span></p>
-                  {!editingOutcome && <button type="button" onClick={() => { setOutcomeDrafts((current) => ({ ...current, [item.id]: outcomeForm(item) })); setEditingOutcomes((current) => ({ ...current, [item.id]: true })); }} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.outcome ? "Edit results" : "Record results"}</button>}
+                  {!editingOutcome && <button type="button" onClick={() => { setOutcomeDrafts((current) => ({ ...current, [item.id]: outcomeForm(item) })); setEditingOutcomes((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.outcome ? "Edit results" : "Record results"}</button>}
                 </div>
                 {item.outcome ? <div className="mt-2 space-y-1 text-[var(--text-muted)]">
                   {resultSummary && <p>{resultSummary}</p>}
@@ -549,10 +554,11 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
                   <label htmlFor={`assisted-outcome-notes-${item.id}`} className="mb-1 mt-3 block font-semibold text-[var(--text-secondary)]">What happened · optional</label>
                   <textarea id={`assisted-outcome-notes-${item.id}`} value={resultDraft.notes} maxLength={MAX_ASSISTED_OUTCOME_NOTES} rows={2} placeholder="A short observation for your next plan" onChange={(event) => changeOutcomeField(item, "notes", event.target.value)} disabled={busy || outcomeSavingId === item.id} className="w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
                   <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">Plypost does not fetch or verify these numbers, or send them to AI. Your posted time and link will stay unchanged.</p>
+                  {outcomeEditStale && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">This posted record changed elsewhere. Copy your notes if needed, then cancel and reopen the latest version.</p>}
                   {resultValidation.error && <p role="status" className="mt-1 text-[11px] text-[var(--danger)]">{resultValidation.error}</p>}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={() => { if (resultValidation.value) void updateOutcome(item.id, resultValidation.value); }} disabled={busy || outcomeSavingId !== null || !resultValidation.value} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 font-semibold text-[var(--accent-text)] disabled:opacity-50">{outcomeSavingId === item.id ? "Saving…" : "Save results"}</button>
-                    {item.outcome && <button type="button" onClick={() => { void updateOutcome(item.id, null); }} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--danger)] disabled:opacity-50">Clear results</button>}
+                    <button type="button" onClick={() => { if (resultValidation.value) void updateOutcome(item.id, resultValidation.value); }} disabled={busy || outcomeSavingId !== null || outcomeEditStale || !resultValidation.value} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 font-semibold text-[var(--accent-text)] disabled:opacity-50">{outcomeSavingId === item.id ? "Saving…" : "Save results"}</button>
+                    {item.outcome && <button type="button" onClick={() => { void updateOutcome(item.id, null); }} disabled={busy || outcomeSavingId !== null || outcomeEditStale} className="font-semibold text-[var(--danger)] disabled:opacity-50">Clear results</button>}
                     <button type="button" onClick={() => closeOutcomeEditor(item.id)} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                   </div>
                 </div>}

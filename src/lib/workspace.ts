@@ -81,6 +81,18 @@ export function assistedContentSnapshot(item: AssistedPost) {
   };
 }
 
+/** The posted mark, link and feedback visible before changing a posted record. */
+export function assistedReceiptSnapshot(item: AssistedPost) {
+  return {
+    status: item.status,
+    postedAt: item.postedAt ?? null,
+    postUrl: item.postUrl ?? null,
+    outcome: item.outcome ?? null,
+  };
+}
+
+export type AssistedReceiptSnapshot = ReturnType<typeof assistedReceiptSnapshot>;
+
 /** State shown when the owner confirms removal; notification bookkeeping is excluded. */
 export function assistedDeletionSnapshot(item: AssistedPost) {
   return {
