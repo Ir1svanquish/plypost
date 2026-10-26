@@ -2,6 +2,18 @@
 
 [MIT License](LICENSE)
 
+## For judges
+
+Plypost is a web workspace for turning one idea into posts tailored for several social platforms. Write a draft, attach images or a short video, review each platform's wording, and prepare a manual publishing checklist. Drafts and media remain in the app's SQLite workspace. The assisted handoff does not post on your behalf.
+
+The optional AI tools make runtime calls to Nebius Token Factory. NVIDIA Nemotron 3 Super drafts platform versions, suggests a weekly plan from a brand brief, and checks a proposed post against its source text. NVIDIA Nemotron 3.5 Super VL can draft a caption from one image the user selects. Suggestions stay editable and require a person to accept them. AI requests and credentials are handled on the server.
+
+[Hosted demo](https://plypost.onrender.com/) · [Local setup](#本机运行) · [English judging and submission draft](docs/submission.md). The hosted demo requires a separate judge login supplied in the private Devpost testing instructions; no credentials are stored in this repository.
+
+### Local setup in English
+
+Use Node.js 24.14 or newer within major version 24. Run `npm ci`, copy `.env.example` to `.env.local`, and run `npm run hash-password`. Put the chosen email and the generated password hash in `PLYPOST_OWNER_EMAIL` and `PLYPOST_OWNER_PASSWORD_HASH` in `.env.local`; add `NEBIUS_API_KEY` only if you want to call the AI models. Start with `npm run dev` and open `http://localhost:3000`. Keep `.env.local` and `data/` private. For a fictional, separate workspace without social account connections, run `npm run demo` and read the generated login details in the ignored `data/demo/login.txt`. Run `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build` to check the project.
+
 Plypost 是一个多平台发帖工作台。写一份草稿，再按平台改文案、存图片、设提醒。可在本机运行；[公开演示站](https://plypost.onrender.com/)由单实例 Render 服务托管，GitHub 更新需要手动部署。
 
 新草稿从空白开始，不预选平台。写帖页在正文框内用 **＋** 添加图片或视频；选中的图片缩略图和视频标记会留在正文下方，可直接移除。正文下方的工具栏可插入表情、话题符号，填写地点备注，或打开目标日期。地点只是人工发布时的提示，不读取定位，也不会自动添加平台地理标签。图片缩略图仍只对登录账号可见，下载原图不受影响。正文下方展开 **Generate caption** 选写法；其它选项按需展开。可以只存标题或素材，稍后再补文案。
