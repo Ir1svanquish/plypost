@@ -484,7 +484,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
 
   async function changeWorkspace(action: string, extra: Record<string, unknown>) {
     if (restoringBackupRef.current) throw new Error("Wait for the full backup restore to finish.");
-    workspaceSnapshotGate.current.beginWrite();
+    const ticket = workspaceSnapshotGate.current.beginWrite();
+    let succeeded = false;
+    let applySnapshot = () => {};
     try {
       const response = await fetch("/api/workspace", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -503,14 +505,19 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         if (typeof data.code === "string") failure.code = data.code;
         throw failure;
       }
-      setDrafts(data.drafts);
-      setSchedule(data.schedule);
-      setAssisted(data.assisted);
-      setAuditLog(data.log);
-      setWorkerLastSeen(data.workerLastSeen);
+      applySnapshot = () => {
+        setDrafts(data.drafts);
+        setSchedule(data.schedule);
+        setAssisted(data.assisted);
+        setAuditLog(data.log);
+        setWorkerLastSeen(data.workerLastSeen);
+      };
+      succeeded = true;
       return data;
     } finally {
-      workspaceSnapshotGate.current.endWrite();
+      const { apply, refresh } = workspaceSnapshotGate.current.endWrite(ticket, succeeded);
+      if (apply) applySnapshot();
+      if (refresh) void refreshWorkspace().catch(() => {});
     }
   }
 
