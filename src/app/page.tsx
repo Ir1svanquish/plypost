@@ -46,6 +46,7 @@ import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisp
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
 import { WorkspaceSnapshotGate } from "@/lib/workspace-snapshot-gate";
+import { ShownReminderReceipts } from "@/lib/reminder-receipts";
 import { WORKSPACE_KEY, assistedContentSnapshot, assistedDeletionSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type AssistedReceiptSnapshot, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 import { MAX_POST_IMAGES, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
@@ -240,7 +241,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const workspaceSnapshotGate = useRef(new WorkspaceSnapshotGate());
   const initialWorkspaceLoad = useRef(true);
-  const pendingNotificationIds = useRef(new Set<string>());
+  const pendingNotificationIds = useRef(new ShownReminderReceipts());
+  const notificationSyncWarned = useRef(false);
   const [assistDestination, setAssistDestination] = useState<AssistedDestinationId>(assistedOnlyDisplayIds[0]);
   const [assistOverrides, setAssistOverrides] = useState<Partial<Record<AssistedDestinationId, string>>>({});
   const [assistTime, setAssistTime] = useState("");
@@ -519,6 +521,15 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
+  async function syncShownReminders() {
+    const result = await pendingNotificationIds.current.flush((ids) => changeWorkspace("mark-assisted-notified", { ids }));
+    if (result === "saved") notificationSyncWarned.current = false;
+    if (result === "failed" && pendingNotificationIds.current.size && !notificationSyncWarned.current) {
+      notificationSyncWarned.current = true;
+      setNotice({ kind: "error", text: "Reminder was shown, but its status could not be saved. Plypost will retry while this page stays open." });
+    }
+  }
+
   useEffect(() => {
     try {
       const saved = readOwnerEditorCache(localStorage, email);
@@ -653,20 +664,22 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         body: due.length === 1 ? `${assistedDestinations[due[0].destination].name}: ${due[0].title}` : `${due.length} posts are ready for your review.`,
         tag: "socialflow-assisted-due",
       });
-      for (const item of due) pendingNotificationIds.current.add(item.id);
-      void changeWorkspace("mark-assisted-notified", { ids: due.map((item) => item.id) }).catch(() => {
-        setNotice({ kind: "error", text: "Reminder was shown, but its status could not be saved. Check the server connection." });
-      });
+      pendingNotificationIds.current.markShown(due.map((item) => item.id));
+      void syncShownReminders();
     } catch {
       setNotificationPermission("unsupported");
     }
   }, [assisted, hydrated, workspaceReady, now, notificationPermission]);
 
   useEffect(() => {
-    for (const id of pendingNotificationIds.current) {
+    if (workspaceReady && now && pendingNotificationIds.current.size) void syncShownReminders();
+  }, [workspaceReady, now]);
+
+  useEffect(() => {
+    for (const id of pendingNotificationIds.current.ids()) {
       const item = assisted.find((entry) => entry.id === id);
-      if (!item || item.status !== "queued" || !hasManualReminder(item) || Date.parse(item.scheduledFor) > now) {
-        pendingNotificationIds.current.delete(id);
+      if (!item || item.status !== "queued" || !hasManualReminder(item) || item.notifiedAt || Date.parse(item.scheduledFor) > now) {
+        pendingNotificationIds.current.remove(id);
       }
     }
   }, [assisted, now]);
