@@ -1130,16 +1130,24 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
         openView("compose");
         return;
       }
-      setPendingEditorSwitch(null);
       if (target.kind === "draft") {
         const refreshed = await refreshWorkspace();
+        if (editorRevision.current !== originalRevision || !sameEditorContent(editorContentRef.current, originalContent)) {
+          setPendingEditorSwitch(null);
+          setNotice({ kind: "error", text: "The editor changed while the next draft was loading. Your new edits were kept; review them before changing drafts." });
+          openView("compose");
+          return;
+        }
         const latest = (refreshed.drafts as SavedDraft[]).find((draft) => draft.id === target.draft.id);
         if (!latest) throw new Error("The target draft was deleted. Your current changes were saved; choose another draft.");
+        setPendingEditorSwitch(null);
         applyEditorSwitch({ ...target, draft: latest });
       } else {
+        setPendingEditorSwitch(null);
         applyEditorSwitch(target);
       }
     } catch (error) {
+      setPendingEditorSwitch(null);
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not open the target draft after saving." });
       openView("compose");
     } finally {
@@ -1943,12 +1951,12 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     </dialog>}
     {pendingEditorSwitch && <dialog ref={switchDialogRef} onCancel={(event) => { event.preventDefault(); if (!switchSaving) setPendingEditorSwitch(null); }} aria-labelledby="unsaved-editor-title" aria-describedby="unsaved-editor-description" className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">
       <h2 id="unsaved-editor-title" className="text-[19px] font-bold tracking-[-0.025em]">{pendingDraftSave ? "Check this save" : "Unsaved changes"}</h2>
-      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">{pendingDraftSave ? "The last save has not been confirmed. Check it before" : "Your current text, platform versions, and image choices have changed. Save your edits before"} {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : pendingEditorSwitch.kind === "planned" ? "opening a copy of this planned post" : "starting a draft from a posted handoff"}. {pendingDraftSave ? "Discarding here also clears the pending check." : needsDraftRecovery ? "If the saved draft changed elsewhere, save your edits as a new draft." : ""}</p>
+      <p id="unsaved-editor-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">{pendingDraftSave ? "The last save has not been confirmed. Check it before" : "Your current text, platform versions, and image choices have changed. Save your edits before"} {pendingEditorSwitch.kind === "new" ? "starting a new draft" : pendingEditorSwitch.kind === "draft" ? `opening “${pendingEditorSwitch.draft.title}”` : pendingEditorSwitch.kind === "planned" ? "opening a copy of this planned post" : "starting a draft from a posted handoff"}{". "}{pendingDraftSave ? "Discarding here also clears the pending check." : needsDraftRecovery ? "If the saved draft changed elsewhere, save your edits as a new draft." : ""}</p>
       {!canSaveEditor && <p className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Add a title, caption, platform text or image before saving.</p>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
         <button type="button" autoFocus onClick={() => setPendingEditorSwitch(null)} disabled={switchSaving} className="rounded-lg px-3 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Keep editing</button>
         <button type="button" onClick={() => { const target = pendingEditorSwitch; setPendingEditorSwitch(null); applyEditorSwitch(target); }} disabled={switchSaving} className="rounded-lg border border-[var(--danger)] px-3 py-2.5 text-[12px] font-semibold text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50">Discard changes</button>
-        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !canSaveEditor} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving…" : pendingDraftSave ? "Check save and continue" : needsDraftRecovery ? "Save as new and continue" : "Save and continue"}</button>
+        <button type="button" onClick={() => { void saveAndSwitch(); }} disabled={switchSaving || !canSaveEditor} className="gradient-button rounded-lg px-3 py-2.5 text-[12px] font-bold text-white disabled:opacity-50">{switchSaving ? "Saving and opening…" : pendingDraftSave ? "Check save and continue" : needsDraftRecovery ? "Save as new and continue" : "Save and continue"}</button>
       </div>
     </dialog>}
     </>
