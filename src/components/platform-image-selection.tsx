@@ -50,7 +50,7 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
           aria-label={`${selected ? "Remove" : "Select"} draft image ${index + 1}${sourceAlt?.[index] ? `, ${sourceAlt[index]}` : ""}`}
           aria-pressed={selected}
           className={`relative aspect-square overflow-hidden rounded-lg border-2 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:opacity-45 ${selected ? "border-[var(--accent)]" : "border-[var(--line)] hover:border-[var(--accent-border)]"}`}>
-          <Image unoptimized loading="lazy" src={`/api/media/${encodeURIComponent(id)}`} alt="" fill sizes="96px" className="object-cover" />
+          <Image unoptimized loading="lazy" src={`/api/media/${encodeURIComponent(id)}?thumb=1`} alt="" fill sizes="96px" className="object-cover" />
           <span className="absolute bottom-1 left-1 rounded bg-[var(--surface)] px-1 text-[10px] font-bold text-[var(--text)]">{index + 1}</span>
           {selected && <span className="absolute right-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white"><Check size={11} aria-hidden="true" />{selectedPosition + 1}</span>}
         </button>;
