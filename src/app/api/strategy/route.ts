@@ -5,7 +5,7 @@ import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import {
   approveStrategyIdea, createWeeklyPlan, dismissStrategyIdea, listStrategy, loadBrandBrief,
-  saveBrandBrief, updateStrategyIdea,
+  saveBrandBriefIfCurrent, StrategyConflictError, updateStrategyIdea,
 } from "@/lib/server/strategy";
 import { reserveAiRequest } from "@/lib/server/workspace";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
@@ -82,9 +82,17 @@ export async function POST(request: Request) {
   const input = body.value;
   try {
     switch (input.action) {
-      case "save-brief":
-        saveBrandBrief(user, input.brief);
+      case "save-brief": {
+        const expected = input.expectedUpdatedAt;
+        if (!Object.hasOwn(input, "expectedUpdatedAt") ||
+            (expected !== null && (typeof expected !== "string" ||
+              !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expected) ||
+              !Number.isFinite(Date.parse(expected)) || new Date(expected).toISOString() !== expected))) {
+          throw new Error("Reload the brand profile before saving.");
+        }
+        saveBrandBriefIfCurrent(user, input.brief, expected);
         break;
+      }
       case "update-idea":
         updateStrategyIdea(user, input.planId, input.ideaId, input.patch);
         break;
@@ -105,6 +113,9 @@ export async function POST(request: Request) {
     }
     return NextResponse.json(listStrategy(user), { headers: responseHeaders });
   } catch (error) {
+    if (error instanceof StrategyConflictError) {
+      return NextResponse.json({ ...listStrategy(user), error: error.message }, { status: 409, headers: responseHeaders });
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update strategy." }, { status: 400 });
   }
 }

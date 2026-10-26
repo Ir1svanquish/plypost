@@ -31,16 +31,34 @@ export function listStrategy(userId: string): StrategyState {
   return { brief: loadBrandBrief(userId), plans: rows.map((row) => decodedPlan(row)) };
 }
 
-export function saveBrandBrief(userId: string, value: unknown): BrandBrief {
+export class StrategyConflictError extends Error {}
+
+function storeBrandBrief(userId: string, value: unknown, expectedUpdatedAt?: string | null): BrandBrief {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Complete the brand brief first.");
-  const brief = parseBrandBrief({ ...value, updatedAt: new Date().toISOString() });
-  if (!brief) throw new Error("Complete the required brand fields and check their length, pillars and destinations.");
-  transaction((db) => {
+  const candidate = parseBrandBrief({ ...value, updatedAt: new Date().toISOString() });
+  if (!candidate) throw new Error("Complete the required brand fields and check their length, pillars and destinations.");
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM brand_briefs WHERE user_id=?").get(userId) as PayloadRow | undefined;
+    const previous = row ? parseBrandBrief(JSON.parse(row.payload)) : null;
+    if (row && !previous) throw new Error("Stored brand brief is invalid.");
+    if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== (previous?.updatedAt ?? null)) {
+      throw new StrategyConflictError("Brand profile changed in another window. Review both versions before saving again.");
+    }
+    const updatedAt = new Date(Math.max(Date.now(), previous ? Date.parse(previous.updatedAt) + 1 : 0)).toISOString();
+    const brief = { ...candidate, updatedAt };
     db.prepare("INSERT INTO brand_briefs(user_id,payload) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload")
       .run(userId, JSON.stringify(brief));
     audit(userId, "strategy.brief_saved");
+    return brief;
   });
-  return brief;
+}
+
+export function saveBrandBrief(userId: string, value: unknown): BrandBrief {
+  return storeBrandBrief(userId, value);
+}
+
+export function saveBrandBriefIfCurrent(userId: string, value: unknown, expectedUpdatedAt: string | null): BrandBrief {
+  return storeBrandBrief(userId, value, expectedUpdatedAt);
 }
 
 export function createWeeklyPlan(

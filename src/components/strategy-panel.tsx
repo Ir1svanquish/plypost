@@ -55,6 +55,17 @@ function briefIsDirty(form: BriefForm, saved: BrandBrief | null): boolean {
   return JSON.stringify(normalizedBrief(form)) !== JSON.stringify(normalizedBrief(asForm(saved)));
 }
 
+function briefFields(form: BriefForm): { label: string; value: string }[] {
+  const value = normalizedBrief(form);
+  return [
+    { label: "Name", value: value.brandName }, { label: "Audience", value: value.audience },
+    { label: "Goal", value: value.goal }, { label: "Voice", value: value.voice },
+    { label: "Offer", value: value.description }, { label: "Facts and constraints", value: value.facts },
+    { label: "Topics", value: value.contentPillars.join(", ") },
+    { label: "Platforms", value: value.platforms.map((id) => platforms[id].name).join(", ") },
+  ];
+}
+
 export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, onOpenAssisted, onDirtyChange, refreshToken = 0 }: {
   drafts: SavedDraft[];
   assisted: AssistedPost[];
@@ -69,6 +80,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [brief, setBrief] = useState<BrandBrief | null>(null);
   const [form, setForm] = useState<BriefForm>(() => asForm(null));
+  const [briefBaseVersion, setBriefBaseVersion] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [plans, setPlans] = useState<WeeklyPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState("");
@@ -81,6 +93,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
   const [editPlatforms, setEditPlatforms] = useState<PlatformId[]>([]);
   const [newDrafts, setNewDrafts] = useState<Record<string, SavedDraft>>({});
   const dirtyBrief = briefIsDirty(form, brief);
+  const briefConflict = briefBaseVersion !== (brief?.updatedAt ?? null);
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? plans[0];
   const editingIdea = selectedPlan?.ideas.find((idea) => idea.id === editingIdeaId);
   const dirtyIdea = Boolean(editingIdea && (
@@ -119,6 +132,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
         if (controller.signal.aborted) return;
         setBrief(data.brief);
         setForm(asForm(data.brief));
+        setBriefBaseVersion(data.brief?.updatedAt ?? null);
         setPlans(data.plans);
         setNewDrafts({});
         setSelectedPlanId(data.plans[0]?.id ?? "");
@@ -144,6 +158,13 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
         body: JSON.stringify({ action, ...body }),
       });
       const data = await response.json() as StrategyPayload;
+      if (response.status === 409 && data.brief !== undefined && Array.isArray(data.plans)) {
+        setBrief(data.brief);
+        setPlans(data.plans);
+        setProfileOpen(true);
+        setMessage({ kind: "error", text: data.error || "Brand profile changed in another window. Review both versions." });
+        return null;
+      }
       if (!response.ok) throw new Error(data.error || "Could not update your AI plan.");
       setBrief(data.brief);
       setPlans(data.plans);
@@ -167,14 +188,25 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
       setMessage({ kind: "error", text: "Use one to five distinct content pillars, each under 120 characters." });
       return;
     }
-    const data = await mutate("save-brief", { brief: candidate });
+    if (briefConflict) {
+      setMessage({ kind: "error", text: "Review the latest brand profile and choose which version to keep before saving." });
+      setProfileOpen(true);
+      return;
+    }
+    const data = await mutate("save-brief", { brief: candidate, expectedUpdatedAt: briefBaseVersion });
     if (!data) return;
     setForm(asForm(data.brief));
+    setBriefBaseVersion(data.brief?.updatedAt ?? null);
     setMessage({ kind: "success", text: "Brand profile saved. New plans will use this version; existing plans keep their original profile." });
     setProfileOpen(false);
   }
 
   async function generate() {
+    if (briefConflict) {
+      setMessage({ kind: "error", text: "Review the changed brand profile before generating ideas." });
+      setProfileOpen(true);
+      return;
+    }
     if (dirtyIdea) {
       setMessage({ kind: "error", text: "Save or cancel your idea edits before generating another plan." });
       return;
@@ -253,6 +285,12 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
           <ChevronDown size={17} aria-hidden="true" className={`shrink-0 text-[var(--text-soft)] transition-transform ${profileOpen ? "rotate-180" : ""}`} />
         </button>
         {profileOpen && <div id="strategy-brief-form" className="grid gap-4 border-t border-[var(--line)] p-4 sm:grid-cols-2 sm:p-5">
+          {briefConflict && <div role="alert" className="rounded-xl border border-[var(--warning)] bg-[var(--surface)] p-4 text-[12px] text-[var(--text-secondary)] sm:col-span-2">
+            <p className="font-bold text-[var(--warning)]">Brand profile changed in another window. Your edits are still here.</p>
+            <p className="mt-1">Compare both versions, then choose one. Saving remains paused until you decide.</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">{([ ["Latest saved", asForm(brief)], ["Your edits", form] ] as const).map(([label, values]) => <div key={label} className="max-h-56 overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] p-3"><p className="font-bold text-[var(--text)]">{label}</p>{label === "Latest saved" && !brief ? <p className="mt-1">No profile is saved.</p> : <dl className="mt-2 space-y-1">{briefFields(values).map((field) => <div key={field.label}><dt className="inline font-semibold">{field.label}: </dt><dd className="inline whitespace-pre-wrap break-words">{field.value || "—"}</dd></div>)}</dl>}</div>)}</div>
+            <div className="mt-3 flex flex-wrap gap-4"><button type="button" onClick={() => { setForm(asForm(brief)); setBriefBaseVersion(brief?.updatedAt ?? null); setMessage(null); }} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Use latest saved</button><button type="button" onClick={() => { setBriefBaseVersion(brief?.updatedAt ?? null); setMessage(null); }} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Keep my edits</button></div>
+          </div>}
           <label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Brand or account name <span className="text-[var(--danger)]">*</span><input value={form.brandName} onChange={(event) => setForm({ ...form, brandName: event.target.value })} maxLength={80} disabled={busy !== null} placeholder="Your brand" className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)]" /></label>
           <label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Audience <span className="text-[var(--danger)]">*</span><input value={form.audience} onChange={(event) => setForm({ ...form, audience: event.target.value })} maxLength={500} disabled={busy !== null} placeholder="Who do you want to reach?" className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)]" /></label>
           <label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Goal <span className="text-[var(--danger)]">*</span><input value={form.goal} onChange={(event) => setForm({ ...form, goal: event.target.value })} maxLength={500} disabled={busy !== null} placeholder="What should these posts achieve?" className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)]" /></label>
@@ -261,13 +299,13 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
           <label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Content pillars <span className="text-[var(--danger)]">*</span><span className="block font-normal text-[var(--text-soft)]">One topic per line, up to five</span><textarea value={form.pillarsText} onChange={(event) => setForm({ ...form, pillarsText: event.target.value })} rows={3} disabled={busy !== null} placeholder={"Product tips\nLessons learned"} className="mt-1.5 w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)]" /></label>
           <label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Confirmed facts and constraints <span className="font-normal text-[var(--text-soft)]">(optional)</span><span className="block font-normal text-[var(--text-soft)]">Only give AI claims you can verify.</span><textarea value={form.facts} onChange={(event) => setForm({ ...form, facts: event.target.value })} maxLength={3000} rows={3} disabled={busy !== null} placeholder="Facts to use, claims to avoid, or a source URL" className="mt-1.5 w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)]" /></label>
           <fieldset className="sm:col-span-2" disabled={busy !== null}><legend className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Platforms <span className="text-[var(--danger)]">*</span></legend><div className="flex flex-wrap gap-2">{platformDisplayIds.map((id) => <label key={id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-semibold ${form.platforms.includes(id) ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-secondary)]"}`}><input type="checkbox" checked={form.platforms.includes(id)} onChange={() => setForm({ ...form, platforms: togglePlatform(form.platforms, id) })} className="accent-[var(--accent)]" />{platforms[id].name}</label>)}</div></fieldset>
-          <div className="flex flex-wrap items-center justify-end gap-3 sm:col-span-2"><span className="mr-auto text-[11px] leading-5 text-[var(--text-soft)]">Stored in your account. Only this saved brand profile is sent to Nebius when you click Generate ideas; posting results stay local.</span><button type="button" onClick={() => { setForm(asForm(brief)); setMessage(null); }} disabled={!dirtyBrief || busy !== null} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-45">Discard edits</button><button type="button" onClick={() => void saveBrief()} disabled={!dirtyBrief || busy !== null} className="gradient-button rounded-lg px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-45">{busy === "save-brief" ? "Saving…" : "Save profile"}</button></div>
+          <div className="flex flex-wrap items-center justify-end gap-3 sm:col-span-2"><span className="mr-auto text-[11px] leading-5 text-[var(--text-soft)]">Stored in your account. Only this saved brand profile is sent to Nebius when you click Generate ideas; posting results stay local.</span><button type="button" onClick={() => { setForm(asForm(brief)); setBriefBaseVersion(brief?.updatedAt ?? null); setMessage(null); }} disabled={(!dirtyBrief && !briefConflict) || busy !== null} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-45">Discard edits</button><button type="button" onClick={() => void saveBrief()} disabled={!dirtyBrief || briefConflict || busy !== null} className="gradient-button rounded-lg px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-45">{busy === "save-brief" ? "Saving…" : "Save profile"}</button></div>
         </div>}
       </div>
 
       <div className="flex flex-col gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1"><h3 className="text-[14px] font-bold text-[var(--text)]">Make a weekly plan</h3><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">AI suggests up to three topics from your saved profile. You decide what becomes a draft.</p><div className="mt-4 max-w-xs"><label className="text-[12px] font-semibold text-[var(--text-secondary)]">Week<select value={weekStart} onChange={(event) => setWeekStart(event.target.value)} disabled={busy !== null} className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)]">{choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select></label></div><p className="mt-3 text-[11px] leading-5 text-[var(--text-soft)]">Uses NVIDIA Nemotron 3 Super through Nebius Token Factory. Clicking Generate sends only your saved brand profile; posting results stay local.</p></div>
-        <button type="button" onClick={() => void generate()} disabled={!brief || dirtyBrief || busy !== null} className="gradient-button inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-3 text-[13px] font-bold text-white disabled:opacity-45"><Sparkles size={16} aria-hidden="true" />{busy === "generate" ? "Generating…" : "Generate ideas"}</button>
+        <button type="button" onClick={() => void generate()} disabled={!brief || dirtyBrief || briefConflict || busy !== null} className="gradient-button inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-3 text-[13px] font-bold text-white disabled:opacity-45"><Sparkles size={16} aria-hidden="true" />{busy === "generate" ? "Generating…" : "Generate ideas"}</button>
       </div>
       {!brief && <p className="rounded-xl bg-[var(--info-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--info)]">Save your brand profile to start. No example ideas are shown in place of real AI results.</p>}
       {dirtyBrief && <p className="rounded-xl bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]">Your profile has unsaved changes. Save them before generating ideas.</p>}

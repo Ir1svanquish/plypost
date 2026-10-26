@@ -1,5 +1,6 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,7 @@ import { POST as strategyPost } from "../src/app/api/strategy/route.ts";
 import { importLegacyLibrary, importLibrary } from "../src/lib/server/workspace.ts";
 import {
   approveStrategyIdea, createWeeklyPlan, dismissStrategyIdea, listStrategy,
-  saveBrandBrief, updateStrategyIdea,
+  saveBrandBrief, saveBrandBriefIfCurrent, StrategyConflictError, updateStrategyIdea,
 } from "../src/lib/server/strategy.ts";
 import { parseBrandBrief, parseGeneratedIdeas, parseWeeklyPlan, validWeekStart } from "../src/lib/strategy.ts";
 
@@ -43,6 +44,39 @@ test("brand and model parsers reject malformed claims, dates and destinations", 
   assert.equal(parseGeneratedIdeas(JSON.stringify({ ideas: [{ ...proposals[0], platforms: ["threads"] }] }), briefInput.platforms), null);
   assert.equal(parseGeneratedIdeas(JSON.stringify({ ideas: [{ ...proposals[0], seed: "" }] }), briefInput.platforms), null);
   assert.equal(parseGeneratedIdeas("Here are ideas: " + JSON.stringify({ ideas: proposals }), briefInput.platforms), null);
+});
+
+test("a stale brand profile cannot replace newer AI planning facts", () => {
+  const user = `brief-${randomUUID()}@example.test`;
+  const first = saveBrandBriefIfCurrent(user, briefInput, null);
+  assert.throws(() => saveBrandBriefIfCurrent(user, { ...briefInput, facts: "Stale" }, null), StrategyConflictError);
+  const latest = saveBrandBriefIfCurrent(user, { ...briefInput, facts: "Updated facts" }, first.updatedAt);
+  assert.ok(latest.updatedAt > first.updatedAt);
+  assert.throws(() => saveBrandBriefIfCurrent(user, { ...briefInput, goal: "Old window" }, first.updatedAt), StrategyConflictError);
+  assert.deepEqual(listStrategy(user).brief, latest);
+});
+
+test("brand profile API returns the latest version on a stale save", async () => {
+  const user = `brief-api-${randomUUID()}@example.test`;
+  process.env.PLYPOST_OWNER_EMAIL = user;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  try {
+    const first = saveBrandBriefIfCurrent(user, briefInput, null);
+    const latest = saveBrandBriefIfCurrent(user, { ...briefInput, voice: "Updated elsewhere" }, first.updatedAt);
+    const session = createSession(user);
+    const request = new globalThis.Request("http://localhost:3000/api/strategy", {
+      method: "POST",
+      headers: { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${session}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "save-brief", brief: { ...briefInput, voice: "Old window" }, expectedUpdatedAt: first.updatedAt }),
+    });
+    const response = await strategyPost(request);
+    assert.equal(response.status, 409);
+    assert.deepEqual((await response.json()).brief, latest);
+    assert.deepEqual(listStrategy(user).brief, latest);
+  } finally {
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+  }
 });
 
 test("reviewed ideas become owner-scoped drafts exactly once, with immutable approval snapshot", () => {
