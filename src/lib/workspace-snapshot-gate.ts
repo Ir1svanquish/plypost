@@ -9,6 +9,7 @@ export class WorkspaceSnapshotGate {
   private lastAppliedWrite = 0;
   private writesInFlight = 0;
   private reconcileAfterWrites = false;
+  private idleWaiters: Array<() => void> = [];
 
   beginRead(): ReadTicket {
     return { generation: this.generation, sequence: ++this.sequence };
@@ -19,6 +20,19 @@ export class WorkspaceSnapshotGate {
         ticket.sequence < this.lastAppliedRead) return false;
     this.lastAppliedRead = ticket.sequence;
     return true;
+  }
+
+  /** Retry a superseded user read after current writes settle. Background polls can use one attempt. */
+  async read<T>(load: () => Promise<T>, maxAttempts = 3): Promise<T> {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const ticket = this.beginRead();
+      const snapshot = await load();
+      if (this.acceptRead(ticket)) return snapshot;
+      if (attempt + 1 < maxAttempts && this.writesInFlight) {
+        await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+      }
+    }
+    throw new Error("Workspace changed while loading. Refresh and try again.");
   }
 
   beginWrite(): WriteTicket {
@@ -36,6 +50,9 @@ export class WorkspaceSnapshotGate {
     if (apply) this.lastAppliedWrite = ticket.sequence;
     const refresh = this.writesInFlight === 0 && this.reconcileAfterWrites;
     if (refresh) this.reconcileAfterWrites = false;
+    if (this.writesInFlight === 0) {
+      for (const resolve of this.idleWaiters.splice(0)) resolve();
+    }
     return { apply, refresh };
   }
 }

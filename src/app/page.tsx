@@ -460,20 +460,18 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     if (restoringBackup) restoreOverlayRef.current?.focus();
   }, [restoringBackup]);
 
-  async function refreshWorkspace() {
-    const ticket = workspaceSnapshotGate.current.beginRead();
-    const response = await fetch("/api/workspace", { cache: "no-store" });
-    if (!response.ok) throw new Error("Could not load your server workspace.");
-    const data = await response.json().catch(() => {
-      const failure = new Error(response.status >= 500
-        ? "The server is temporarily unavailable. Your editor is unchanged; retry when it recovers."
-        : "The server returned an unreadable response. Your editor is unchanged.") as Error & { status?: number };
-      failure.status = response.status;
-      throw failure;
-    });
-    if (!workspaceSnapshotGate.current.acceptRead(ticket)) {
-      throw new Error("Workspace changed while loading. Refresh and try again.");
-    }
+  async function refreshWorkspace(retryStale = true) {
+    const data = await workspaceSnapshotGate.current.read(async () => {
+      const response = await fetch("/api/workspace", { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load your server workspace.");
+      return response.json().catch(() => {
+        const failure = new Error(response.status >= 500
+          ? "The server is temporarily unavailable. Your editor is unchanged; retry when it recovers."
+          : "The server returned an unreadable response. Your editor is unchanged.") as Error & { status?: number };
+        failure.status = response.status;
+        throw failure;
+      });
+    }, retryStale ? 3 : 1);
     setDrafts(data.drafts);
     setSchedule(data.schedule);
     setAssisted(data.assisted);
@@ -630,7 +628,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
   }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave, hydrated, email]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace().then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
+    const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace(false).then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
     return () => window.clearInterval(timer);
   }, []);
 
