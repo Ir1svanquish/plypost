@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { passwordHash } from "../src/lib/server/auth.ts";
-import { assistedContentSnapshot } from "../src/lib/workspace.ts";
+import { assistedContentSnapshot, assistedDeletionSnapshot } from "../src/lib/workspace.ts";
 import { randomUUID } from "node:crypto";
 import { isPortIsReserved } from "next/dist/lib/helpers/get-reserved-port.js";
 
@@ -251,9 +251,11 @@ test("stores assisted checklist actions behind the owner session", async () => {
   const reviewedMigration = await post("/api/workspace", { action: "migrate-browser-workspace", backup: { version: 3, drafts: [], schedule: [], assisted: [reviewedItem] } });
   assert.equal(reviewedMigration.status, 200);
   assert.equal((await reviewedMigration.json()).assisted.length, 3);
-  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: assisted.id })).status, 200);
-  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: migratedItem.id })).status, 200);
-  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: reviewedItem.id })).status, 200);
+  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: assisted.id })).status, 409);
+  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: assisted.id, expectedState: assistedDeletionSnapshot(assisted) })).status, 409);
+  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: assisted.id, expectedState: assistedDeletionSnapshot(postedItem) })).status, 200);
+  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: migratedItem.id, expectedState: assistedDeletionSnapshot(migratedItem) })).status, 200);
+  assert.equal((await post("/api/workspace", { action: "delete-assisted", id: reviewedItem.id, expectedState: assistedDeletionSnapshot(reviewedItem) })).status, 200);
   assert.deepEqual((await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json()).assisted, []);
 });
 

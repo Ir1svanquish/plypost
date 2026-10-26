@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { assistedContentSnapshot, draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { assistedContentSnapshot, assistedDeletionSnapshot, draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { imageLimitForDestination } from "../media-policy";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
@@ -470,11 +470,19 @@ export function markAssistedNotified(userId: string, ids: unknown): void {
   });
 }
 
-export function deleteAssisted(userId: string, id: string): boolean {
+export function deleteAssisted(userId: string, id: string, expectedState: unknown): boolean {
   if (!validId(id)) return false;
-  const result = database().prepare("DELETE FROM assisted WHERE id=? AND user_id=?").run(id, userId);
-  if (result.changes) audit(userId, "assisted.deleted", id);
-  return Boolean(result.changes);
+  return transaction((db) => {
+    const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
+    if (!row) return false;
+    const current = JSON.parse(row.payload) as AssistedPost;
+    if (!isRecord(expectedState) || JSON.stringify(expectedState) !== JSON.stringify(assistedDeletionSnapshot(current))) {
+      throw new AssistedConflictError("This handoff changed in another window. Review its latest version before removing it.");
+    }
+    db.prepare("DELETE FROM assisted WHERE id=? AND user_id=?").run(id, userId);
+    audit(userId, "assisted.deleted", id);
+    return true;
+  });
 }
 
 export function migrateAssisted(userId: string, raw: unknown): "imported" | "skipped" {

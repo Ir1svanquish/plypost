@@ -81,6 +81,20 @@ export function assistedContentSnapshot(item: AssistedPost) {
   };
 }
 
+/** State shown when the owner confirms removal; notification bookkeeping is excluded. */
+export function assistedDeletionSnapshot(item: AssistedPost) {
+  return {
+    ...assistedContentSnapshot(item),
+    title: item.title,
+    scheduledFor: item.scheduledFor,
+    reminderEnabled: item.reminderEnabled !== false,
+    status: item.status,
+    postedAt: item.postedAt ?? null,
+    postUrl: item.postUrl ?? null,
+    outcome: item.outcome ?? null,
+  };
+}
+
 export type AssistedOutcomeInput = {
   views?: number;
   likes?: number;

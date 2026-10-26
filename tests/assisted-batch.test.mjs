@@ -11,7 +11,7 @@ import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
 import { createVideo } from "../src/lib/server/video.ts";
 import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText } from "../src/lib/server/workspace.ts";
-import { assistedContentSnapshot, assistedState, hasManualReminder, parseWorkspace } from "../src/lib/workspace.ts";
+import { assistedContentSnapshot, assistedDeletionSnapshot, assistedState, hasManualReminder, parseWorkspace } from "../src/lib/workspace.ts";
 import { buildPlanAgenda } from "../src/lib/plan-agenda.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
 
@@ -64,10 +64,10 @@ test("batch handoffs snapshot saved platform versions and media, while repeat re
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, [items[0], { ...items[1], scheduledFor: new Date(Date.now() + 180_000).toISOString() }]), /different or partial/);
   assert.throws(() => prepareAssistedBatch(owner, randomUUID(), batchId, items), /different or partial/);
   assert.equal(listWorkspace(owner).assisted.length, 2);
-  assert.equal(deleteAssisted(owner, first[0].id), true);
+  assert.equal(deleteAssisted(owner, first[0].id, assistedDeletionSnapshot(first[0])), true);
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, items), /different or partial/);
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, [items[1]]), /different or partial/);
-  assert.equal(deleteAssisted(owner, first[1].id), true);
+  assert.equal(deleteAssisted(owner, first[1].id, assistedDeletionSnapshot(first[1])), true);
   assert.throws(() => prepareAssistedBatch(owner, saved.id, batchId, items), /handoffs were removed/);
 });
 

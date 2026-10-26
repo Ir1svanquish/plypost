@@ -9,7 +9,7 @@ import { unzipSync } from "fflate";
 import { closeDatabase } from "../src/lib/server/db.ts";
 import { buildHandoffPackage } from "../src/lib/server/handoff-package.ts";
 import { addAssisted, deleteAssisted, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedVideo } from "../src/lib/server/workspace.ts";
-import { assistedContentSnapshot } from "../src/lib/workspace.ts";
+import { assistedContentSnapshot, assistedDeletionSnapshot } from "../src/lib/workspace.ts";
 import { assertOwnedVideo, createVideo, deleteVideo, getVideo, listVideos, MAX_VIDEO_BYTES } from "../src/lib/server/video.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-video-"));
@@ -38,7 +38,7 @@ test("private video library deduplicates, checks ownership, and protects referen
   assert.throws(() => addAssisted(other, { ...handoff, id: randomUUID() }), /missing from your private library/);
   assert.equal(addAssisted(owner, handoff).videoId, stored.video.id);
   assert.throws(() => deleteVideo(owner, stored.video.id), /Detach this video from saved drafts and handoffs/);
-  assert.equal(deleteAssisted(owner, handoff.id), true);
+  assert.equal(deleteAssisted(owner, handoff.id, assistedDeletionSnapshot(handoff)), true);
   assert.equal(deleteVideo(owner, stored.video.id), true);
   assert.equal(getVideo(owner, stored.video.id), null);
 });
@@ -95,6 +95,6 @@ test("a saved video draft retains its clip through batch handoff and blocks prem
   assert.equal(handoff.videoId, video.id);
   assert.equal(deleteDraft(owner, saved.id, saved.updatedAt), true);
   assert.throws(() => deleteVideo(owner, video.id), /saved drafts and handoffs/);
-  assert.equal(deleteAssisted(owner, handoff.id), true);
+  assert.equal(deleteAssisted(owner, handoff.id, assistedDeletionSnapshot(handoff)), true);
   assert.equal(deleteVideo(owner, video.id), true);
 });

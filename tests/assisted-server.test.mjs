@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, rescheduleAssisted, saveDraft, setAssistedStatus, updateAssistedText } from "../src/lib/server/workspace.ts";
-import { assistedContentSnapshot, assistedState, parseWorkspace } from "../src/lib/workspace.ts";
+import { assistedContentSnapshot, assistedDeletionSnapshot, assistedState, parseWorkspace } from "../src/lib/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-assisted-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "assisted.sqlite");
@@ -72,8 +72,23 @@ test("assisted items persist and status, notification, and deletion are scoped t
   assert.equal(setAssistedStatus(owner, post.id, "queued"), true);
   assert.equal(listWorkspace(owner).assisted[0].postedAt, undefined);
   assert.equal(listWorkspace(owner).assisted[0].postUrl, undefined);
-  assert.equal(deleteAssisted(owner, post.id), true);
+  assert.equal(deleteAssisted(owner, post.id, assistedDeletionSnapshot(listWorkspace(owner).assisted[0])), true);
   assert.deepEqual(listWorkspace(owner).assisted, []);
+});
+
+test("a stale window cannot delete a handoff changed elsewhere", () => {
+  const post = item("Original handoff");
+  addAssisted(owner, post);
+  const reviewed = assistedDeletionSnapshot(post);
+  assert.equal(updateAssistedText(owner, post.id, post.text, "Updated in another window"), true);
+  assert.throws(() => deleteAssisted(owner, post.id, reviewed), /changed/);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).text, "Updated in another window");
+  const revised = listWorkspace(owner).assisted.find((entry) => entry.id === post.id);
+  const beforePosting = assistedDeletionSnapshot(revised);
+  assert.equal(setAssistedStatus(owner, post.id, "posted", undefined, assistedContentSnapshot(revised)), true);
+  assert.throws(() => deleteAssisted(owner, post.id, beforePosting), /changed/);
+  assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).status, "posted");
+  assert.equal(deleteAssisted(owner, post.id, assistedDeletionSnapshot(listWorkspace(owner).assisted.find((entry) => entry.id === post.id))), true);
 });
 
 test("moving a pending manual reminder keeps its content, resets notification, and rejects stale edits", () => {
@@ -236,5 +251,5 @@ test("assisted publishing enforces known platform limits without restricting oth
   assert.throws(() => addAssisted(owner, { ...item("x".repeat(301)), destination: "bluesky" }), /Fix platform draft limits/);
   const elsewhere = item("x".repeat(301));
   assert.deepEqual(addAssisted(owner, elsewhere), elsewhere);
-  assert.equal(deleteAssisted(owner, elsewhere.id), true);
+  assert.equal(deleteAssisted(owner, elsewhere.id, assistedDeletionSnapshot(elsewhere)), true);
 });

@@ -9,6 +9,7 @@ import sharp from "sharp";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { assertOwnedMedia, createMedia, deleteMedia, getMedia, listMedia, MAX_IMAGE_BYTES, MAX_OWNER_MEDIA_BYTES } from "../src/lib/server/media.ts";
 import { addAssisted, addSchedule, deleteAssisted, deleteDraft, deleteSchedule, importLibrary, listWorkspace, migrateAssisted, saveDraft } from "../src/lib/server/workspace.ts";
+import { assistedDeletionSnapshot } from "../src/lib/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-media-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "media.sqlite");
@@ -133,7 +134,7 @@ test("planned and assisted snapshots keep images after their source draft change
   assert.throws(() => deleteMedia(owner, image.id), /planned posts/);
   assert.equal(deleteSchedule(owner, plan.id), true);
   assert.throws(() => deleteMedia(owner, image.id), /assisted items/);
-  assert.equal(deleteAssisted(owner, assisted.id), true);
+  assert.equal(deleteAssisted(owner, assisted.id, assistedDeletionSnapshot(assisted)), true);
   assert.equal(deleteMedia(owner, image.id), true);
 });
 

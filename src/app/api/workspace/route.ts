@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       case "update-assisted-images": if (typeof input.id !== "string" || !updateAssistedImages(user, input.id, input.expectedMediaIds, input.expectedMediaAlt, input.mediaIds, input.mediaAlt)) throw new Error("Assisted item not found."); break;
       case "update-assisted-media-alt": if (typeof input.id !== "string" || !updateAssistedMediaAlt(user, input.id, input.expectedMediaIds, input.expectedMediaAlt, input.mediaAlt)) throw new Error("Assisted item not found."); break;
       case "mark-assisted-notified": markAssistedNotified(user, input.ids); break;
-      case "delete-assisted": if (typeof input.id !== "string" || !deleteAssisted(user, input.id)) throw new Error("Assisted item not found."); break;
+      case "delete-assisted": if (typeof input.id !== "string" || !deleteAssisted(user, input.id, input.expectedState)) throw new Error("Assisted item not found."); break;
       case "migrate-assisted": assistedMigration = migrateAssisted(user, input.items); break;
       case "add-schedule": addSchedule(user, input.item, input.timezone); break;
       case "reschedule-schedule": if (typeof input.id !== "string" || !rescheduleSchedule(user, input.id, input.scheduledFor, input.timezone)) throw new Error("Plan item not found or already running/completed."); break;

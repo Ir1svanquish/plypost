@@ -45,7 +45,7 @@ import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
-import { WORKSPACE_KEY, assistedContentSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, assistedContentSnapshot, assistedDeletionSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 import { MAX_POST_IMAGES, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
 const sampleDraft =
@@ -1466,6 +1466,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       setNotice({ kind: "success", text: success });
       return true;
     } catch (error) {
+      if ((error as { code?: string }).code === "ASSISTED_CONFLICT") await refreshWorkspace().catch(() => {});
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not update assisted publishing." });
       return false;
     } finally {
@@ -1657,9 +1658,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     return runAssistedAction("set-assisted-status", { id, status: "queued" }, "Post returned to your assisted publishing checklist.");
   }
 
-  async function removeAssisted(id: string) {
+  async function removeAssisted(post: AssistedPost) {
     if (!window.confirm("Remove this assisted post from your account?")) return;
-    await runAssistedAction("delete-assisted", { id }, "Assisted post removed from your account.");
+    await runAssistedAction("delete-assisted", { id: post.id, expectedState: assistedDeletionSnapshot(post) }, "Assisted post removed from your account.");
   }
 
   async function enableNotifications() {
