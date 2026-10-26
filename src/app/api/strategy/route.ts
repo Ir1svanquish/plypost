@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { planMessages } from "@/lib/ai-prompts";
-import { parseGeneratedIdeas, validWeekStart } from "@/lib/strategy";
+import { parseBrandBrief, parseGeneratedIdeas, validWeekStart, type BrandBrief } from "@/lib/strategy";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import {
@@ -22,12 +22,33 @@ function reviewedIdea(input: Record<string, unknown>): Record<string, unknown> {
   return idea as Record<string, unknown>;
 }
 
-async function generate(user: string, weekStart: string) {
+function reviewedBriefVersion(input: Record<string, unknown>): string | null {
+  const expected = input.expectedUpdatedAt;
+  if (!Object.hasOwn(input, "expectedUpdatedAt") ||
+      (expected !== null && (typeof expected !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expected) ||
+        !Number.isFinite(Date.parse(expected)) || new Date(expected).toISOString() !== expected))) {
+    throw new Error("Reload the brand profile before continuing.");
+  }
+  return expected as string | null;
+}
+
+function reviewedBrief(input: Record<string, unknown>): BrandBrief {
+  const expected = parseBrandBrief(input.expectedBrief);
+  if (!expected) throw new Error("Reload the brand profile before generating ideas.");
+  return expected;
+}
+
+async function generate(user: string, weekStart: string, expectedBrief: BrandBrief) {
   if (!validWeekStart(weekStart)) {
     return NextResponse.json({ error: "Choose a valid Monday date." }, { status: 400 });
   }
   const brief = loadBrandBrief(user);
   if (!brief) return NextResponse.json({ error: "Save a brand brief before generating a weekly plan." }, { status: 400 });
+  if (JSON.stringify(brief) !== JSON.stringify(expectedBrief)) {
+    return NextResponse.json({ ...listStrategy(user), error: "Brand profile changed in another window. Review the latest version before generating ideas." },
+      { status: 409, headers: responseHeaders });
+  }
   const config = nebiusConfig();
   if (!config.key) {
     return NextResponse.json({
@@ -69,7 +90,10 @@ async function generate(user: string, weekStart: string) {
     if (!ideas) return NextResponse.json({ error: "The model did not return a usable plan. Please try again." }, { status: 502 });
     createWeeklyPlan(user, brief, "nebius", weekStart, ideas);
     return NextResponse.json(listStrategy(user), { headers: responseHeaders });
-  } catch {
+  } catch (error) {
+    if (error instanceof StrategyConflictError) {
+      return NextResponse.json({ ...listStrategy(user), error: error.message }, { status: 409, headers: responseHeaders });
+    }
     return NextResponse.json({ error: "The model request timed out or could not be completed." }, { status: 502 });
   }
 }
@@ -91,13 +115,7 @@ export async function POST(request: Request) {
   try {
     switch (input.action) {
       case "save-brief": {
-        const expected = input.expectedUpdatedAt;
-        if (!Object.hasOwn(input, "expectedUpdatedAt") ||
-            (expected !== null && (typeof expected !== "string" ||
-              !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expected) ||
-              !Number.isFinite(Date.parse(expected)) || new Date(expected).toISOString() !== expected))) {
-          throw new Error("Reload the brand profile before saving.");
-        }
+        const expected = reviewedBriefVersion(input);
         saveBrandBriefIfCurrent(user, input.brief, expected);
         break;
       }
@@ -115,7 +133,7 @@ export async function POST(request: Request) {
         if (input.provider !== undefined && input.provider !== "nebius") {
           return NextResponse.json({ error: "Nebius Token Factory is the only AI provider." }, { status: 400 });
         }
-        return generate(user, input.weekStart as string);
+        return generate(user, input.weekStart as string, reviewedBrief(input));
       default:
         throw new Error("Unknown strategy action.");
     }

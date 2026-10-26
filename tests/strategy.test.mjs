@@ -79,6 +79,61 @@ test("brand profile API returns the latest version on a stale save", async () =>
   }
 });
 
+test("a plan cannot be saved from a brand profile changed during generation", () => {
+  const user = `plan-stale-${randomUUID()}@example.test`;
+  const reviewed = saveBrandBrief(user, briefInput);
+  const latest = saveBrandBriefIfCurrent(user, { ...briefInput, audience: "A different audience" }, reviewed.updatedAt);
+  assert.throws(() => createWeeklyPlan(user, reviewed, "nebius", "2026-10-26", [proposals[0]]), StrategyConflictError);
+  assert.deepEqual(listStrategy(user), { brief: latest, plans: [] });
+  const restored = { ...latest, goal: "A restored goal with the same timestamp" };
+  database().prepare("UPDATE brand_briefs SET payload=? WHERE user_id=?").run(JSON.stringify(restored), user);
+  assert.throws(() => createWeeklyPlan(user, latest, "nebius", "2026-10-26", [proposals[0]]), StrategyConflictError);
+  assert.deepEqual(listStrategy(user), { brief: restored, plans: [] });
+});
+
+test("generation rejects a stale profile before calling AI and after an in-flight change", async () => {
+  const user = `plan-api-${randomUUID()}@example.test`;
+  process.env.PLYPOST_OWNER_EMAIL = user;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-placeholder";
+  const originalFetch = globalThis.fetch;
+  try {
+    const first = saveBrandBrief(user, briefInput);
+    const session = createSession(user);
+    const send = (expectedBrief) => strategyPost(new globalThis.Request("http://localhost:3000/api/strategy", {
+      method: "POST",
+      headers: { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${session}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "generate", weekStart: "2026-10-26", expectedBrief }),
+    }));
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; throw new Error("AI should not be called for a stale profile"); };
+    assert.equal((await send(undefined)).status, 400);
+    const second = saveBrandBriefIfCurrent(user, { ...briefInput, voice: "Newer voice" }, first.updatedAt);
+    const stale = await send(first);
+    assert.equal(stale.status, 409);
+    assert.deepEqual((await stale.json()).brief, second);
+    assert.equal(calls, 0);
+
+    let third;
+    globalThis.fetch = async (_url, options) => {
+      calls++;
+      assert.equal(JSON.parse(options.body).messages[1].content.includes("Newer voice"), true);
+      third = saveBrandBriefIfCurrent(user, { ...briefInput, voice: "Changed while AI worked" }, second.updatedAt);
+      return globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({ ideas: [proposals[0]] }) } }] });
+    };
+    const during = await send(second);
+    assert.equal(during.status, 409);
+    assert.deepEqual((await during.json()).brief, third);
+    assert.equal(calls, 1);
+    assert.deepEqual(listStrategy(user), { brief: third, plans: [] });
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.NEBIUS_API_KEY;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+  }
+});
+
 test("stale idea edits, dismissals and approvals cannot act on newer text", () => {
   const user = `idea-${randomUUID()}@example.test`;
   const brief = saveBrandBrief(user, briefInput);
@@ -183,7 +238,7 @@ test("generation sends only approved brief fields and saves proposals without pu
     const request = new globalThis.Request("http://localhost:3000/api/strategy", {
       method: "POST",
       headers: { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${session}`, "content-type": "application/json" },
-      body: JSON.stringify({ action: "generate", weekStart: "2026-10-26" }),
+      body: JSON.stringify({ action: "generate", weekStart: "2026-10-26", expectedBrief: listStrategy(owner).brief }),
     });
     const response = await strategyPost(request);
     assert.equal(response.status, 200);

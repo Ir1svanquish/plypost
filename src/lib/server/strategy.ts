@@ -94,6 +94,11 @@ export function createWeeklyPlan(
     ideas: valid.map((idea) => ({ id: randomUUID(), ...idea, status: "proposed" })),
   };
   transaction((db) => {
+    const row = db.prepare("SELECT payload FROM brand_briefs WHERE user_id=?").get(userId) as PayloadRow | undefined;
+    const current = row ? parseBrandBrief(JSON.parse(row.payload)) : null;
+    if (!current || JSON.stringify(current) !== JSON.stringify(brief)) {
+      throw new StrategyConflictError("Brand profile changed while ideas were being generated. Review the latest version and generate again.");
+    }
     db.prepare("INSERT INTO weekly_plans(id,user_id,payload,created_at) VALUES (?,?,?,?)")
       .run(plan.id, userId, JSON.stringify(plan), now);
     const old = db.prepare("SELECT id FROM weekly_plans WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT -1 OFFSET 12")

@@ -179,6 +179,9 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
         if (action === "save-brief") {
           setProfileOpen(true);
           setMessage({ kind: "error", text: data.error || "Brand profile changed in another window. Review both versions." });
+        } else if (action === "generate") {
+          setProfileOpen(true);
+          setMessage({ kind: "error", text: data.error || "Brand profile changed. Review the latest version before generating again." });
         } else if (action === "update-idea" || action === "approve-idea" || action === "dismiss-idea") {
           setIdeaConflict({
             planId: body.planId as string, ideaId: body.ideaId as string, action,
@@ -247,7 +250,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
       setProfileOpen(true);
       return;
     }
-    const data = await mutate("generate", { weekStart });
+    const data = await mutate("generate", { weekStart, expectedBrief: brief });
     if (!data) return;
     setSelectedPlanId(data.plans[0]?.id ?? "");
     setEditingIdeaId(null);

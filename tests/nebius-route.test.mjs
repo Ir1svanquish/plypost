@@ -50,10 +50,10 @@ test("Nebius routes use Nemotron through Token Factory and keep planning input l
     assert.equal(adapt.status, 200);
     assert.deepEqual((await adapt.json()).variants, variants);
 
-    saveBrandBrief(owner, brief);
+    const savedBrief = saveBrandBrief(owner, brief);
     const plan = await strategyPost(new globalThis.Request("http://localhost:3000/api/strategy", {
       method: "POST", headers,
-      body: JSON.stringify({ action: "generate", weekStart: "2026-10-26" }),
+      body: JSON.stringify({ action: "generate", weekStart: "2026-10-26", expectedBrief: savedBrief }),
     }));
     assert.equal(plan.status, 200);
     assert.equal((await plan.json()).plans[0].provider, "nebius");
@@ -188,7 +188,7 @@ test("adaptation and weekly planning share the optional daily cap before calling
   process.env.NEBIUS_API_KEY = "test-only-nebius-key";
   process.env.PLYPOST_AI_DAILY_LIMIT = "1";
   const token = createSession(owner);
-  saveBrandBrief(owner, {
+  const savedBrief = saveBrandBrief(owner, {
     brandName: "Workshop", description: "Small local classes", audience: "New learners",
     goal: "Share useful class ideas", voice: "Clear and friendly", facts: "Workshops are held on Saturdays.",
     contentPillars: ["Learning"], platforms: ["bluesky", "linkedin"],
@@ -208,7 +208,7 @@ test("adaptation and weekly planning share the optional daily cap before calling
     }));
     assert.equal(adapted.status, 200);
     const planned = await strategyPost(new globalThis.Request("http://localhost:3000/api/strategy", {
-      method: "POST", headers, body: JSON.stringify({ action: "generate", weekStart: "2026-10-26" }),
+      method: "POST", headers, body: JSON.stringify({ action: "generate", weekStart: "2026-10-26", expectedBrief: savedBrief }),
     }));
     assert.equal(planned.status, 429);
     assert.match((await planned.json()).error, /1 requests per 24 hours/);
