@@ -12,7 +12,7 @@ This file is a review draft, not a submitted entry. Keep the judge password and 
 
 **Demo:** https://plypost.onrender.com/
 
-**Source:** https://github.com/Ir1svanquish/plypost — link only after the repository is public.
+**Source:** https://github.com/Ir1svanquish/plypost (public, MIT licensed).
 
 **Video:** Add the public YouTube URL after upload.
 
@@ -66,7 +66,7 @@ Do a test recording first. If a live model call is slow, trim waiting time in th
 - [x] MIT license and local setup instructions are in the repository.
 - [x] Known-format credential prefixes and sensitive filenames were checked in the current reachable Git history; no match was found. This is not a guarantee against every secret format.
 - [ ] Project owner reviews logo and sample-media provenance, and the public repository contents.
-- [ ] GitHub repository visibility is changed to public; confirm the license appears on the repository page.
+- [x] GitHub repository is public; an unauthenticated request returned HTTP 200 for the repository and its MIT license on 2026-10-26.
 - [ ] A dedicated judge login and fictional workspace are verified; credentials are supplied privately in Devpost.
 - [ ] Actual-use video is recorded, checked, and made publicly visible on YouTube.
 - [ ] English submission fields and feedback are reviewed and entered in Devpost before the deadline.
