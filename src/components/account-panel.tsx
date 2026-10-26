@@ -14,7 +14,9 @@ type Props = {
   auditLog: AuditEntry[];
   activity: SimulationReceipt[];
   onClearActivity: () => void;
-  onLogout: () => void;
+  onLogout: () => Promise<void>;
+  logoutBusy: boolean;
+  logoutError: string;
   mastodonConnection: MastodonConnection | null;
   mastodonLoading: boolean;
   mastodonError: string | null;
@@ -37,7 +39,7 @@ function formatTime(iso: string) {
   });
 }
 
-export function AccountPanel({ email, auditLog, activity, onClearActivity, onLogout, mastodonConnection, mastodonLoading, mastodonError, onRefreshMastodon, blueskyConnection, blueskyLoading, blueskyError, onRefreshBluesky, editorDirty, onExport, onImport, onFullExport, onFullImport, backupBusy }: Props) {
+export function AccountPanel({ email, auditLog, activity, onClearActivity, onLogout, logoutBusy, logoutError, mastodonConnection, mastodonLoading, mastodonError, onRefreshMastodon, blueskyConnection, blueskyLoading, blueskyError, onRefreshBluesky, editorDirty, onExport, onImport, onFullExport, onFullImport, backupBusy }: Props) {
   const fullInput = useRef<HTMLInputElement>(null);
   const textInput = useRef<HTMLInputElement>(null);
   return <div id="account" className="section-anchor space-y-6">
@@ -48,8 +50,9 @@ export function AccountPanel({ email, auditLog, activity, onClearActivity, onLog
     </div>
     <section className="panel-border soft-shadow flex flex-wrap items-center justify-between gap-4 rounded-[18px] bg-[var(--surface)] p-6 sm:p-7" aria-label="Signed-in account">
       <div className="flex min-w-0 items-center gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-text)]"><UserRound size={20} /></span><div className="min-w-0"><p className="text-[12px] text-[var(--text-muted)]">Signed in as</p><p className="truncate text-[14px] font-bold text-[var(--text)]">{email}</p></div></div>
-      <button type="button" onClick={onLogout} className="inline-flex items-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><LogOut size={15} /> Sign out</button>
+      <button type="button" onClick={() => { void onLogout(); }} disabled={logoutBusy} className="inline-flex items-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50"><LogOut size={15} /> {logoutBusy ? "Checking sign-out…" : "Sign out"}</button>
     </section>
+    {logoutError && <p role="alert" className="rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[12px] text-[var(--danger)]">{logoutError}</p>}
     <MastodonConnectionPanel connection={mastodonConnection} loading={mastodonLoading} loadError={mastodonError} onRefresh={onRefreshMastodon} />
     <BlueskyConnectionPanel connection={blueskyConnection} loading={blueskyLoading} loadError={blueskyError} onRefresh={onRefreshBluesky} editorDirty={editorDirty} />
     <details className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)]" aria-label="Backup and restore">

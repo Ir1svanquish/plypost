@@ -187,7 +187,7 @@ function PlatformMark({ id, size = "normal" }: { id: PlatformId; size?: "small" 
   );
 }
 
-function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void }) {
+function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: string; onLogout: () => Promise<void>; logoutBusy: boolean; logoutError: string }) {
   const [view, setView] = useState<WorkspaceView>("compose");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -1920,7 +1920,7 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Manual posting</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Review your checklist and finish each post in its own app.</p></div>
             <AssistedPublishPanel items={assisted} drafts={drafts} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} startWithVideoGroup={openAssistedVideoGroup} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} sourceMediaIds={mediaIds} sourceMediaAlt={mediaAlt} initialVideoId={videoId} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>}
-          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />}
+          {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={onLogout} logoutBusy={logoutBusy} logoutError={logoutError} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />}
         </main>
       </div>
     </div>
@@ -1969,6 +1969,8 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
 
   useEffect(() => {
     void fetch("/api/auth/session", { cache: "no-store" })
@@ -1993,11 +1995,28 @@ export default function Home() {
   }
 
   async function signOut() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    setSession({ email: null, configured: true });
+    if (logoutBusy) return;
+    setLogoutBusy(true);
+    setLogoutError("");
+    try {
+      try {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10_000) });
+      } catch { /* The response may be lost after the server removed the session. */ }
+      const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error("Sign-out could not be checked.");
+      const latest: unknown = await response.json();
+      if (!latest || typeof latest !== "object" || !("email" in latest) || latest.email !== null) {
+        throw new Error("The session is still active.");
+      }
+      setSession({ email: null, configured: "configured" in latest && typeof latest.configured === "boolean" ? latest.configured : true });
+    } catch {
+      setLogoutError("Sign-out was not confirmed. Retry and wait for the sign-in screen before leaving this device.");
+    } finally {
+      setLogoutBusy(false);
+    }
   }
 
-  if (session?.email) return <WorkspaceApp email={session.email} onLogout={signOut} />;
+  if (session?.email) return <WorkspaceApp email={session.email} onLogout={signOut} logoutBusy={logoutBusy} logoutError={logoutError} />;
   return <div className="app-shell flex min-h-screen items-center justify-center px-5 py-10"><div className="panel-border soft-shadow w-full max-w-md rounded-[22px] bg-[var(--surface)] p-8">
     <div className="mb-7 flex items-center gap-3"><Image src="/plypost-mark.svg" alt="" width={44} height={44} className="h-11 w-11 shrink-0" /><span className="text-[25px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
     <h1 className="text-[22px] font-bold text-[var(--text)]">Your workspace, ready when you are.</h1>
