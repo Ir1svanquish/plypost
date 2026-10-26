@@ -45,7 +45,7 @@ import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
-import { WORKSPACE_KEY, assistedContentSnapshot, assistedDeletionSnapshot, assistedReceiptSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type AssistedReceiptSnapshot, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, assistedContentSnapshot, assistedDeletionSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type AssistedReceiptSnapshot, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 import { MAX_POST_IMAGES, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
 const sampleDraft =
@@ -1654,8 +1654,8 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
       : "Your self-reported result was removed.");
   }
 
-  async function undoAssistedPosted(post: AssistedPost) {
-    return runAssistedAction("set-assisted-status", { id: post.id, status: "queued", expectedReceipt: assistedReceiptSnapshot(post) }, "Post returned to your assisted publishing checklist.");
+  async function undoAssistedPosted(id: string, expectedReceipt: AssistedReceiptSnapshot) {
+    return runAssistedAction("set-assisted-status", { id, status: "queued", expectedReceipt, confirmRecordRemoval: true }, "Post returned to your assisted publishing checklist.");
   }
 
   async function removeAssisted(post: AssistedPost) {

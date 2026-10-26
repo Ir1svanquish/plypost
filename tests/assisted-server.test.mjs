@@ -25,7 +25,7 @@ function item(text = "A post to publish") {
 
 function changePostedStatus(id, status, postUrl) {
   const current = listWorkspace(owner).assisted.find((entry) => entry.id === id);
-  return setAssistedStatus(owner, id, status, postUrl, undefined, assistedReceiptSnapshot(current));
+  return setAssistedStatus(owner, id, status, postUrl, undefined, assistedReceiptSnapshot(current), true);
 }
 
 test("assisted items persist and status, notification, and deletion are scoped to the owner", () => {

@@ -45,7 +45,7 @@ type Props = {
   onUpdateDescriptions: (id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaAlt: string[]) => Promise<boolean>;
   onUpdatePostUrl: (id: string, postUrl: string | null, expectedReceipt: AssistedReceiptSnapshot) => Promise<boolean>;
   onUpdateOutcome: (id: string, outcome: AssistedOutcomeInput | null, expectedReceipt: AssistedReceiptSnapshot) => Promise<boolean>;
-  onUndo: (post: AssistedPost) => Promise<boolean>;
+  onUndo: (id: string, expectedReceipt: AssistedReceiptSnapshot) => Promise<boolean>;
   onRemove: (post: AssistedPost) => void;
   onEnableNotifications: () => void;
   onEditImages: () => void;
@@ -115,6 +115,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, OutcomeForm>>({});
   const [editingOutcomes, setEditingOutcomes] = useState<Record<string, AssistedReceiptSnapshot>>({});
   const [outcomeSavingId, setOutcomeSavingId] = useState<string | null>(null);
+  const [undoConfirmation, setUndoConfirmation] = useState<{ id: string; receipt: AssistedReceiptSnapshot } | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(startExpanded);
   const [composerInitialized, setComposerInitialized] = useState(false);
@@ -327,12 +328,14 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
     setPendingStatusFocus({ id: post.id, status: "posted" });
   }
 
-  async function undoPosted(post: AssistedPost) {
-    if (busy || !await onUndo(post)) return;
-    closeOutcomeEditor(post.id);
+  async function undoPosted(id: string, expectedReceipt: AssistedReceiptSnapshot) {
+    if (busy || !await onUndo(id, expectedReceipt)) return;
+    setUndoConfirmation(null);
+    closeLinkEditor(id);
+    closeOutcomeEditor(id);
     setDestinationFilter("all");
     setStatusFilter("to-post");
-    setPendingStatusFocus({ id: post.id, status: "queued" });
+    setPendingStatusFocus({ id, status: "queued" });
   }
 
   return (
@@ -420,6 +423,8 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
             const invalidEditedLink = normalizedEditedLink === null;
             const editingOutcome = item.status === "posted" && Boolean(editingOutcomes[item.id]);
             const outcomeEditStale = editingOutcome && JSON.stringify(editingOutcomes[item.id]) !== JSON.stringify(assistedReceiptSnapshot(item));
+            const confirmingUndo = item.status === "posted" && undoConfirmation?.id === item.id;
+            const undoStale = confirmingUndo && JSON.stringify(undoConfirmation.receipt) !== JSON.stringify(assistedReceiptSnapshot(item));
             const resultDraft = outcomeDrafts[item.id] ?? outcomeForm(item);
             const resultValidation = readOutcomeForm(resultDraft);
             const resultSummary = item.outcome && (["views", "likes", "replies"] as const)
@@ -511,16 +516,24 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
-              {item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { void undoPosted(item); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+              {item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => setUndoConfirmation({ id: item.id, receipt: assistedReceiptSnapshot(item) })} disabled={busy || editingOutcome || editingLink || outcomeSavingId !== null || linkSavingId !== null || confirmingUndo} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
               {item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
+              {confirmingUndo && <div className="mt-3 max-w-xl rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-[12px] text-[var(--text-secondary)]">
+                <p>Undoing removes the saved posted time, link and results from Plypost. It does not remove the post from the social platform.</p>
+                {undoStale && <p role="alert" className="mt-2 font-semibold text-[var(--danger)]">This posted record changed elsewhere. Cancel and review the latest version before undoing.</p>}
+                <div className="mt-3 flex flex-wrap gap-3">
+                  <button type="button" onClick={() => { void undoPosted(item.id, undoConfirmation.receipt); }} disabled={busy || undoStale} className="rounded-lg bg-[var(--danger)] px-3 py-2 font-semibold text-[var(--surface)] disabled:opacity-50">Clear record and undo</button>
+                  <button type="button" onClick={() => setUndoConfirmation(null)} disabled={busy} className="font-semibold text-[var(--text-secondary)] disabled:opacity-50">Keep posted</button>
+                </div>
+              </div>}
               {item.status === "posted" && <details id={`assisted-posted-record-${item.id}`} className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
                 <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Posted record{savedUrl ? " · link saved" : ""}{item.outcome ? " · results recorded" : ""}</summary>
               <div className="mt-3 text-[11px] leading-5 text-[var(--text-muted)]">
                 <p>Marked posted by you{item.postedAt ? ` · ${formatLocalDateTime(item.postedAt)}` : ""} · not verified by Plypost.</p>
                 <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
                   {savedUrl && <a href={savedUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)] underline underline-offset-2"><ExternalLink size={11} /> Link you recorded · not verified</a>}
-                  {!editingLink && <button type="button" onClick={() => { setPostUrls((current) => ({ ...current, [item.id]: savedUrl ?? "" })); setEditingLinks((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || linkSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedUrl ? "Edit recorded link" : "Add recorded link"}</button>}
+                  {!editingLink && <button type="button" onClick={() => { setPostUrls((current) => ({ ...current, [item.id]: savedUrl ?? "" })); setEditingLinks((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || confirmingUndo || linkSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedUrl ? "Edit recorded link" : "Add recorded link"}</button>}
                 </div>
                 {editingLink && <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
                   <label htmlFor={`assisted-edit-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Public post link · self-reported</label>
@@ -537,7 +550,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
               <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 text-[12px]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-semibold text-[var(--text-secondary)]">Results you entered <span className="font-normal text-[var(--text-muted)]">· self-reported, not verified</span></p>
-                  {!editingOutcome && <button type="button" onClick={() => { setOutcomeDrafts((current) => ({ ...current, [item.id]: outcomeForm(item) })); setEditingOutcomes((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.outcome ? "Edit results" : "Record results"}</button>}
+                  {!editingOutcome && <button type="button" onClick={() => { setOutcomeDrafts((current) => ({ ...current, [item.id]: outcomeForm(item) })); setEditingOutcomes((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || confirmingUndo || outcomeSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.outcome ? "Edit results" : "Record results"}</button>}
                 </div>
                 {item.outcome ? <div className="mt-2 space-y-1 text-[var(--text-muted)]">
                   {resultSummary && <p>{resultSummary}</p>}

@@ -251,7 +251,7 @@ function matchesReviewedAssistedContent(value: unknown, current: AssistedPost): 
     value.mediaAlt.every((description, index) => description === saved.mediaAlt[index]);
 }
 
-export function setAssistedStatus(userId: string, id: string, status: unknown, postUrl?: unknown, expectedContent?: unknown, expectedReceipt?: unknown): boolean {
+export function setAssistedStatus(userId: string, id: string, status: unknown, postUrl?: unknown, expectedContent?: unknown, expectedReceipt?: unknown, confirmRecordRemoval?: unknown): boolean {
   if (!validId(id) || (status !== "posted" && status !== "queued")) throw new Error("Invalid assisted status.");
   if (status === "queued" && postUrl !== undefined) throw new Error("A post link requires a posted item.");
   // Omission preserves the current link; only an explicit null removes it.
@@ -269,6 +269,9 @@ export function setAssistedStatus(userId: string, id: string, status: unknown, p
     if ((status === "queued" || current.status === "posted") &&
         (!isRecord(expectedReceipt) || JSON.stringify(expectedReceipt) !== JSON.stringify(assistedReceiptSnapshot(current)))) {
       throw new AssistedConflictError("This posted record changed in another window. Review its latest link and results before editing it.");
+    }
+    if (status === "queued" && current.status === "posted" && confirmRecordRemoval !== true) {
+      throw new Error("Confirm clearing this posted record before undoing its mark.");
     }
     if (current.status === status && (postUrl === undefined ||
         (postUrl === null && current.postUrl === undefined) || normalizedUrl === current.postUrl)) return true;

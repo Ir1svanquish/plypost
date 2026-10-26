@@ -40,7 +40,7 @@ function saveOutcome(id, outcome) {
 }
 
 function changePostedStatus(id, status, postUrl) {
-  return setAssistedStatus(owner, id, status, postUrl, undefined, currentReceipt(id));
+  return setAssistedStatus(owner, id, status, postUrl, undefined, currentReceipt(id), true);
 }
 
 function request(body, { token, origin = "http://localhost" } = {}) {
@@ -119,6 +119,25 @@ test("stale posted-record actions cannot erase or replace newer links and result
   setAssistedOutcome(owner, post.id, { views: 25 }, receipt(third));
   assert.throws(() => setAssistedOutcome(owner, post.id, { views: 2 }, receipt(third)), /changed/i);
   assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).outcome.views, 25);
+});
+
+test("undoing a posted mark requires acknowledging the saved receipt will be cleared", async () => {
+  const post = addAssisted(owner, item());
+  setAssistedStatus(owner, post.id, "posted", postUrl, assistedContentSnapshot(post));
+  saveOutcome(post.id, { views: 9, notes: "Follow up" });
+  const before = listWorkspace(owner).assisted.find((entry) => entry.id === post.id);
+  assert.throws(() => setAssistedStatus(owner, post.id, "queued", undefined, undefined, receipt(before)), /confirm|clear/i);
+  assert.deepEqual(listWorkspace(owner).assisted.find((entry) => entry.id === post.id), before);
+  const token = createSession(owner);
+  const body = { action: "set-assisted-status", id: post.id, status: "queued", expectedReceipt: receipt(before) };
+  assert.equal((await POST(request(body, { token }))).status, 400);
+  assert.deepEqual(listWorkspace(owner).assisted.find((entry) => entry.id === post.id), before);
+  assert.equal((await POST(request({ ...body, confirmRecordRemoval: true }, { token }))).status, 200);
+  const afterUndo = listWorkspace(owner).assisted.find((entry) => entry.id === post.id);
+  assert.equal(afterUndo.status, "queued");
+  assert.equal(afterUndo.postedAt, undefined);
+  assert.equal(afterUndo.postUrl, undefined);
+  assert.equal(afterUndo.outcome, undefined);
 });
 
 test("workspace route requires same-origin owner session and exposes saved results", async () => {
