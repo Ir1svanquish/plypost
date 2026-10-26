@@ -79,6 +79,52 @@ test("brand profile API returns the latest version on a stale save", async () =>
   }
 });
 
+test("stale idea edits, dismissals and approvals cannot act on newer text", () => {
+  const user = `idea-${randomUUID()}@example.test`;
+  const brief = saveBrandBrief(user, briefInput);
+  const plan = createWeeklyPlan(user, brief, "nebius", "2026-10-26", [proposals[0]]);
+  const reviewed = plan.ideas[0];
+  updateStrategyIdea(user, plan.id, reviewed.id, { title: "Updated elsewhere", seed: "Newer source draft" }, reviewed);
+  const latest = listStrategy(user).plans[0].ideas[0];
+  assert.throws(() => updateStrategyIdea(user, plan.id, reviewed.id, { title: "Old window" }, reviewed), StrategyConflictError);
+  assert.throws(() => dismissStrategyIdea(user, plan.id, reviewed.id, reviewed), StrategyConflictError);
+  assert.throws(() => approveStrategyIdea(user, plan.id, reviewed.id, reviewed), StrategyConflictError);
+  assert.deepEqual(listStrategy(user).plans[0].ideas[0], latest);
+  assert.equal(database().prepare("SELECT COUNT(*) AS count FROM drafts WHERE user_id=?").get(user).count, 0);
+
+  const draft = approveStrategyIdea(user, plan.id, reviewed.id, latest);
+  assert.equal(draft.source, "Newer source draft");
+  assert.deepEqual(approveStrategyIdea(user, plan.id, reviewed.id, latest), draft);
+  assert.equal(database().prepare("SELECT COUNT(*) AS count FROM drafts WHERE user_id=?").get(user).count, 1);
+});
+
+test("idea API refuses blind actions and returns the latest idea on conflict", async () => {
+  const user = `idea-api-${randomUUID()}@example.test`;
+  process.env.PLYPOST_OWNER_EMAIL = user;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  try {
+    const brief = saveBrandBrief(user, briefInput);
+    const plan = createWeeklyPlan(user, brief, "nebius", "2026-10-26", [proposals[0]]);
+    const reviewed = plan.ideas[0];
+    updateStrategyIdea(user, plan.id, reviewed.id, { seed: "Edited in another window" }, reviewed);
+    const session = createSession(user);
+    const send = (body) => strategyPost(new globalThis.Request("http://localhost:3000/api/strategy", {
+      method: "POST",
+      headers: { origin: "http://localhost:3000", cookie: `${SESSION_COOKIE}=${session}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }));
+    const blind = await send({ action: "approve-idea", planId: plan.id, ideaId: reviewed.id });
+    assert.equal(blind.status, 400);
+    const stale = await send({ action: "approve-idea", planId: plan.id, ideaId: reviewed.id, expectedIdea: reviewed });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).plans[0].ideas[0].seed, "Edited in another window");
+    assert.equal(database().prepare("SELECT COUNT(*) AS count FROM drafts WHERE user_id=?").get(user).count, 0);
+  } finally {
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+  }
+});
+
 test("reviewed ideas become owner-scoped drafts exactly once, with immutable approval snapshot", () => {
   const brief = saveBrandBrief(owner, briefInput);
   assert.ok(brief.updatedAt);

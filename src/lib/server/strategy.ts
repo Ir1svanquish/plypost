@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
 import {
   parseBrandBrief, parseGeneratedIdeas, parseIdeaPatch, parseWeeklyPlan, validWeekStart,
-  type BrandBrief, type StrategyProvider, type StrategyState, type WeeklyPlan,
+  type BrandBrief, type StrategyIdea, type StrategyProvider, type StrategyState, type WeeklyPlan,
 } from "../strategy";
 import type { SavedDraft } from "../workspace";
 
@@ -32,6 +32,25 @@ export function listStrategy(userId: string): StrategyState {
 }
 
 export class StrategyConflictError extends Error {}
+
+function sameIdeaContent(current: StrategyIdea, expected: unknown): expected is Record<string, unknown> {
+  if (!expected || typeof expected !== "object" || Array.isArray(expected)) return false;
+  const value = expected as Record<string, unknown>;
+  return value.id === current.id && value.title === current.title && value.angle === current.angle &&
+    value.rationale === current.rationale && value.seed === current.seed &&
+    Array.isArray(value.platforms) && value.platforms.length === current.platforms.length &&
+    value.platforms.every((id, index) => id === current.platforms[index]);
+}
+
+function sameIdeaSnapshot(current: StrategyIdea, expected: unknown): boolean {
+  return sameIdeaContent(current, expected) && expected.status === current.status && expected.draftId === current.draftId;
+}
+
+function requireCurrentIdea(current: StrategyIdea, expected: unknown, action: string): void {
+  if (expected !== undefined && !sameIdeaSnapshot(current, expected)) {
+    throw new StrategyConflictError(`This idea changed in another window. Review the latest version before ${action}.`);
+  }
+}
 
 function storeBrandBrief(userId: string, value: unknown, expectedUpdatedAt?: string | null): BrandBrief {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Complete the brand brief first.");
@@ -85,13 +104,14 @@ export function createWeeklyPlan(
   return plan;
 }
 
-export function updateStrategyIdea(userId: string, planId: unknown, ideaId: unknown, value: unknown): void {
+export function updateStrategyIdea(userId: string, planId: unknown, ideaId: unknown, value: unknown, expectedIdea?: unknown): void {
   if (!validId(planId) || !validId(ideaId)) throw new Error("Plan idea not found.");
   transaction((db) => {
     const row = db.prepare("SELECT payload FROM weekly_plans WHERE id=? AND user_id=?").get(planId, userId) as PayloadRow | undefined;
     const plan = decodedPlan(row);
     const idea = plan.ideas.find((item) => item.id === ideaId);
     if (!idea) throw new Error("Plan idea not found.");
+    requireCurrentIdea(idea, expectedIdea, "saving");
     if (idea.status !== "proposed") throw new Error("Only proposed ideas can be edited.");
     const patch = parseIdeaPatch(value, plan.briefSnapshot.platforms);
     if (!patch) throw new Error("Edit the title, source, or selected destinations within the allowed limits.");
@@ -101,13 +121,14 @@ export function updateStrategyIdea(userId: string, planId: unknown, ideaId: unkn
     audit(userId, "strategy.idea_updated", ideaId, planId);
   });
 }
-export function dismissStrategyIdea(userId: string, planId: unknown, ideaId: unknown): void {
+export function dismissStrategyIdea(userId: string, planId: unknown, ideaId: unknown, expectedIdea?: unknown): void {
   if (!validId(planId) || !validId(ideaId)) throw new Error("Plan idea not found.");
   transaction((db) => {
     const row = db.prepare("SELECT payload FROM weekly_plans WHERE id=? AND user_id=?").get(planId, userId) as PayloadRow | undefined;
     const plan = decodedPlan(row);
     const idea = plan.ideas.find((item) => item.id === ideaId);
     if (!idea) throw new Error("Plan idea not found.");
+    requireCurrentIdea(idea, expectedIdea, "dismissing");
     if (idea.status !== "proposed") throw new Error("Only proposed ideas can be dismissed.");
     idea.status = "dismissed";
     db.prepare("UPDATE weekly_plans SET payload=? WHERE id=? AND user_id=?")
@@ -117,13 +138,15 @@ export function dismissStrategyIdea(userId: string, planId: unknown, ideaId: unk
 }
 
 /** Approval copies the reviewed seed into an ordinary owner-scoped draft; it never publishes. */
-export function approveStrategyIdea(userId: string, planId: unknown, ideaId: unknown): SavedDraft {
+export function approveStrategyIdea(userId: string, planId: unknown, ideaId: unknown, expectedIdea?: unknown): SavedDraft {
   if (!validId(planId) || !validId(ideaId)) throw new Error("Plan idea not found.");
   return transaction((db) => {
     const row = db.prepare("SELECT payload FROM weekly_plans WHERE id=? AND user_id=?").get(planId, userId) as PayloadRow | undefined;
     const plan = decodedPlan(row);
     const idea = plan.ideas.find((item) => item.id === ideaId);
     if (!idea) throw new Error("Plan idea not found.");
+    const sameApprovalRetry = idea.status === "approved" && sameIdeaContent(idea, expectedIdea) && expectedIdea.status === "proposed";
+    if (!sameApprovalRetry) requireCurrentIdea(idea, expectedIdea, "approving");
     if (idea.status === "approved" && idea.draftId) {
       const draftRow = db.prepare("SELECT payload FROM drafts WHERE id=? AND user_id=?")
         .get(idea.draftId, userId) as PayloadRow | undefined;

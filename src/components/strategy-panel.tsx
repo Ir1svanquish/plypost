@@ -9,6 +9,11 @@ import type { AssistedPost, SavedDraft } from "@/lib/workspace";
 type BriefForm = Omit<BrandBrief, "updatedAt" | "contentPillars"> & { pillarsText: string };
 type StrategyPayload = { brief: BrandBrief | null; plans: WeeklyPlan[]; draft?: SavedDraft; error?: string };
 type BusyAction = "save-brief" | "generate" | "update-idea" | "approve-idea" | "dismiss-idea" | null;
+type IdeaConflict = {
+  planId: string; ideaId: string; action: "update-idea" | "approve-idea" | "dismiss-idea";
+  previous: StrategyIdea;
+  edits?: Pick<StrategyIdea, "title" | "seed" | "platforms">;
+};
 
 const emptyBrief: BriefForm = {
   brandName: "", description: "", audience: "", goal: "", voice: "", facts: "",
@@ -66,6 +71,14 @@ function briefFields(form: BriefForm): { label: string; value: string }[] {
   ];
 }
 
+function ideaFields(idea: StrategyIdea): { label: string; value: string }[] {
+  return [
+    { label: "Status", value: idea.status }, { label: "Title", value: idea.title },
+    { label: "Source draft", value: idea.seed },
+    { label: "Destinations", value: idea.platforms.map((id) => platforms[id].name).join(", ") },
+  ];
+}
+
 export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, onOpenAssisted, onDirtyChange, refreshToken = 0 }: {
   drafts: SavedDraft[];
   assisted: AssistedPost[];
@@ -91,6 +104,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
   const [editTitle, setEditTitle] = useState("");
   const [editSeed, setEditSeed] = useState("");
   const [editPlatforms, setEditPlatforms] = useState<PlatformId[]>([]);
+  const [ideaConflict, setIdeaConflict] = useState<IdeaConflict | null>(null);
   const [newDrafts, setNewDrafts] = useState<Record<string, SavedDraft>>({});
   const dirtyBrief = briefIsDirty(form, brief);
   const briefConflict = briefBaseVersion !== (brief?.updatedAt ?? null);
@@ -103,8 +117,8 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
   const choices = weekChoices();
 
   useEffect(() => {
-    onDirtyChange(dirtyBrief || dirtyIdea);
-  }, [dirtyBrief, dirtyIdea, onDirtyChange]);
+    onDirtyChange(dirtyBrief || dirtyIdea || Boolean(ideaConflict?.edits));
+  }, [dirtyBrief, dirtyIdea, ideaConflict, onDirtyChange]);
 
   useEffect(() => {
     setNewDrafts((current) => {
@@ -114,11 +128,11 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
   }, [drafts]);
 
   useEffect(() => {
-    if (!dirtyBrief && !dirtyIdea) return;
+    if (!dirtyBrief && !dirtyIdea && !ideaConflict?.edits) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirtyBrief, dirtyIdea]);
+  }, [dirtyBrief, dirtyIdea, ideaConflict]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -138,6 +152,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
         setSelectedPlanId(data.plans[0]?.id ?? "");
         setProfileOpen(false);
         setEditingIdeaId(null);
+        setIdeaConflict(null);
         setMessage(null);
       } catch (error) {
         if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Could not load your AI plan.");
@@ -161,13 +176,25 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
       if (response.status === 409 && data.brief !== undefined && Array.isArray(data.plans)) {
         setBrief(data.brief);
         setPlans(data.plans);
-        setProfileOpen(true);
-        setMessage({ kind: "error", text: data.error || "Brand profile changed in another window. Review both versions." });
+        if (action === "save-brief") {
+          setProfileOpen(true);
+          setMessage({ kind: "error", text: data.error || "Brand profile changed in another window. Review both versions." });
+        } else if (action === "update-idea" || action === "approve-idea" || action === "dismiss-idea") {
+          setIdeaConflict({
+            planId: body.planId as string, ideaId: body.ideaId as string, action,
+            previous: body.expectedIdea as StrategyIdea,
+            ...(action === "update-idea" ? { edits: { title: editTitle, seed: editSeed, platforms: [...editPlatforms] } } : {}),
+          });
+          setMessage({ kind: "error", text: data.error || "This idea changed in another window. Review both versions." });
+        }
         return null;
       }
       if (!response.ok) throw new Error(data.error || "Could not update your AI plan.");
       setBrief(data.brief);
       setPlans(data.plans);
+      if (action === "update-idea" || action === "approve-idea" || action === "dismiss-idea") {
+        setIdeaConflict((current) => current?.ideaId === body.ideaId ? null : current);
+      }
       return data;
     } catch (error) {
       setMessage({ kind: "error", text: error instanceof Error ? error.message : "Could not update your AI plan." });
@@ -202,6 +229,10 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
   }
 
   async function generate() {
+    if (ideaConflict) {
+      setMessage({ kind: "error", text: "Resolve the changed idea before generating another plan." });
+      return;
+    }
     if (briefConflict) {
       setMessage({ kind: "error", text: "Review the changed brand profile before generating ideas." });
       setProfileOpen(true);
@@ -229,6 +260,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
     setEditTitle(idea.title);
     setEditSeed(idea.seed);
     setEditPlatforms([...idea.platforms]);
+    setIdeaConflict(null);
     setMessage(null);
   }
 
@@ -238,7 +270,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
       setMessage({ kind: "error", text: "Add a title, draft text and at least one platform." });
       return;
     }
-    const data = await mutate("update-idea", { planId: selectedPlan.id, ideaId: idea.id, patch: {
+    const data = await mutate("update-idea", { planId: selectedPlan.id, ideaId: idea.id, expectedIdea: idea, patch: {
       title: editTitle.trim(), seed: editSeed.trim(), platforms: editPlatforms,
     } });
     if (!data) return;
@@ -252,7 +284,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
       setMessage({ kind: "error", text: "Save or discard your edits before approving this idea." });
       return;
     }
-    const data = await mutate("approve-idea", { planId: selectedPlan.id, ideaId: idea.id });
+    const data = await mutate("approve-idea", { planId: selectedPlan.id, ideaId: idea.id, expectedIdea: idea });
     if (!data) return;
     if (data.draft) {
       setNewDrafts((current) => ({ ...current, [data.draft!.id]: data.draft! }));
@@ -264,7 +296,7 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
   async function dismissIdea(idea: StrategyIdea) {
     if (!selectedPlan) return;
     if (editingIdeaId === idea.id && dirtyIdea && !window.confirm("Discard your unsaved edits and dismiss this idea?")) return;
-    const data = await mutate("dismiss-idea", { planId: selectedPlan.id, ideaId: idea.id });
+    const data = await mutate("dismiss-idea", { planId: selectedPlan.id, ideaId: idea.id, expectedIdea: idea });
     if (!data) return;
     setEditingIdeaId(null);
     setMessage({ kind: "success", text: "Idea dismissed. It remains in the plan for reference." });
@@ -305,25 +337,33 @@ export function StrategyPanel({ drafts, assisted, onDraftApproved, onOpenDraft, 
 
       <div className="flex flex-col gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1"><h3 className="text-[14px] font-bold text-[var(--text)]">Make a weekly plan</h3><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">AI suggests up to three topics from your saved profile. You decide what becomes a draft.</p><div className="mt-4 max-w-xs"><label className="text-[12px] font-semibold text-[var(--text-secondary)]">Week<select value={weekStart} onChange={(event) => setWeekStart(event.target.value)} disabled={busy !== null} className="mt-1.5 w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)]">{choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select></label></div><p className="mt-3 text-[11px] leading-5 text-[var(--text-soft)]">Uses NVIDIA Nemotron 3 Super through Nebius Token Factory. Clicking Generate sends only your saved brand profile; posting results stay local.</p></div>
-        <button type="button" onClick={() => void generate()} disabled={!brief || dirtyBrief || briefConflict || busy !== null} className="gradient-button inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-3 text-[13px] font-bold text-white disabled:opacity-45"><Sparkles size={16} aria-hidden="true" />{busy === "generate" ? "Generating…" : "Generate ideas"}</button>
+        <button type="button" onClick={() => void generate()} disabled={!brief || dirtyBrief || briefConflict || Boolean(ideaConflict) || busy !== null} className="gradient-button inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-3 text-[13px] font-bold text-white disabled:opacity-45"><Sparkles size={16} aria-hidden="true" />{busy === "generate" ? "Generating…" : "Generate ideas"}</button>
       </div>
       {!brief && <p className="rounded-xl bg-[var(--info-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--info)]">Save your brand profile to start. No example ideas are shown in place of real AI results.</p>}
       {dirtyBrief && <p className="rounded-xl bg-[var(--warning-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--warning)]">Your profile has unsaved changes. Save them before generating ideas.</p>}
       {message && <p role={message.kind === "error" ? "alert" : "status"} className={`rounded-xl px-4 py-3 text-[12px] leading-5 ${message.kind === "error" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--positive-soft)] text-[var(--positive)]"}`}>{message.text}</p>}
 
       <div className="border-t border-[var(--line)] pt-5">
-        <div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="text-[15px] font-bold text-[var(--text)]">Ideas to review</h3><p className="mt-1 text-[12px] text-[var(--text-muted)]">Only your approved ideas become saved drafts.</p></div>{plans.length > 0 && <label className="w-full text-[11px] font-semibold text-[var(--text-secondary)] sm:w-auto">Plan<select value={selectedPlan?.id ?? ""} onChange={(event) => { if (dirtyIdea && !window.confirm("Discard your unsaved idea edits?")) return; setSelectedPlanId(event.target.value); setEditingIdeaId(null); }} className="mt-1 block w-full min-w-0 rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] sm:w-60">{plans.map((plan) => <option key={plan.id} value={plan.id}>Week of {plan.weekStart} · {new Date(plan.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</option>)}</select></label>}</div>
+        <div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="text-[15px] font-bold text-[var(--text)]">Ideas to review</h3><p className="mt-1 text-[12px] text-[var(--text-muted)]">Only your approved ideas become saved drafts.</p></div>{plans.length > 0 && <label className="w-full text-[11px] font-semibold text-[var(--text-secondary)] sm:w-auto">Plan<select value={selectedPlan?.id ?? ""} onChange={(event) => { if ((dirtyIdea || ideaConflict?.edits) && !window.confirm("Discard your unsaved idea edits?")) return; setSelectedPlanId(event.target.value); setEditingIdeaId(null); setIdeaConflict(null); }} className="mt-1 block w-full min-w-0 rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] sm:w-60">{plans.map((plan) => <option key={plan.id} value={plan.id}>Week of {plan.weekStart} · {new Date(plan.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</option>)}</select></label>}</div>
         {!selectedPlan ? <div className="mt-4 flex items-start gap-3 rounded-xl border border-dashed border-[var(--line)] bg-[var(--surface-muted)] p-5 text-[12px] leading-5 text-[var(--text-muted)]"><Lightbulb size={17} className="mt-0.5 shrink-0 text-[var(--accent-text)]" aria-hidden="true" />Your generated ideas will appear here for review.</div> : <div className="mt-4 space-y-3"><p className="text-[11px] text-[var(--text-soft)]">Created {new Date(selectedPlan.createdAt).toLocaleString("en-US")} · {selectedPlan.provider === "nebius" ? "Nebius" : "NVIDIA Nemotron"} · profile snapshot saved with this plan</p>{selectedPlan.ideas.map((idea, index) => {
           const isEditing = editingIdeaId === idea.id && idea.status === "proposed";
           const draft = (idea.draftId && (drafts.find((item) => item.id === idea.draftId) ?? newDrafts[idea.draftId])) || null;
           const handoffs = idea.draftId ? assisted.filter((item) => item.sourceDraftId === idea.draftId) : [];
           const postedCount = handoffs.filter((item) => item.status === "posted").length;
+          const conflict = ideaConflict?.planId === selectedPlan.id && ideaConflict.ideaId === idea.id ? ideaConflict : null;
+          const previouslyReviewed = conflict?.edits ? { ...conflict.previous, ...conflict.edits } : conflict?.previous;
           return <article key={idea.id} className={`rounded-2xl border p-4 sm:p-5 ${idea.status === "dismissed" ? "border-[var(--line)] bg-[var(--surface-muted)] opacity-75" : "border-[var(--line)] bg-[var(--surface)]"}`}>
             <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.13em] text-[var(--text-soft)]">Idea {index + 1}</p><h4 className="mt-1 break-words text-[15px] font-bold text-[var(--text)]">{idea.title}</h4></div><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${idea.status === "approved" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : idea.status === "dismissed" ? "bg-[var(--surface-muted)] text-[var(--text-muted)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{idea.status === "approved" ? "Approved draft" : idea.status === "dismissed" ? "Dismissed" : "Needs review"}</span></div>
             {idea.angle && <p className="mt-2 text-[12px] leading-5 text-[var(--text-secondary)]"><span className="font-bold">Angle:</span> {idea.angle}</p>}
             {idea.rationale && <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]"><span className="font-bold">Why:</span> {idea.rationale}</p>}
-            {isEditing ? <div className="mt-4 space-y-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4"><label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Title<input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} maxLength={120} disabled={busy !== null} className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] text-[var(--text)]" /></label><label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Source draft<textarea value={editSeed} onChange={(event) => setEditSeed(event.target.value)} maxLength={3000} rows={5} disabled={busy !== null} className="mt-1.5 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)]" /></label><fieldset disabled={busy !== null}><legend className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Destinations</legend><div className="flex flex-wrap gap-2">{platformDisplayIds.map((id) => <label key={id} className="inline-flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]"><input type="checkbox" checked={editPlatforms.includes(id)} onChange={() => setEditPlatforms(togglePlatform(editPlatforms, id))} className="accent-[var(--accent)]" />{platforms[id].name}</label>)}</div></fieldset><div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { setEditingIdeaId(null); setMessage(null); }} disabled={busy !== null} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)]"><X size={14} aria-hidden="true" />Cancel</button><button type="button" onClick={() => void saveIdea(idea)} disabled={busy !== null || !dirtyIdea} className="gradient-button rounded-lg px-4 py-2 text-[12px] font-bold text-white disabled:opacity-45">{busy === "update-idea" ? "Saving…" : "Save idea"}</button></div></div> : <><p className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-[var(--surface-muted)] p-3 text-[12px] leading-5 text-[var(--text-secondary)]">{idea.seed}</p><div className="mt-3 flex flex-wrap gap-1.5">{platformDisplayIds.filter((id) => idea.platforms.includes(id)).map((id) => <span key={id} className="rounded-full border border-[var(--line)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">{platforms[id].name}</span>)}</div></>}
-            {idea.status === "proposed" && !isEditing && <div className="mt-4 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => startEditing(idea)} disabled={busy !== null} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-45"><Pencil size={13} aria-hidden="true" />Edit</button><button type="button" onClick={() => void dismissIdea(idea)} disabled={busy !== null} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-45">Dismiss</button><button type="button" onClick={() => void approveIdea(idea)} disabled={busy !== null} className="gradient-button inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-bold text-white disabled:opacity-45"><Check size={14} aria-hidden="true" />{busy === "approve-idea" ? "Approving…" : "Approve to draft"}</button></div>}
+            {conflict && previouslyReviewed && <div role="alert" className="mt-4 rounded-xl border border-[var(--warning)] bg-[var(--surface)] p-4 text-[12px] text-[var(--text-secondary)]">
+              <p className="font-bold text-[var(--warning)]">This idea changed in another window. Your action was not applied.</p>
+              <p className="mt-1">Compare the latest saved idea with {conflict.edits ? "your unsaved edits" : "the idea you reviewed"} before acting again.</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">{([ ["Latest saved", idea], [conflict.edits ? "Your edits" : "Previously reviewed", previouslyReviewed] ] as const).map(([label, value]) => <div key={label} className="max-h-56 overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] p-3"><p className="font-bold text-[var(--text)]">{label}</p><dl className="mt-2 space-y-1">{ideaFields(value).map((field) => <div key={field.label}><dt className="inline font-semibold">{field.label}: </dt><dd className="inline whitespace-pre-wrap break-words">{field.value}</dd></div>)}</dl></div>)}</div>
+              <div className="mt-3 flex flex-wrap gap-4"><button type="button" onClick={() => { if (conflict.action === "update-idea" && idea.status === "proposed") { setEditingIdeaId(idea.id); setEditTitle(idea.title); setEditSeed(idea.seed); setEditPlatforms([...idea.platforms]); } else setEditingIdeaId(null); setIdeaConflict(null); setMessage(null); }} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Use latest saved</button>{conflict.edits && idea.status === "proposed" && <button type="button" onClick={() => { setEditingIdeaId(idea.id); setEditTitle(conflict.edits!.title); setEditSeed(conflict.edits!.seed); setEditPlatforms([...conflict.edits!.platforms]); setIdeaConflict(null); setMessage(null); }} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Keep my edits</button>}</div>
+            </div>}
+            {isEditing ? <div className="mt-4 space-y-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4"><label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Title<input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} maxLength={120} disabled={busy !== null} className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] text-[var(--text)]" /></label><label className="block text-[12px] font-semibold text-[var(--text-secondary)]">Source draft<textarea value={editSeed} onChange={(event) => setEditSeed(event.target.value)} maxLength={3000} rows={5} disabled={busy !== null} className="mt-1.5 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)]" /></label><fieldset disabled={busy !== null}><legend className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Destinations</legend><div className="flex flex-wrap gap-2">{platformDisplayIds.map((id) => <label key={id} className="inline-flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]"><input type="checkbox" checked={editPlatforms.includes(id)} onChange={() => setEditPlatforms(togglePlatform(editPlatforms, id))} className="accent-[var(--accent)]" />{platforms[id].name}</label>)}</div></fieldset><div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { if (conflict?.edits && !window.confirm("Discard your unsaved edits?")) return; setEditingIdeaId(null); setIdeaConflict(null); setMessage(null); }} disabled={busy !== null} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)]"><X size={14} aria-hidden="true" />Cancel</button><button type="button" onClick={() => void saveIdea(idea)} disabled={busy !== null || !dirtyIdea || Boolean(conflict)} className="gradient-button rounded-lg px-4 py-2 text-[12px] font-bold text-white disabled:opacity-45">{busy === "update-idea" ? "Saving…" : "Save idea"}</button></div></div> : <><p className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-[var(--surface-muted)] p-3 text-[12px] leading-5 text-[var(--text-secondary)]">{idea.seed}</p><div className="mt-3 flex flex-wrap gap-1.5">{platformDisplayIds.filter((id) => idea.platforms.includes(id)).map((id) => <span key={id} className="rounded-full border border-[var(--line)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">{platforms[id].name}</span>)}</div></>}
+            {idea.status === "proposed" && !isEditing && <div className="mt-4 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => startEditing(idea)} disabled={busy !== null || Boolean(ideaConflict)} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-45"><Pencil size={13} aria-hidden="true" />Edit</button><button type="button" onClick={() => void dismissIdea(idea)} disabled={busy !== null || Boolean(ideaConflict)} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-45">Dismiss</button><button type="button" onClick={() => void approveIdea(idea)} disabled={busy !== null || Boolean(ideaConflict)} className="gradient-button inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-bold text-white disabled:opacity-45"><Check size={14} aria-hidden="true" />{busy === "approve-idea" ? "Approving…" : "Approve to draft"}</button></div>}
             {idea.status === "approved" && <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><div className="text-[11px] leading-5 text-[var(--text-soft)]"><p>Approval saved a draft. Review its platform versions in Create.</p><p>{handoffs.length} manual {handoffs.length === 1 ? "handoff" : "handoffs"} prepared · {postedCount} marked posted by you</p></div><div className="flex flex-wrap items-center gap-3">{handoffs.length > 0 && <button type="button" onClick={() => onOpenAssisted(handoffs.find((item) => item.status === "queued") ?? handoffs[0])} className="inline-flex items-center gap-1 text-[12px] font-bold text-[var(--accent-text)]">View handoffs <ArrowRight size={13} aria-hidden="true" /></button>}{draft ? <button type="button" onClick={() => onOpenDraft(draft)} className="inline-flex items-center gap-1 text-[12px] font-bold text-[var(--accent-text)]">Open draft <ArrowRight size={13} aria-hidden="true" /></button> : <span className="text-[11px] text-[var(--warning)]">Draft is no longer in the library.</span>}</div></div>}
           </article>;
         })}</div>}

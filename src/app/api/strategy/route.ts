@@ -14,6 +14,14 @@ export const runtime = "nodejs";
 
 const responseHeaders = { "Cache-Control": "no-store" };
 
+function reviewedIdea(input: Record<string, unknown>): Record<string, unknown> {
+  const idea = input.expectedIdea;
+  if (!idea || typeof idea !== "object" || Array.isArray(idea)) {
+    throw new Error("Reload the idea before changing it.");
+  }
+  return idea as Record<string, unknown>;
+}
+
 async function generate(user: string, weekStart: string) {
   if (!validWeekStart(weekStart)) {
     return NextResponse.json({ error: "Choose a valid Monday date." }, { status: 400 });
@@ -94,14 +102,14 @@ export async function POST(request: Request) {
         break;
       }
       case "update-idea":
-        updateStrategyIdea(user, input.planId, input.ideaId, input.patch);
+        updateStrategyIdea(user, input.planId, input.ideaId, input.patch, reviewedIdea(input));
         break;
       case "approve-idea": {
-        const draft = approveStrategyIdea(user, input.planId, input.ideaId);
+        const draft = approveStrategyIdea(user, input.planId, input.ideaId, reviewedIdea(input));
         return NextResponse.json({ ...listStrategy(user), draft }, { headers: responseHeaders });
       }
       case "dismiss-idea":
-        dismissStrategyIdea(user, input.planId, input.ideaId);
+        dismissStrategyIdea(user, input.planId, input.ideaId, reviewedIdea(input));
         break;
       case "generate":
         if (input.provider !== undefined && input.provider !== "nebius") {
