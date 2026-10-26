@@ -7,12 +7,16 @@ import { currentUser, sameOrigin } from "@/lib/server/auth";
 import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 import { getMedia } from "@/lib/server/media";
-import { loadVoiceProfile, saveVoiceProfile, deleteVoiceProfile } from "@/lib/server/voice-profile";
+import { VoiceProfileConflictError, deleteVoiceProfileIfCurrent, isVoiceProfileVersion, loadVoiceProfile, saveVoiceProfileIfCurrent } from "@/lib/server/voice-profile";
 import { reserveAiRequest } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 const headers = { "Cache-Control": "no-store" };
 const VISION_MODEL = "nvidia/Nemotron-3.5-Super-VL";
+
+function profileConflict(user: string, error: VoiceProfileConflictError) {
+  return NextResponse.json({ error: error.message, voiceProfile: loadVoiceProfile(user) }, { status: 409, headers });
+}
 
 async function completion(key: string, model: string, messages: ReturnType<typeof styleAnalysisMessages> | ReturnType<typeof imageCaptionMessages> | ReturnType<typeof draftFromNotesMessages>, maxTokens: number) {
   const response = await fetch("https://api.tokenfactory.nebius.com/v1/chat/completions", {
@@ -39,8 +43,17 @@ export async function DELETE(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403, headers });
   const user = currentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to continue." }, { status: 401, headers });
-  deleteVoiceProfile(user);
-  return NextResponse.json({ voiceProfile: null }, { headers });
+  const body = await readBoundedJsonObject(request, 2_000);
+  if (body.kind === "too-large") return NextResponse.json({ error: "Request is too large." }, { status: 413, headers });
+  if (body.kind === "invalid" || !isVoiceProfileVersion(body.value.expectedUpdatedAt) || body.value.expectedUpdatedAt === null)
+    return NextResponse.json({ error: "Choose the current writing style guide before removing it." }, { status: 400, headers });
+  try {
+    deleteVoiceProfileIfCurrent(user, body.value.expectedUpdatedAt);
+    return NextResponse.json({ voiceProfile: null }, { headers });
+  } catch (error) {
+    if (error instanceof VoiceProfileConflictError) return profileConflict(user, error);
+    throw error;
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -51,8 +64,14 @@ export async function PATCH(request: Request) {
   if (body.kind === "too-large") return NextResponse.json({ error: "Request is too large." }, { status: 413, headers });
   if (body.kind === "invalid") return NextResponse.json({ error: "Invalid JSON body." }, { status: 400, headers });
   const guide = parseGuide(body.value.guide);
-  if (!guide || !loadVoiceProfile(user)) return NextResponse.json({ error: "Choose a saved style guide under 1,000 characters." }, { status: 400, headers });
-  return NextResponse.json({ voiceProfile: saveVoiceProfile(user, guide) }, { headers });
+  if (!guide || !isVoiceProfileVersion(body.value.expectedUpdatedAt) || body.value.expectedUpdatedAt === null)
+    return NextResponse.json({ error: "Choose a saved style guide under 1,000 characters." }, { status: 400, headers });
+  try {
+    return NextResponse.json({ voiceProfile: saveVoiceProfileIfCurrent(user, guide, body.value.expectedUpdatedAt) }, { headers });
+  } catch (error) {
+    if (error instanceof VoiceProfileConflictError) return profileConflict(user, error);
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {
@@ -78,8 +97,12 @@ export async function POST(request: Request) {
   const styleValid = (input.style === undefined || isCaptionStyleId(input.style)) &&
     (input.useVoice === undefined || (typeof input.useVoice === "boolean" && input.useVoice === (style === "personal")));
   const useVoice = style === "personal";
-  if (isPersonal && !examples) {
+  if (isPersonal && (!examples || !isVoiceProfileVersion(input.expectedUpdatedAt))) {
     return NextResponse.json({ error: "Choose 3–6 examples, each under 1,800 characters." }, { status: 400, headers });
+  }
+  const expectedVoiceVersion = isPersonal ? input.expectedUpdatedAt as string | null : null;
+  if (isPersonal && loadVoiceProfile(user)?.updatedAt !== (expectedVoiceVersion ?? undefined)) {
+    return profileConflict(user, new VoiceProfileConflictError("The writing style guide changed in another window. Review the latest version before analyzing again."));
   }
   if ((isCaption || isDraft) && !styleValid) {
     return NextResponse.json({ error: "Choose a supported caption style." }, { status: 400, headers });
@@ -124,8 +147,9 @@ export async function POST(request: Request) {
     const guide = parseGuideResponse(raw);
     if (!guide) throw new Error("The model did not return a usable style guide. Try shorter examples.");
     if (repeatsLongExcerpt(guide, examples!)) throw new Error("The model repeated part of a sample post. Try again with shorter examples.");
-    return NextResponse.json({ voiceProfile: saveVoiceProfile(user, guide) }, { headers });
+    return NextResponse.json({ voiceProfile: saveVoiceProfileIfCurrent(user, guide, expectedVoiceVersion) }, { headers });
   } catch (error) {
+    if (error instanceof VoiceProfileConflictError) return profileConflict(user, error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "The AI request failed." }, { status: 502, headers });
   }
 }

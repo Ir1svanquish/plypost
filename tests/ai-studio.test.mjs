@@ -10,7 +10,7 @@ import { createMedia } from "../src/lib/server/media.ts";
 import { GET, POST, PATCH, DELETE } from "../src/app/api/ai-studio/route.ts";
 import { POST as adaptPost } from "../src/app/api/generate/route.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
-import { loadVoiceProfile, saveVoiceProfile } from "../src/lib/server/voice-profile.ts";
+import { loadVoiceProfile, saveVoiceProfileIfCurrent } from "../src/lib/server/voice-profile.ts";
 import { isStandaloneQuestion, parseDraftFromNotesResponse } from "../src/lib/ai-studio.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-ai-studio-"));
@@ -53,21 +53,28 @@ test("selected posts and an owned image use Nebius only after explicit actions",
     assert.equal(retiredAction.status, 400);
     const retiredGuide = await adaptPost(request("/api/generate", token, { source: "A draft", referenceGuide: "Old guide" }));
     assert.equal(retiredGuide.status, 400);
+    assert.equal((await POST(request("/api/ai-studio", token,
+      { action: "analyze-style", examples: ["One", "Two", "Three"] }))).status, 400);
     assert.equal(calls.length, 0);
 
     const samples = ["I keep these words private.", "A second private old post.", "One more old post." ];
-    const analyzed = await POST(request("/api/ai-studio", token, { action: "analyze-style", examples: samples }));
+    const analyzed = await POST(request("/api/ai-studio", token, { action: "analyze-style", examples: samples, expectedUpdatedAt: null }));
     assert.equal(analyzed.status, 200);
-    assert.match((await analyzed.json()).voiceProfile.guide, /Short openings/);
+    const analyzedProfile = (await analyzed.json()).voiceProfile;
+    assert.match(analyzedProfile.guide, /Short openings/);
     assert.equal(calls[0].body.model, "nvidia/nemotron-3-super-120b-a12b");
     assert.equal(calls[0].body.messages[1].content.includes(samples[0]), true);
     assert.equal(database().prepare("SELECT guide FROM voice_profiles WHERE user_id=?").get(owner).guide.includes(samples[0]), false);
-    const edited = await PATCH(request("/api/ai-studio", token, { guide: "Short openings and direct sentences." }, "PATCH"));
+    const edited = await PATCH(request("/api/ai-studio", token, { guide: "Short openings and direct sentences.", expectedUpdatedAt: analyzedProfile.updatedAt }, "PATCH"));
     assert.equal(edited.status, 200);
+    const editedProfile = (await edited.json()).voiceProfile;
     assert.equal(loadVoiceProfile(owner).guide, "Short openings and direct sentences.");
     assert.equal(calls.length, 1);
 
     assert.equal(database().prepare("SELECT COUNT(*) AS count FROM voice_profiles").get().count, 1);
+    assert.equal((await PATCH(request("/api/ai-studio", token,
+      { guide: "Missing version." }, "PATCH"))).status, 400);
+    assert.equal((await DELETE(request("/api/ai-studio", token, null, "DELETE"))).status, 400);
 
     const caption = await POST(request("/api/ai-studio", token, {
       action: "caption-image", mediaId: image.id, context: "This is a sample visual.", useVoice: true,
@@ -87,12 +94,92 @@ test("selected posts and an owned image use Nebius only after explicit actions",
     assert.equal("referencePattern" in guided, false);
     assert.equal(calls.every((call) => call.url === "https://api.tokenfactory.nebius.com/v1/chat/completions"), true);
 
-    assert.equal((await DELETE(request("/api/ai-studio", token, null, "DELETE"))).status, 200);
+    assert.equal((await DELETE(request("/api/ai-studio", token, { expectedUpdatedAt: editedProfile.updatedAt }, "DELETE"))).status, 200);
     assert.equal(loadVoiceProfile(owner), null);
     const staleVoice = await POST(request("/api/ai-studio", token, { action: "caption-image", mediaId: image.id, useVoice: true }));
     assert.equal(staleVoice.status, 400);
     assert.equal(calls.length, 3);
   } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.PLYPOST_OWNER_EMAIL;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+    delete process.env.NEBIUS_API_KEY;
+  }
+});
+
+test("stale style guide edits and deletions cannot overwrite another window", async () => {
+  const owner = "style-conflict@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  const token = createSession(owner);
+  try {
+    const original = saveVoiceProfileIfCurrent(owner, "Original guide.", null);
+    const updated = await PATCH(request("/api/ai-studio", token,
+      { guide: "New guide from the other window.", expectedUpdatedAt: original.updatedAt }, "PATCH"));
+    assert.equal(updated.status, 200);
+    const latest = (await updated.json()).voiceProfile;
+    assert.notEqual(latest.updatedAt, original.updatedAt);
+
+    const staleEdit = await PATCH(request("/api/ai-studio", token,
+      { guide: "Stale editor text.", expectedUpdatedAt: original.updatedAt }, "PATCH"));
+    assert.equal(staleEdit.status, 409);
+    assert.deepEqual((await staleEdit.json()).voiceProfile, latest);
+    const staleDelete = await DELETE(request("/api/ai-studio", token,
+      { expectedUpdatedAt: original.updatedAt }, "DELETE"));
+    assert.equal(staleDelete.status, 409);
+    assert.equal(loadVoiceProfile(owner).guide, latest.guide);
+    assert.equal((await DELETE(request("/api/ai-studio", token,
+      { expectedUpdatedAt: latest.updatedAt }, "DELETE"))).status, 200);
+    assert.equal(loadVoiceProfile(owner), null);
+    assert.equal((await PATCH(request("/api/ai-studio", token,
+      { guide: "No profile to edit.", expectedUpdatedAt: latest.updatedAt }, "PATCH"))).status, 409);
+  } finally {
+    delete process.env.PLYPOST_OWNER_EMAIL;
+    delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
+  }
+});
+
+test("a slow style analysis cannot replace a guide edited while Nebius responded", async () => {
+  const owner = "style-analysis-race@example.test";
+  process.env.PLYPOST_OWNER_EMAIL = owner;
+  process.env.PLYPOST_OWNER_PASSWORD_HASH = "test-only-placeholder";
+  process.env.NEBIUS_API_KEY = "test-only-nebius-key";
+  const token = createSession(owner);
+  const original = saveVoiceProfileIfCurrent(owner, "Original guide.", null);
+  const originalFetch = globalThis.fetch;
+  let resolveStart;
+  let releaseResponse;
+  const started = new Promise((resolve) => { resolveStart = resolve; });
+  const holdResponse = new Promise((resolve) => { releaseResponse = resolve; });
+  let aiCalls = 0;
+  globalThis.fetch = async () => {
+    aiCalls += 1;
+    resolveStart();
+    await holdResponse;
+    return globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({ guide: "AI replacement guide." }) } }] });
+  };
+  try {
+    const pending = POST(request("/api/ai-studio", token, {
+      action: "analyze-style", examples: ["First post.", "Second post.", "Third post."],
+      expectedUpdatedAt: original.updatedAt,
+    }));
+    await started;
+    const manual = await PATCH(request("/api/ai-studio", token,
+      { guide: "Edited while AI was responding.", expectedUpdatedAt: original.updatedAt }, "PATCH"));
+    assert.equal(manual.status, 200);
+    releaseResponse();
+    const analyzed = await pending;
+    assert.equal(analyzed.status, 409);
+    assert.equal((await analyzed.json()).voiceProfile.guide, "Edited while AI was responding.");
+    assert.equal(loadVoiceProfile(owner).guide, "Edited while AI was responding.");
+    const stale = await POST(request("/api/ai-studio", token, {
+      action: "analyze-style", examples: ["First post.", "Second post.", "Third post."],
+      expectedUpdatedAt: original.updatedAt,
+    }));
+    assert.equal(stale.status, 409);
+    assert.equal(aiCalls, 1);
+  } finally {
+    releaseResponse();
     globalThis.fetch = originalFetch;
     delete process.env.PLYPOST_OWNER_EMAIL;
     delete process.env.PLYPOST_OWNER_PASSWORD_HASH;
@@ -111,7 +198,7 @@ test("a guide that repeats a long passage from a sample post is not saved", asyn
   globalThis.fetch = async () => globalThis.Response.json({ choices: [{ message: { content: JSON.stringify({ guide: `Use short lines. ${quoted}` }) } }] });
   try {
     const response = await POST(request("/api/ai-studio", token, {
-      action: "analyze-style", examples: [quoted, "A second sample post.", "A third sample post."],
+      action: "analyze-style", examples: [quoted, "A second sample post.", "A third sample post."], expectedUpdatedAt: null,
     }));
     assert.equal(response.status, 502);
     assert.equal(loadVoiceProfile(owner), null);
@@ -146,7 +233,7 @@ test("drafting from notes sends only the selected notes and optional style guide
       assert.equal((await POST(request("/api/ai-studio", token, invalid))).status, 400);
     }
     assert.equal(calls.length, 0);
-    saveVoiceProfile(owner, "Short, plain sentences.");
+    saveVoiceProfileIfCurrent(owner, "Short, plain sentences.", null);
     const notes = "Workshop Saturday 2 p.m. Bring laptop.";
     const response = await POST(request("/api/ai-studio", token, {
       action: "draft-from-notes", notes, useVoice: true, mediaId: "should-not-be-sent",
@@ -202,7 +289,7 @@ test("a question alone cannot become a fabricated personal anecdote", async () =
 
 test("portable backup carries the derived guide without retaining source posts", async () => {
   const owner = "backup-style@example.test";
-  saveVoiceProfile(owner, "Plain language and short paragraphs.");
+  saveVoiceProfileIfCurrent(owner, "Plain language and short paragraphs.", null);
   const archive = JSON.parse(exportPortableBackup(owner));
   assert.equal(archive.version, 5);
   assert.equal(archive.voiceProfile.guide, "Plain language and short paragraphs.");
