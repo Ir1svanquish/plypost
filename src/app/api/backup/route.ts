@@ -1,5 +1,6 @@
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { BackupError, streamPortableBackup, importPortableBackup, MAX_PORTABLE_BACKUP_BYTES } from "@/lib/server/portable-backup";
+import { BackupError, streamPortableBackup, importPortableBackup } from "@/lib/server/portable-backup";
+import { parsePortableBackupRequest } from "@/lib/server/portable-backup-stream";
 
 export const runtime = "nodejs";
 
@@ -9,41 +10,49 @@ const privateHeaders = {
   "Cross-Origin-Resource-Policy": "same-origin",
   "Referrer-Policy": "no-referrer",
 };
+let backupOperationActive = false;
 
-async function readBoundedJson(request: Request): Promise<unknown> {
-  const claimedLength = request.headers.get("content-length");
-  if (claimedLength && /^\d+$/.test(claimedLength) && Number(claimedLength) > MAX_PORTABLE_BACKUP_BYTES) {
-    throw new BackupError("Backup exceeds the 192 MiB portable archive limit.", 413);
-  }
-  if (!request.body) throw new BackupError("Backup file is empty.");
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_PORTABLE_BACKUP_BYTES) {
-        await reader.cancel();
-        throw new BackupError("Backup exceeds the 192 MiB portable archive limit.", 413);
-      }
-      chunks.push(value);
-    }
-  } finally { reader.releaseLock(); }
-  if (!total) throw new BackupError("Backup file is empty.");
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
-  catch { throw new BackupError("Backup is not valid UTF-8 JSON."); }
+function busyResponse() {
+  return Response.json({ error: "Another full backup is in progress. Try again when it finishes." },
+    { status: 409, headers: privateHeaders });
+}
+
+function releaseAfterDownload(source: ReadableStream<Uint8Array>, release: () => void) {
+  const reader = source.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await reader.read();
+        if (next.done) { release(); controller.close(); }
+        else controller.enqueue(next.value);
+      } catch (error) { release(); controller.error(error); }
+    },
+    async cancel(reason) {
+      try { await reader.cancel(reason); }
+      finally { release(); }
+    },
+  }, { highWaterMark: 0 });
 }
 
 export async function GET(request: Request) {
   const user = currentUser(request);
   if (!user) return Response.json({ error: "Sign in to continue." }, { status: 401, headers: privateHeaders });
+  if (backupOperationActive) return busyResponse();
+  backupOperationActive = true;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    backupOperationActive = false;
+    request.signal.removeEventListener("abort", release);
+  };
+  request.signal.addEventListener("abort", release, { once: true });
+  if (request.signal.aborted) {
+    release();
+    return Response.json({ error: "Backup request was cancelled." }, { status: 400, headers: privateHeaders });
+  }
   try {
-    const backup = streamPortableBackup(user);
+    const backup = releaseAfterDownload(streamPortableBackup(user), release);
     const date = new Date().toISOString().slice(0, 10);
     return new Response(backup, {
       headers: {
@@ -53,6 +62,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    release();
     if (error instanceof BackupError) {
       return Response.json({ error: error.message }, { status: error.status, headers: privateHeaders });
     }
@@ -67,8 +77,10 @@ export async function POST(request: Request) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") || "")) {
     return Response.json({ error: "Upload a Plypost portable JSON backup." }, { status: 415, headers: privateHeaders });
   }
+  if (backupOperationActive) return busyResponse();
+  backupOperationActive = true;
   try {
-    const raw = await readBoundedJson(request);
+    const raw = await parsePortableBackupRequest(request);
     const restored = await importPortableBackup(user, raw);
     return Response.json({ restored }, { headers: privateHeaders });
   } catch (error) {
@@ -76,5 +88,5 @@ export async function POST(request: Request) {
       return Response.json({ error: error.message }, { status: error.status, headers: privateHeaders });
     }
     return Response.json({ error: "Could not import backup." }, { status: 500, headers: privateHeaders });
-  }
+  } finally { backupOperationActive = false; }
 }

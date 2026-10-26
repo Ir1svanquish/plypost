@@ -258,7 +258,16 @@ function assertUniqueIds(items: { id: string }[]) {
   if (new Set(items.map((item) => item.id)).size !== items.length) invalid("Backup contains duplicate IDs.");
 }
 
+// Only the streaming request parser creates this after checking canonical base64.
+export class DecodedBackupAsset {
+  constructor(public readonly bytes: Buffer) {}
+}
+
 function decodeCanonicalBase64(value: unknown, maxBytes = MAX_IMAGE_BYTES, label = "image"): Buffer {
+  if (value instanceof DecodedBackupAsset) {
+    if (value.bytes.length > maxBytes) invalid(`Backup contains invalid ${label} data.`);
+    return value.bytes;
+  }
   if (typeof value !== "string" || value.length > Math.ceil(maxBytes / 3) * 4 ||
       value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
     invalid(`Backup contains invalid ${label} data.`);
@@ -331,6 +340,7 @@ async function prepareMedia(raw: unknown): Promise<PreparedMedia[]> {
       oldId: entry.id, newId: randomUUID(), name: safeName(entry.name), mimeType: entry.mimeType,
       sizeBytes: encoded.length, width, height, createdAt: entry.createdAt, sha256: digest, body: encoded,
     });
+    if (entry.base64 instanceof DecodedBackupAsset) entry.base64 = null;
   }
   return prepared;
 }
@@ -361,6 +371,7 @@ function prepareVideos(raw: unknown): PreparedVideo[] {
     digests.add(digest);
     prepared.push({ oldId: entry.id, newId: randomUUID(), name: entry.name, mimeType: entry.mimeType,
       sizeBytes: body.length, createdAt: entry.createdAt, sha256: digest, body });
+    if (entry.base64 instanceof DecodedBackupAsset) entry.base64 = null;
   }
   return prepared;
 }

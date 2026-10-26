@@ -193,7 +193,12 @@ test("portable backup route enforces owner session, origin, type, and private re
   assert.equal(download.status, 200);
   assert.match(download.headers.get("content-disposition"), /plypost-portable/);
   assert.match(download.headers.get("cache-control"), /no-store/);
+  assert.equal((await GET(new globalThis.Request(base, { headers: { cookie } }))).status, 409);
+  assert.equal((await POST(backupRequest({}, { cookie }))).status, 409);
   const archive = await download.json();
+  const cancelled = await GET(new globalThis.Request(base, { headers: { cookie } }));
+  assert.equal(cancelled.status, 200);
+  await cancelled.body.cancel();
   const expected = JSON.parse(exportPortableBackup(owner));
   expected.exportedAt = archive.exportedAt;
   assert.deepEqual(archive, expected);
@@ -205,6 +210,61 @@ test("portable backup route enforces owner session, origin, type, and private re
   const imported = await POST(backupRequest(archive, { cookie }));
   assert.equal(imported.status, 200);
   assert.deepEqual((await imported.json()).restored, { drafts: 1, jobs: 1, assisted: 1, media: 1, videos: 0 });
+});
+
+test("an unfinished restore keeps another backup request from doubling memory use", async () => {
+  const cookie = `${SESSION_COOKIE}=${createSession(owner)}`;
+  let finish;
+  const body = new globalThis.ReadableStream({ start(controller) {
+    finish = () => { controller.enqueue(Buffer.from("{}")); controller.close(); };
+  } });
+  const pending = POST(new globalThis.Request(base, { method: "POST", duplex: "half",
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie }, body }));
+  assert.equal((await GET(new globalThis.Request(base, { headers: { cookie } }))).status, 409);
+  assert.equal((await POST(backupRequest({}, { cookie }))).status, 409);
+  finish();
+  assert.equal((await pending).status, 400);
+  const available = await GET(new globalThis.Request(base, { headers: { cookie } }));
+  assert.equal(available.status, 200);
+  await available.body.cancel();
+});
+
+test("backup upload accepts fragmented UTF-8 and rejects malformed streams without replacing work", async () => {
+  const cookie = `${SESSION_COOKIE}=${createSession(owner)}`;
+  const archive = JSON.parse(exportPortableBackup(owner));
+  archive.media[0].name = "封面🙂.png";
+  const bytes = Buffer.from(JSON.stringify(archive));
+  let offset = 0;
+  const fragmented = new globalThis.ReadableStream({ pull(controller) {
+    if (offset >= bytes.length) { controller.close(); return; }
+    controller.enqueue(bytes.subarray(offset, offset + 7));
+    offset += 7;
+  } });
+  const uploaded = await POST(new globalThis.Request(base, { method: "POST", duplex: "half",
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie }, body: fragmented }));
+  assert.equal(uploaded.status, 200);
+  assert.equal(listMedia(owner)[0].name, "封面🙂.png");
+  const before = listWorkspace(owner);
+
+  const noncanonical = JSON.parse(exportPortableBackup(owner));
+  noncanonical.media[0].base64 += "=";
+  assert.equal((await POST(backupRequest(noncanonical, { cookie }))).status, 400);
+  const duplicate = JSON.stringify(noncanonical).replace('"format":"plypost-portable"',
+    '"format":"plypost-portable","format":"plypost-portable"');
+  assert.equal((await POST(backupRequest(duplicate, { cookie }))).status, 400);
+  const invalidUtf8 = new globalThis.Request(base, { method: "POST",
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie },
+    body: Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]) });
+  assert.equal((await POST(invalidUtf8)).status, 400);
+  let sent = 0;
+  const oversized = new globalThis.ReadableStream({ pull(controller) {
+    if (sent++ < 193) controller.enqueue(Buffer.alloc(1024 * 1024, 0x20));
+    else controller.close();
+  } });
+  const unclaimedLength = new globalThis.Request(base, { method: "POST", duplex: "half",
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie }, body: oversized });
+  assert.equal((await POST(unclaimedLength)).status, 413);
+  assert.deepEqual(listWorkspace(owner), before);
 });
 
 test("backup import rejects an image whose bytes do not match its declared checksum", async () => {
