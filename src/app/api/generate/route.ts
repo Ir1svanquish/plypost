@@ -3,7 +3,7 @@ import { parseGeneratedVariants } from "@/lib/generated-variants";
 import { variantMessages } from "@/lib/ai-prompts";
 import { characterCount, isPlatformId, platformDisplayIds } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
+import { modelRequestOptions, nebiusConfig, readNebiusContent } from "@/lib/server/ai-provider";
 import { reserveAiRequest } from "@/lib/server/workspace";
 import { loadVoiceProfile } from "@/lib/server/voice-profile";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
@@ -76,9 +76,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const data: unknown = await response.json();
-    const content = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content;
-    const parsed = typeof content === "string" ? parseGeneratedVariants(content, requested) : null;
+    const content = await readNebiusContent(response);
+    const parsed = content ? parseGeneratedVariants(content, requested) : null;
     if (!parsed) {
       return NextResponse.json(
         { error: "The model did not return usable drafts for the selected platforms. Please try again." },

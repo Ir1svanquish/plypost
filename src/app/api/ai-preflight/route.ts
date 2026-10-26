@@ -3,7 +3,7 @@ import { isAssistedDestinationId } from "@/lib/assisted";
 import { parsePreflightReport, preflightMessages } from "@/lib/ai-preflight";
 import { characterCount } from "@/lib/platforms";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
+import { modelRequestOptions, nebiusConfig, readNebiusContent } from "@/lib/server/ai-provider";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 import { reserveAiRequest } from "@/lib/server/workspace";
 
@@ -44,9 +44,8 @@ export async function POST(request: Request) {
       cache: "no-store",
     });
     if (!response.ok) return NextResponse.json({ error: `The Nebius request failed (HTTP ${response.status}). Check your key, model and quota.` }, { status: 502 });
-    const data: unknown = await response.json();
-    const content = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content;
-    const report = typeof content === "string" ? parsePreflightReport(content, text) : null;
+    const content = await readNebiusContent(response);
+    const report = content ? parsePreflightReport(content, text) : null;
     if (!report) return NextResponse.json({ error: "The model did not return a usable check. Please try again." }, { status: 502 });
     return NextResponse.json({ destination, report }, { headers: { "Cache-Control": "no-store" } });
   } catch {

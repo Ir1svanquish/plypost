@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { planMessages } from "@/lib/ai-prompts";
 import { parseBrandBrief, parseGeneratedIdeas, validWeekStart, type BrandBrief } from "@/lib/strategy";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
+import { modelRequestOptions, nebiusConfig, readNebiusContent } from "@/lib/server/ai-provider";
 import {
   approveStrategyIdea, createWeeklyPlan, dismissStrategyIdea, listStrategy, loadBrandBrief,
   saveBrandBriefIfCurrent, StrategyConflictError, updateStrategyIdea,
@@ -84,9 +84,8 @@ async function generate(user: string, weekStart: string, expectedBrief: BrandBri
         error: `The Nebius request failed (HTTP ${response.status}). Check the key, model and quota.`,
       }, { status: 502 });
     }
-    const data: unknown = await response.json();
-    const content = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content;
-    const ideas = typeof content === "string" ? parseGeneratedIdeas(content, brief.platforms) : null;
+    const content = await readNebiusContent(response);
+    const ideas = content ? parseGeneratedIdeas(content, brief.platforms) : null;
     if (!ideas) return NextResponse.json({ error: "The model did not return a usable plan. Please try again." }, { status: 502 });
     createWeeklyPlan(user, brief, "nebius", weekStart, ideas);
     return NextResponse.json(listStrategy(user), { headers: responseHeaders });

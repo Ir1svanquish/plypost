@@ -3,9 +3,12 @@ type BoundedJsonResult =
   | { kind: "too-large" }
   | { kind: "invalid" };
 
-export async function readBoundedJsonObject(request: Request, maxBytes: number, maxCharacters?: number): Promise<BoundedJsonResult> {
+export async function readBoundedJsonObject(request: Pick<Request, "headers" | "body">, maxBytes: number, maxCharacters?: number): Promise<BoundedJsonResult> {
   const declaredLength = Number(request.headers.get("content-length"));
-  if (declaredLength > maxBytes) return { kind: "too-large" };
+  if (declaredLength > maxBytes) {
+    await request.body?.cancel().catch(() => undefined);
+    return { kind: "too-large" };
+  }
   if (!request.body) return { kind: "invalid" };
 
   const reader = request.body.getReader();

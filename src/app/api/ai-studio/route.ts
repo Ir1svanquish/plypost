@@ -4,7 +4,7 @@ import { draftFromNotesMessages, imageCaptionMessages, styleAnalysisMessages } f
 import { isCaptionStyleId } from "@/lib/caption-styles";
 import { isStandaloneQuestion, parseDraftFromNotesResponse, parseExamples, parseGuide, parseGuideResponse, parseImageCaptionResponse, repeatsLongExcerpt } from "@/lib/ai-studio";
 import { currentUser, sameOrigin } from "@/lib/server/auth";
-import { modelRequestOptions, nebiusConfig } from "@/lib/server/ai-provider";
+import { modelRequestOptions, nebiusConfig, readNebiusContent } from "@/lib/server/ai-provider";
 import { readBoundedJsonObject } from "@/lib/server/bounded-json";
 import { getMedia } from "@/lib/server/media";
 import { VoiceProfileConflictError, deleteVoiceProfileIfCurrent, isVoiceProfileVersion, loadVoiceProfile, saveVoiceProfileIfCurrent } from "@/lib/server/voice-profile";
@@ -27,9 +27,8 @@ async function completion(key: string, model: string, messages: ReturnType<typeo
     signal: AbortSignal.timeout(45_000), cache: "no-store",
   });
   if (!response.ok) throw new Error(`Nebius returned HTTP ${response.status}. Check the model and quota.`);
-  const data: unknown = await response.json();
-  const content = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") throw new Error("Nebius returned no usable text.");
+  const content = await readNebiusContent(response);
+  if (!content) throw new Error("Nebius returned no usable text.");
   return content;
 }
 
