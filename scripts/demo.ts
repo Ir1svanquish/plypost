@@ -7,6 +7,7 @@ import { passwordHash } from "../src/lib/server/auth.ts";
 import { closeDatabase } from "../src/lib/server/db.ts";
 import { saveBrandBrief } from "../src/lib/server/strategy.ts";
 import { addSchedule, prepareAssistedBatch, saveDraft, setAssistedStatus } from "../src/lib/server/workspace.ts";
+import { assistedContentSnapshot } from "../src/lib/workspace.ts";
 
 const demoEmail = "demo@plypost.local";
 const defaultDemoDir = resolve("data/demo");
@@ -57,7 +58,7 @@ export function createDemoAt(directory: string): DemoConfig {
       { destination: "threads", scheduledFor: daysFromNow(1), reminderEnabled: false },
       { destination: "bluesky", scheduledFor: now, reminderEnabled: false },
     ]);
-    if (!setAssistedStatus(demoEmail, handoffs[2].id, "posted")) throw new Error("Could not seed demo progress.");
+    if (!setAssistedStatus(demoEmail, handoffs[2].id, "posted", undefined, assistedContentSnapshot(handoffs[2]))) throw new Error("Could not seed demo progress.");
 
     saveDraft(demoEmail, {
       id: randomUUID(), title: "[Demo] Ask a focused question",

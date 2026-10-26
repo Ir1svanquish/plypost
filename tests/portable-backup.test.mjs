@@ -14,6 +14,7 @@ import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { exportPortableBackup, importPortableBackup, streamPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { approveStrategyIdea, createWeeklyPlan, listStrategy, saveBrandBrief } from "../src/lib/server/strategy.ts";
 import { getSlotSettings, saveSlotSettings } from "../src/lib/server/slots.ts";
+import { assistedContentSnapshot } from "../src/lib/workspace.ts";
 import { GET, POST } from "../src/app/api/backup/route.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-portable-"));
@@ -54,7 +55,7 @@ test("portable backup restores image pixels and saved records in a fresh databas
   database().prepare("INSERT INTO assisted(id,user_id,payload,scheduled_for,updated_at) VALUES (?,?,?,?,?)")
     .run(assisted.id, owner, JSON.stringify(assisted), assisted.scheduledFor, stamp());
   const postUrl = "https://social.example/creator/post/2026";
-  assert.equal(setAssistedStatus(owner, assisted.id, "posted", postUrl), true);
+  assert.equal(setAssistedStatus(owner, assisted.id, "posted", postUrl, assistedContentSnapshot(assisted)), true);
   const weeklySlots = saveSlotSettings(owner, { timeZone: "Asia/Hong_Kong", rules: [
     { platform: "bluesky", day: 1, time: "09:00" },
     { platform: "linkedin", day: 4, time: "16:30" },

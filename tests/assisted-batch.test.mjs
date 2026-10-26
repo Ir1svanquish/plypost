@@ -11,7 +11,7 @@ import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
 import { createVideo } from "../src/lib/server/video.ts";
 import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText } from "../src/lib/server/workspace.ts";
-import { assistedState, hasManualReminder, parseWorkspace } from "../src/lib/workspace.ts";
+import { assistedContentSnapshot, assistedState, hasManualReminder, parseWorkspace } from "../src/lib/workspace.ts";
 import { buildPlanAgenda } from "../src/lib/plan-agenda.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
 
@@ -230,7 +230,8 @@ test("queued handoff descriptions can be corrected without changing the draft or
   }));
   assert.equal(staleClient.status, 409);
   assert.match((await staleClient.json()).error, /Reload the page/);
-  assert.equal(setAssistedStatus(owner, first.id, "posted"), true);
+  assert.equal(setAssistedStatus(owner, first.id, "posted", undefined,
+    assistedContentSnapshot(listWorkspace(owner).assisted.find((item) => item.id === first.id))), true);
   assert.throws(() => updateAssistedMediaAlt(owner, first.id, [image.id], ["Final description"], ["After posting"]), /marked posted/);
 
   const legacyDraft = saveDraft(owner, draft("Older image note", ["bluesky"], {}, [image.id]));
@@ -260,6 +261,35 @@ test("description edits reject images reordered elsewhere even when their descri
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, "ASSISTED_CONFLICT");
   assert.deepEqual(listWorkspace(owner).assisted.find((item) => item.id === handoff.id).mediaAlt, descriptions);
+});
+
+test("marking a manual handoff posted rejects a stale content review", async () => {
+  const bytes = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#77aacc" } }).png().toBuffer();
+  const image = (await createMedia(owner, { name: "review.png", type: "image/png", bytes })).media;
+  const saved = saveDraft(owner, { ...draft("Reviewed before publishing", undefined, undefined, [image.id]), mediaAlt: ["Original image note"] });
+  const [handoff] = prepareAssistedBatch(owner, saved.id, randomUUID(), [handoffs()[0]]);
+  const reviewed = { destination: handoff.destination, text: handoff.text, mediaIds: handoff.mediaIds,
+    mediaAlt: handoff.mediaAlt, videoId: handoff.videoId ?? null, placeLabel: handoff.placeLabel ?? null };
+  assert.equal(updateAssistedMediaAlt(owner, handoff.id, [image.id], ["Original image note"], ["New image note"]), true);
+  assert.throws(() => setAssistedStatus(owner, handoff.id, "posted", undefined, reviewed), /content changed/);
+  assert.equal(listWorkspace(owner).assisted.find((item) => item.id === handoff.id).status, "queued");
+
+  const token = createSession(owner);
+  const response = await workspacePost(new globalThis.Request("http://localhost:3000/api/workspace", {
+    method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json", cookie: `${SESSION_COOKIE}=${token}` },
+    body: JSON.stringify({ action: "set-assisted-status", id: handoff.id, status: "posted", expectedContent: reviewed }),
+  }));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "ASSISTED_CONFLICT");
+  assert.equal(listWorkspace(owner).assisted.find((item) => item.id === handoff.id).status, "queued");
+
+  const afterImageEdit = listWorkspace(owner).assisted.find((item) => item.id === handoff.id);
+  assert.equal(updateAssistedText(owner, handoff.id, afterImageEdit.text, "New reviewed text"), true);
+  assert.throws(() => setAssistedStatus(owner, handoff.id, "posted", undefined,
+    assistedContentSnapshot(afterImageEdit)), /content changed/);
+  const latest = listWorkspace(owner).assisted.find((item) => item.id === handoff.id);
+  assert.equal(setAssistedStatus(owner, handoff.id, "posted", undefined, assistedContentSnapshot(latest)), true);
+  assert.equal(listWorkspace(owner).assisted.find((item) => item.id === handoff.id).status, "posted");
 });
 
 test("one queued handoff can replace and reorder images without changing its draft or sibling", async () => {
@@ -295,7 +325,8 @@ test("one queued handoff can replace and reorder images without changing its dra
   workspace = listWorkspace(owner);
   assert.deepEqual(workspace.assisted.find((item) => item.id === first.id).mediaIds, [firstImage.id]);
   assert.deepEqual(workspace.assisted.find((item) => item.id === first.id).mediaAlt, ["Only image"]);
-  assert.equal(setAssistedStatus(owner, first.id, "posted"), true);
+  assert.equal(setAssistedStatus(owner, first.id, "posted", undefined,
+    assistedContentSnapshot(workspace.assisted.find((item) => item.id === first.id))), true);
   assert.throws(() => updateAssistedImages(owner, first.id, [firstImage.id], ["Only image"], [], []), /marked posted/);
 });
 

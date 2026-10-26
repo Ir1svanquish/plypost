@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, rescheduleAssisted, saveDraft, setAssistedStatus, updateAssistedText } from "../src/lib/server/workspace.ts";
-import { assistedState, parseWorkspace } from "../src/lib/workspace.ts";
+import { assistedContentSnapshot, assistedState, parseWorkspace } from "../src/lib/workspace.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-assisted-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "assisted.sqlite");
@@ -41,7 +41,7 @@ test("assisted items persist and status, notification, and deletion are scoped t
   markAssistedNotified(owner, [post.id]);
   assert.equal(listWorkspace(owner).assisted[0].notifiedAt, notifiedAt);
 
-  assert.equal(setAssistedStatus(owner, post.id, "posted"), true);
+  assert.equal(setAssistedStatus(owner, post.id, "posted", undefined, assistedContentSnapshot(post)), true);
   assert.equal(listWorkspace(owner).assisted[0].status, "posted");
   const postedAt = listWorkspace(owner).assisted[0].postedAt;
   assert.ok(postedAt);
@@ -96,7 +96,7 @@ test("moving a pending manual reminder keeps its content, resets notification, a
   for (const invalid of ["2026-02-30T09:00:00.000Z", new Date(Date.now() - 60_000).toISOString(), "not-a-date"]) {
     assert.throws(() => rescheduleAssisted(owner, post.id, moved, invalid), /future UTC reminder/);
   }
-  assert.equal(setAssistedStatus(owner, post.id, "posted"), true);
+  assert.equal(setAssistedStatus(owner, post.id, "posted", undefined, assistedContentSnapshot(current)), true);
   assert.throws(() => rescheduleAssisted(owner, post.id, moved, new Date(Date.now() + 172_800_000).toISOString()), /changed or is no longer queued/);
   assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).scheduledFor, moved);
 });
@@ -146,7 +146,7 @@ test("editing queued handoff text preserves its reminder and rejects stale or po
     assert.throws(() => updateAssistedText(owner, post.id, revised.text, invalid), /up to 5,000/);
   }
   assert.equal(listWorkspace(owner).assisted.find((entry) => entry.id === post.id).text, revised.text);
-  setAssistedStatus(owner, post.id, "posted");
+  setAssistedStatus(owner, post.id, "posted", undefined, assistedContentSnapshot(revised));
   assert.throws(() => updateAssistedText(owner, post.id, revised.text, "Too late"), /marked posted/);
 });
 

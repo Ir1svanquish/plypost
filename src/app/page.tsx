@@ -45,7 +45,7 @@ import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
-import { WORKSPACE_KEY, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
+import { WORKSPACE_KEY, assistedContentSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 import { MAX_POST_IMAGES, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
 const sampleDraft =
@@ -1562,8 +1562,9 @@ function WorkspaceApp({ email, onLogout }: { email: string; onLogout: () => void
     }
   }
 
-  async function markAssistedPosted(id: string, postUrl?: string) {
-    return runAssistedAction("set-assisted-status", { id, status: "posted", ...(postUrl ? { postUrl } : {}) }, "Marked as posted by you. Plypost did not verify the platform post.");
+  async function markAssistedPosted(post: AssistedPost, postUrl?: string) {
+    return runAssistedAction("set-assisted-status", { id: post.id, status: "posted", expectedContent: assistedContentSnapshot(post),
+      ...(postUrl ? { postUrl } : {}) }, "Marked as posted by you. Plypost did not verify the platform post.");
   }
 
   async function updateAssistedPostUrl(id: string, postUrl: string | null): Promise<boolean> {

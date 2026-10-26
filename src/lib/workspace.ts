@@ -68,6 +68,19 @@ export type AssistedPost = {
   contentEditedAt?: string;
 };
 
+/** The content a person reviewed before reporting a manual post as published. */
+export function assistedContentSnapshot(item: AssistedPost) {
+  const mediaIds = item.mediaIds ?? [];
+  return {
+    destination: item.destination,
+    text: item.text,
+    mediaIds: [...mediaIds],
+    mediaAlt: mediaIds.map((_, index) => item.mediaAlt?.[index] ?? ""),
+    videoId: item.videoId ?? null,
+    placeLabel: item.placeLabel ?? null,
+  };
+}
+
 export type AssistedOutcomeInput = {
   views?: number;
   likes?: number;

@@ -9,6 +9,7 @@ import { unzipSync } from "fflate";
 import { closeDatabase } from "../src/lib/server/db.ts";
 import { buildHandoffPackage } from "../src/lib/server/handoff-package.ts";
 import { addAssisted, deleteAssisted, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedVideo } from "../src/lib/server/workspace.ts";
+import { assistedContentSnapshot } from "../src/lib/workspace.ts";
 import { assertOwnedVideo, createVideo, deleteVideo, getVideo, listVideos, MAX_VIDEO_BYTES } from "../src/lib/server/video.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-video-"));
@@ -71,7 +72,8 @@ test("queued handoff can replace and detach its clip without losing text or anot
   assert.equal(listWorkspace(owner).assisted.find((item) => item.id === handoff.id).videoId, undefined);
   assert.equal(unzipSync(buildHandoffPackage(owner, handoff.id).bytes)["video/clip.mp4"], undefined);
   assert.equal(deleteVideo(owner, second.id), true);
-  assert.equal(setAssistedStatus(owner, handoff.id, "posted"), true);
+  assert.equal(setAssistedStatus(owner, handoff.id, "posted", undefined,
+    assistedContentSnapshot(listWorkspace(owner).assisted.find((item) => item.id === handoff.id))), true);
   assert.throws(() => updateAssistedVideo(owner, handoff.id, null, foreign.id), /marked posted/);
   assert.throws(() => updateAssistedVideo(owner, handoff.id, null, "not-an-id"), /Choose a saved video/);
 });

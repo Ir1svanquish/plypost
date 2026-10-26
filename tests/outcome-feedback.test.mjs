@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase } from "../src/lib/server/db.ts";
 import { addAssisted, listWorkspace, setAssistedOutcome, setAssistedStatus } from "../src/lib/server/workspace.ts";
-import { parseAssistedOutcomeInput, parseWorkspace } from "../src/lib/workspace.ts";
+import { assistedContentSnapshot, parseAssistedOutcomeInput, parseWorkspace } from "../src/lib/workspace.ts";
 import { exportPortableBackup, importPortableBackup } from "../src/lib/server/portable-backup.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { POST } from "../src/app/api/workspace/route.ts";
@@ -54,7 +54,7 @@ test("outcome parser accepts old items and rejects malformed or unverified feedb
 test("only posted owner items accept self-reported results; post receipt survives changes", () => {
   const post = addAssisted(owner, item());
   assert.throws(() => setAssistedOutcome(owner, post.id, { views: 1 }), /Mark the item posted/);
-  assert.equal(setAssistedStatus(owner, post.id, "posted", postUrl), true);
+  assert.equal(setAssistedStatus(owner, post.id, "posted", postUrl, assistedContentSnapshot(post)), true);
   const postedAt = listWorkspace(owner).assisted[0].postedAt;
   assert.equal(setAssistedOutcome(other, post.id, { views: 1 }), false);
   for (const invalid of [undefined, {}, { views: -1 }, { views: 1.2 }, { likes: "4" },
@@ -85,7 +85,7 @@ test("only posted owner items accept self-reported results; post receipt survive
 
 test("workspace route requires same-origin owner session and exposes saved results", async () => {
   const post = addAssisted(owner, item());
-  setAssistedStatus(owner, post.id, "posted", postUrl);
+  setAssistedStatus(owner, post.id, "posted", postUrl, assistedContentSnapshot(post));
   const body = { action: "set-assisted-outcome", id: post.id, outcome: { views: 42, notes: "Clicked through" } };
   assert.equal((await POST(request(body))).status, 401);
   const token = createSession(owner);

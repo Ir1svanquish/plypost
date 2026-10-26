@@ -38,7 +38,7 @@ type Props = {
   onAdd: (videoId?: string, selectedMediaIds?: string[]) => Promise<boolean>;
   onSetReminder: (post: AssistedPost, scheduledFor: string | null) => Promise<void>;
   onCopy: (text: string, destination: AssistedDestinationId) => void;
-  onMarkPosted: (id: string, postUrl?: string) => Promise<boolean>;
+  onMarkPosted: (post: AssistedPost, postUrl?: string) => Promise<boolean>;
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
   onUpdateVideo: (id: string, expectedVideoId: string | null, videoId: string | null) => Promise<boolean>;
   onUpdateImages: (id: string, expectedMediaIds: string[], expectedMediaAlt: string[], mediaIds: string[], mediaAlt: string[]) => Promise<boolean>;
@@ -317,12 +317,12 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
     if (await onAdd(videoId ?? undefined, selectedMediaIds)) setImageSelections({});
   }
 
-  async function markPosted(id: string, postUrl?: string) {
-    if (busy || !await onMarkPosted(id, postUrl)) return;
-    closeVideoEditor(id);
+  async function markPosted(post: AssistedPost, postUrl?: string) {
+    if (busy || !await onMarkPosted(post, postUrl)) return;
+    closeVideoEditor(post.id);
     setDestinationFilter("all");
     setStatusFilter("posted");
-    setPendingStatusFocus({ id, status: "posted" });
+    setPendingStatusFocus({ id: post.id, status: "posted" });
   }
 
   async function undoPosted(id: string) {
@@ -507,7 +507,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
-                {item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item.id, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { void undoPosted(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+                {item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || Boolean(editingImages) || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => { void undoPosted(item.id); }} disabled={busy || outcomeSavingId !== null} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
               </div>
               {item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
               {item.status === "posted" && <details id={`assisted-posted-record-${item.id}`} className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">

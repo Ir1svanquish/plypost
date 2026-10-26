@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
-import { draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
+import { assistedContentSnapshot, draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { imageLimitForDestination } from "../media-policy";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
@@ -240,7 +240,18 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
   });
 }
 
-export function setAssistedStatus(userId: string, id: string, status: unknown, postUrl?: unknown): boolean {
+function matchesReviewedAssistedContent(value: unknown, current: AssistedPost): boolean {
+  if (!isRecord(value)) return false;
+  const saved = assistedContentSnapshot(current);
+  return value.destination === saved.destination && value.text === saved.text &&
+    value.videoId === saved.videoId && value.placeLabel === saved.placeLabel &&
+    Array.isArray(value.mediaIds) && value.mediaIds.length === saved.mediaIds.length &&
+    value.mediaIds.every((id, index) => id === saved.mediaIds[index]) &&
+    Array.isArray(value.mediaAlt) && value.mediaAlt.length === saved.mediaAlt.length &&
+    value.mediaAlt.every((description, index) => description === saved.mediaAlt[index]);
+}
+
+export function setAssistedStatus(userId: string, id: string, status: unknown, postUrl?: unknown, expectedContent?: unknown): boolean {
   if (!validId(id) || (status !== "posted" && status !== "queued")) throw new Error("Invalid assisted status.");
   if (status === "queued" && postUrl !== undefined) throw new Error("A post link requires a posted item.");
   // Omission preserves the current link; only an explicit null removes it.
@@ -251,6 +262,10 @@ export function setAssistedStatus(userId: string, id: string, status: unknown, p
     const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
     if (!row) return false;
     const current = JSON.parse(row.payload) as AssistedPost;
+    if (status === "posted" && (current.status === "queued" || expectedContent !== undefined) &&
+        !matchesReviewedAssistedContent(expectedContent, current)) {
+      throw new AssistedConflictError("This handoff content changed. Review its latest text and media before marking it posted.");
+    }
     if (current.status === status && (postUrl === undefined ||
         (postUrl === null && current.postUrl === undefined) || normalizedUrl === current.postUrl)) return true;
     const updated: AssistedPost = { ...current, status };
