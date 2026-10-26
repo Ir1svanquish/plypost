@@ -70,10 +70,10 @@ export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, variant
       {unavailable && <p role="alert" className="mb-3 text-[11px] text-[var(--danger)]">This handoff is no longer editable. Copy your changes if needed, then close the editor.</p>}
       {editing && stale && <p role="alert" className="mb-3 text-[11px] text-[var(--danger)]">Descriptions changed in another window. Copy your edits if needed, then reopen the latest version.</p>}
       {copyError && <p role="alert" className="mb-2 text-[11px] text-[var(--danger)]">Could not copy. Select the description and copy it manually.</p>}
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className={`grid gap-2 ${mediaIds.length > 1 && !editing ? "grid-cols-2" : "sm:grid-cols-2"}`}>
         {mediaIds.map((id, index) => <div key={id} className="min-w-0 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)]">
-          <div className="relative aspect-[2/1] bg-[var(--field)]">
-            <Image unoptimized loading="lazy" src={`/api/media/${encodeURIComponent(id)}`} alt={mediaAlt?.[index] || `Saved image ${index + 1} of ${mediaIds.length}`} fill sizes="(max-width: 640px) 90vw, 300px" className="object-cover" />
+          <div className={`relative bg-[var(--field)] ${mediaIds.length > 1 && !editing ? "aspect-square sm:aspect-[2/1]" : "aspect-[2/1]"}`}>
+            <Image unoptimized loading="lazy" src={`/api/media/${encodeURIComponent(id)}?thumb=1`} alt={mediaAlt?.[index] || `Saved image ${index + 1} of ${mediaIds.length}`} fill sizes="(max-width: 640px) 45vw, 300px" className="object-cover" />
             <span className="absolute left-1.5 top-1.5 rounded bg-[var(--surface)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text)] shadow-sm">{index + 1}</span>
           </div>
           <a href={`/api/media/${encodeURIComponent(id)}?download=1`} download className="flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]" aria-label={`Download saved image ${index + 1} of ${mediaIds.length}`}><Download size={12} aria-hidden="true" /> Download {index + 1}</a>
