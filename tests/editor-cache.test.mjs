@@ -54,4 +54,8 @@ test("only an untouched starter template is cleared from the editor cache", () =
   ]) {
     assert.equal(isUntouchedStarterCache({ ...starter, ...changed }, samples, channels), false);
   }
+  assert.equal(isUntouchedStarterCache({ ...starter, placeLabel: "Central, Hong Kong" }, samples, channels), false,
+    "a place note is an edit worth retaining");
+  assert.equal(isUntouchedStarterCache({ ...starter, pendingDraftSave: { snapshot: { source: samples[0] } } }, samples, channels), false,
+    "an unconfirmed save must keep its editor text");
 });

@@ -11,7 +11,9 @@ export function isUntouchedStarterCache(value: unknown, examples: readonly strin
   const variants = data.variants;
   return data.editorOrigin === "starter" && typeof data.source === "string" && examples.includes(data.source) &&
     (data.title === "" || data.title === undefined) && (data.currentDraftId === null || data.currentDraftId === undefined) &&
+    (data.pendingDraftSave === null || data.pendingDraftSave === undefined) &&
     (data.plannedDate === "" || data.plannedDate === undefined) && (data.videoId === null || data.videoId === undefined) &&
+    (data.placeLabel === "" || data.placeLabel === undefined) &&
     (data.mediaIds === undefined || Array.isArray(data.mediaIds) && data.mediaIds.length === 0) &&
     (data.mediaAlt === undefined || Array.isArray(data.mediaAlt) && data.mediaAlt.length === 0) &&
     (variants === undefined || Boolean(variants && typeof variants === "object" && !Array.isArray(variants) && Object.keys(variants).length === 0)) &&
