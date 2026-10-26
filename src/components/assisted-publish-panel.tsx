@@ -17,6 +17,7 @@ import { isManualAiDestination } from "@/lib/ai-handoff";
 import { imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
 type Props = {
+  active: boolean;
   items: AssistedPost[];
   drafts: SavedDraft[];
   destination: AssistedDestinationId;
@@ -101,7 +102,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, sourceMediaIds, sourceMediaAlt, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, startWithVideoGroup = false }: Props) {
+export function AssistedPublishPanel({ items, drafts, active, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, sourceMediaIds, sourceMediaAlt, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, startWithVideoGroup = false }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -163,30 +164,37 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
   }, [workspaceReady, composerInitialized, items.length, time, startExpanded]);
 
   useEffect(() => {
+    if (!active || !startExpanded) return;
+    setComposerOpen(true);
+    setVideoId(initialVideoId);
+    setImageSelections({});
+  }, [active, startExpanded, initialVideoId]);
+
+  useEffect(() => {
     if (previousDestination.current === destination) return;
     previousDestination.current = destination;
     setShowVideoDestinations(assistedVideoDisplayIds.some((id) => id === destination));
   }, [destination]);
 
   useEffect(() => {
-    if (!focusItemId) { handledFocusRef.current = null; return; }
+    if (!active || !focusItemId) { handledFocusRef.current = null; return; }
     if (handledFocusRef.current === focusItemId) return;
     const focused = items.find((item) => item.id === focusItemId);
     if (!focused) return;
     handledFocusRef.current = focusItemId;
     setDestinationFilter("all");
     setStatusFilter(focused.status === "posted" ? "posted" : "to-post");
-  }, [focusItemId, items]);
+  }, [active, focusItemId, items]);
 
   useEffect(() => {
-    if (!focusItemId || !hasFocusedItem) return;
+    if (!active || !focusItemId || !hasFocusedItem) return;
     const element = document.getElementById(`assisted-item-${focusItemId}`);
     element?.scrollIntoView({ behavior: "smooth", block: "center" });
     element?.focus({ preventScroll: true });
-  }, [focusItemId, hasFocusedItem, statusFilter, activeDestinationFilter]);
+  }, [active, focusItemId, hasFocusedItem, statusFilter, activeDestinationFilter]);
 
   useEffect(() => {
-    if (!pendingStatusFocus || !visibleItems.some((item) => item.id === pendingStatusFocus.id && item.status === pendingStatusFocus.status)) return;
+    if (!active || !pendingStatusFocus || !visibleItems.some((item) => item.id === pendingStatusFocus.id && item.status === pendingStatusFocus.status)) return;
     const element = document.getElementById(`assisted-item-${pendingStatusFocus.id}`);
     if (!element) return;
     if (pendingStatusFocus.status === "posted") {
@@ -196,7 +204,7 @@ export function AssistedPublishPanel({ items, drafts, destination, text, customT
     element.scrollIntoView({ behavior: "smooth", block: "center" });
     element.focus({ preventScroll: true });
     setPendingStatusFocus(null);
-  }, [pendingStatusFocus, visibleItems]);
+  }, [active, pendingStatusFocus, visibleItems]);
 
   function closeLinkEditor(id: string) {
     setEditingLinks((current) => { const next = { ...current }; delete next[id]; return next; });
