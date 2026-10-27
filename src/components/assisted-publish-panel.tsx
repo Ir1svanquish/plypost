@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, CalendarClock, Check, Copy, Download, ExternalLink, RotateCcw, Trash2 } from "lucide-react";
 import { assistedDestinations, assistedTextImageDisplayIds, assistedVideoDisplayIds, missingHandoffMedia, type AssistedDestinationId } from "@/lib/assisted";
 import { characterCount, isPlatformId } from "@/lib/platforms";
@@ -134,7 +134,27 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   const [descriptionDirtyIds, setDescriptionDirtyIds] = useState<Record<string, boolean>>({});
   const [descriptionEditingIds, setDescriptionEditingIds] = useState<Record<string, boolean>>({});
   const [videoBusy, setVideoBusy] = useState(false);
+  const [lastSeenItems, setLastSeenItems] = useState<AssistedPost[]>(items);
   const handledFocusRef = useRef<string | null>(null);
+  const openEditIds = useMemo(() => {
+    const ids = new Set([...Object.keys(textEdits), ...Object.keys(videoEdits), ...Object.keys(editingLinks), ...Object.keys(editingOutcomes)]);
+    for (const [id, editing] of Object.entries(descriptionEditingIds)) if (editing) ids.add(id);
+    for (const [id, dirty] of Object.entries(descriptionDirtyIds)) if (dirty) ids.add(id);
+    for (const [id, url] of Object.entries(postUrls)) if (url) ids.add(id);
+    if (imageEdit) ids.add(imageEdit.itemId);
+    if (reminderEdit) ids.add(reminderEdit.itemId);
+    return ids;
+  }, [textEdits, videoEdits, editingLinks, editingOutcomes, descriptionEditingIds, descriptionDirtyIds, postUrls, imageEdit, reminderEdit]);
+  const liveIds = new Set(items.map((item) => item.id));
+  const removedItems = lastSeenItems.filter((item) => !liveIds.has(item.id) && openEditIds.has(item.id));
+  const renderedItems = [...items, ...removedItems];
+  useEffect(() => {
+    setLastSeenItems((current) => {
+      const live = new Set(items.map((item) => item.id));
+      const next = [...items, ...current.filter((item) => !live.has(item.id) && openEditIds.has(item.id))];
+      return next.length === current.length && next.every((item, index) => item === current[index]) ? current : next;
+    });
+  }, [items, openEditIds]);
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
   const selectedMediaIds = (imageSelections[destination] ?? sourceMediaIds.slice(0, imageLimitForDestination(destination)))
@@ -153,13 +173,13 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     upcoming: destinationItems.filter((item) => assistedState(item, now) === "upcoming").length,
     posted: destinationItems.filter((item) => item.status === "posted").length,
   };
-  const visibleItems = destinationItems.filter((item) => {
+  const visibleItems = [...destinationItems.filter((item) => {
     if (statusFilter === "to-post") return item.status === "queued";
     if (statusFilter === "due") return assistedState(item, now) === "due";
     return assistedState(item, now) === statusFilter;
-  });
+  }), ...removedItems];
   const visibleItemIds = new Set(visibleItems.map((item) => item.id));
-  const itemById = new Map(items.map((item) => [item.id, item]));
+  const itemById = new Map(renderedItems.map((item) => [item.id, item]));
   const imageSelectionDirty = Object.entries(imageSelections).some(([id, selectedIds]) => {
     const defaultIds = sourceMediaIds.slice(0, imageLimitForDestination(id as AssistedDestinationId));
     return selectedIds?.length !== defaultIds.length || selectedIds.some((imageId, index) => imageId !== defaultIds[index]);
@@ -394,6 +414,10 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
         <button type="button" onClick={() => setComposerOpen((current) => !current)} disabled={!composerInitialized} aria-expanded={composerOpen} aria-controls="assisted-compose-form" className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-50">{composerOpen ? "Hide new post" : "New manual post"}</button>
       </div>
       {calendarError && <p role="alert" className="mx-6 mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)] sm:mx-7">{calendarError}</p>}
+      {removedItems.length > 0 && <div role="alert" className="mx-6 mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)] sm:mx-7">
+        <span>{removedItems.length === 1 ? "A handoff was" : `${removedItems.length} handoffs were`} removed in another window while an edit was open. Copy any unsaved work, then cancel the old edit.</span>
+        <button type="button" onClick={() => setPendingStatusFocus({ id: removedItems[0].id, status: removedItems[0].status })} className="font-semibold underline underline-offset-2">Review unsaved edit</button>
+      </div>}
       {statusChangedWhileEditing && <div role="alert" className="mx-6 mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)] sm:mx-7">
         <span>A handoff changed status in another window while an edit was open. Review and copy any unsaved work before closing it.</span>
         <button type="button" onClick={() => { setDestinationFilter("all"); setStatusFilter(statusChangedWhileEditing.status === "posted" ? "posted" : "to-post"); setPendingStatusFocus({ id: statusChangedWhileEditing.id, status: statusChangedWhileEditing.status }); }} className="font-semibold underline underline-offset-2">Review handoff</button>
@@ -446,13 +470,14 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
           </select>
         </label>
       </div>}
-      {items.length === 0 ? (
+      {renderedItems.length === 0 ? (
         <div className="flex flex-col items-center border-t border-[var(--line)] px-6 py-9 text-center"><Bell size={22} className="text-[var(--accent-text)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No assisted posts yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Add one above to start a manual publishing checklist.</p></div>
       ) : (
         <>
         {visibleItems.length === 0 && <div className="border-t border-[var(--line)] px-6 py-8 text-center sm:px-7"><p className="text-[13px] font-semibold text-[var(--text-secondary)]">No posts in this view</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">Choose another status or platform to see more.</p></div>}
         <div hidden={visibleItems.length === 0} className="divide-y divide-[var(--line)] border-t border-[var(--line)]">
-          {items.map((item) => {
+          {renderedItems.map((item) => {
+            const removed = !liveIds.has(item.id);
             const state = assistedState(item, now);
             const reminder = hasManualReminder(item);
             const editingReminder = reminderEdit?.itemId === item.id ? reminderEdit : null;
@@ -460,7 +485,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
             const accessiblePostPreview = item.text.replace(/\s+/g, " ").trim();
             const missingMedia = missingHandoffMedia(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId));
             const enteredUrl = postUrls[item.id] ?? "";
-            const strandedPostUrl = item.status === "posted" && !editingLinks[item.id] && Boolean(enteredUrl) && enteredUrl !== (item.postUrl ?? "");
+            const strandedPostUrl = (removed || item.status === "posted") && !editingLinks[item.id] && Boolean(enteredUrl) && enteredUrl !== (item.postUrl ?? "");
             const normalizedUrl = enteredUrl ? normalizePublicPostUrl(enteredUrl) : undefined;
             const invalidUrl = normalizedUrl === null;
             const savedUrl = item.postUrl && normalizePublicPostUrl(item.postUrl) === item.postUrl ? item.postUrl : undefined;
@@ -485,11 +510,11 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
             const textEditCount = textEdit ? characterCount(textEdit.value) : 0;
             const textEditValidation = textEdit && isPlatformId(item.destination)
               ? validatePlatformText(item.destination, textEdit.value.trim()) : null;
-            const canSaveText = Boolean(item.status === "queued" && textEdit && !textEditStale && textEdit.value.trim() &&
+            const canSaveText = Boolean(!removed && item.status === "queued" && textEdit && !textEditStale && textEdit.value.trim() &&
               textEdit.value.trim() !== item.text && textEditCount <= 5000 && textEditValidation?.valid !== false);
             const videoEdit = videoEdits[item.id];
             const videoEditStale = Boolean(videoEdit && videoEdit.expectedVideoId !== (item.videoId ?? null));
-            const canSaveVideo = Boolean(item.status === "queued" && videoEdit && !videoEditStale && videoEdit.value !== videoEdit.expectedVideoId);
+            const canSaveVideo = Boolean(!removed && item.status === "queued" && videoEdit && !videoEditStale && videoEdit.value !== videoEdit.expectedVideoId);
             const editingImages = imageEdit?.itemId === item.id ? imageEdit : null;
             const savedImageIds = item.mediaIds ?? [];
             const savedImageAlt = savedImageIds.map((_, index) => item.mediaAlt?.[index] ?? "");
@@ -500,26 +525,27 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
                 (editingImages.descriptions[id] ?? "").trim() !== editingImages.expectedAlt[index])));
             const hasOpenHandoffEdit = Boolean(textEdit || videoEdit || editingImages || editingReminder || editingLink || editingOutcome || descriptionEditingIds[item.id]);
             return <article key={item.id} id={`assisted-item-${item.id}`} hidden={!visibleItemIds.has(item.id)} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
+              {removed && <p role="alert" className="mb-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">Removed in another window. This copy exists only here so you can recover unsaved edits. Save actions are unavailable.</p>}
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Due now · publish manually" : state === "posted" ? "Marked posted by you" : state === "unscheduled" ? "No reminder" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{reminder ? formatLocalDateTime(item.scheduledFor) : "Publish when you are ready"}{item.status === "queued" && <> · <button type="button" onClick={() => setReminderEdit({ itemId: item.id, value: reminder ? localDateTimeValue(new Date(item.scheduledFor)) : "", error: "" })} disabled={busy || reminderSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{reminder ? "Change reminder" : "Add reminder"}</button></>}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && missingMedia && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{missingMedia === "video" ? "No video attached here. Bring one when posting." : "No photo or video attached here. Bring one when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
-                <button type="button" aria-label={`Remove ${target.name} handoff: ${accessiblePostPreview.slice(0, 80)}${accessiblePostPreview.length > 80 ? "…" : ""}`} onClick={() => onRemove(item)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${removed || state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{removed ? "Removed · recovery copy" : state === "due" ? "Due now · publish manually" : state === "posted" ? "Marked posted by you" : state === "unscheduled" ? "No reminder" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{reminder ? formatLocalDateTime(item.scheduledFor) : "Publish when you are ready"}{!removed && item.status === "queued" && <> · <button type="button" onClick={() => setReminderEdit({ itemId: item.id, value: reminder ? localDateTimeValue(new Date(item.scheduledFor)) : "", error: "" })} disabled={busy || reminderSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{reminder ? "Change reminder" : "Add reminder"}</button></>}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{!removed && item.status === "queued" && missingMedia && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{missingMedia === "video" ? "No video attached here. Bring one when posting." : "No photo or video attached here. Bring one when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
+                {!removed && <button type="button" aria-label={`Remove ${target.name} handoff: ${accessiblePostPreview.slice(0, 80)}${accessiblePostPreview.length > 80 ? "…" : ""}`} onClick={() => onRemove(item)} disabled={busy || hasOpenHandoffEdit || Boolean(enteredUrl && enteredUrl !== (item.postUrl ?? ""))} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>}
               </div>
-              {editingReminder && <form onSubmit={(event) => { event.preventDefault(); if (item.status !== "queued") return; if (!isValidLocalDateTime(editingReminder.value, Date.now() + 10_000)) { setReminderEdit({ ...editingReminder, error: "Choose a future local date and time." }); return; } void saveReminder(item, new Date(editingReminder.value).toISOString()); }} className="mt-3 max-w-xl rounded-xl border border-[var(--accent-border)] bg-[var(--surface-muted)] p-3">
-                <LocalDateTimeField id={`assisted-reminder-${item.id}`} label="Reminder time" value={editingReminder.value} minTimestamp={now + 10_000} readOnly={item.status !== "queued"} onChange={(value) => setReminderEdit((current) => current?.itemId === item.id ? { ...current, value, error: "" } : current)} />
+              {editingReminder && <form onSubmit={(event) => { event.preventDefault(); if (removed || item.status !== "queued") return; if (!isValidLocalDateTime(editingReminder.value, Date.now() + 10_000)) { setReminderEdit({ ...editingReminder, error: "Choose a future local date and time." }); return; } void saveReminder(item, new Date(editingReminder.value).toISOString()); }} className="mt-3 max-w-xl rounded-xl border border-[var(--accent-border)] bg-[var(--surface-muted)] p-3">
+                <LocalDateTimeField id={`assisted-reminder-${item.id}`} label="Reminder time" value={editingReminder.value} minTimestamp={now + 10_000} readOnly={removed || item.status !== "queued"} onChange={(value) => setReminderEdit((current) => current?.itemId === item.id ? { ...current, value, error: "" } : current)} />
                 {editingReminder.error && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{editingReminder.error}</p>}
-                {item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Copy your reminder time if needed, then cancel this edit.</p>}
-                <div className="mt-3 flex flex-wrap items-center gap-3"><button type="submit" disabled={item.status !== "queued" || busy || reminderSavingId !== null || !isValidLocalDateTime(editingReminder.value, now + 10_000)} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{reminderSavingId === item.id ? "Saving…" : "Save reminder"}</button>{reminder && <button type="button" onClick={() => void saveReminder(item, null)} disabled={item.status !== "queued" || busy || reminderSavingId !== null} className="text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Remove reminder</button>}<button type="button" onClick={() => setReminderEdit(null)} disabled={reminderSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button></div>
+                {!removed && item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Copy your reminder time if needed, then cancel this edit.</p>}
+                <div className="mt-3 flex flex-wrap items-center gap-3"><button type="submit" disabled={removed || item.status !== "queued" || busy || reminderSavingId !== null || !isValidLocalDateTime(editingReminder.value, now + 10_000)} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{reminderSavingId === item.id ? "Saving…" : "Save reminder"}</button>{reminder && <button type="button" onClick={() => void saveReminder(item, null)} disabled={removed || item.status !== "queued" || busy || reminderSavingId !== null} className="text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Remove reminder</button>}<button type="button" onClick={() => setReminderEdit(null)} disabled={reminderSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button></div>
               </form>}
               <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
                 <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Post details{item.mediaIds?.length ? ` · ${item.mediaIds.length} ${item.mediaIds.length === 1 ? "image" : "images"}` : ""}{item.videoId ? " · video" : ""}</summary>
                 <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-[var(--surface)] p-3 leading-5 text-[var(--text-secondary)]">{item.text}</p>
-              {item.status === "queued" && !textEdit && <button type="button" onClick={() => setTextEdits((current) => ({ ...current, [item.id]: { expectedText: item.text, value: item.text } }))} disabled={busy} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">Edit saved text</button>}
+              {!removed && item.status === "queued" && !textEdit && <button type="button" onClick={() => setTextEdits((current) => ({ ...current, [item.id]: { expectedText: item.text, value: item.text } }))} disabled={busy} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">Edit saved text</button>}
               {textEdit && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
                 <label htmlFor={`assisted-edit-text-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Saved handoff text · {target.name}</label>
-                <textarea id={`assisted-edit-text-${item.id}`} value={textEdit.value} maxLength={5000} rows={5} aria-invalid={textEditStale || textEditValidation?.valid === false} readOnly={item.status !== "queued"} onChange={(event) => setTextEdits((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? { expectedText: item.text, value: item.text }), value: event.target.value } }))} disabled={busy || textSavingId === item.id} className="w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
+                <textarea id={`assisted-edit-text-${item.id}`} value={textEdit.value} maxLength={5000} rows={5} aria-invalid={textEditStale || textEditValidation?.valid === false} readOnly={removed || item.status !== "queued"} onChange={(event) => setTextEdits((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? { expectedText: item.text, value: item.text }), value: event.target.value } }))} disabled={busy || textSavingId === item.id} className="w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
                 <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">{textEditCount} / {textEditValidation?.limit ?? 5000} {item.destination === "bluesky" ? "graphemes" : "characters"}. This changes only this manual handoff; its reminder, media and source draft stay as saved.</p>
                 {textEditStale && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">The saved text changed elsewhere. Copy your edits if needed, then cancel and reopen the latest version.</p>}
-                {item.status !== "queued" && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Copy your unsaved text if needed, then cancel this edit.</p>}
+                {!removed && item.status !== "queued" && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Copy your unsaved text if needed, then cancel this edit.</p>}
                 {textEditValidation?.issues.map((issue) => <p key={issue.code} className={`mt-1 text-[11px] ${issue.severity === "error" ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}>{issue.message}</p>)}
                 {textEditCount > 5000 && <p className="mt-1 text-[11px] text-[var(--danger)]">Keep the handoff within 5,000 characters.</p>}
                 <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -529,7 +555,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               </div>}
               {item.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {item.placeLabel} <span className="text-[var(--text-soft)]">(add on the platform yourself)</span></p>}
               {imageLimitWarning(item.destination, item.mediaIds?.length ?? 0) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(item.destination, item.mediaIds?.length ?? 0)}</p>}
-              <div hidden={Boolean(editingImages)}><MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} onEditingChange={(editing) => setDescriptionEditingIds((current) => {
+              <div hidden={Boolean(editingImages)}><MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={!removed && item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} onEditingChange={(editing) => setDescriptionEditingIds((current) => {
                 if (Boolean(current[item.id]) === editing) return current;
                 const next = { ...current };
                 if (editing) next[item.id] = true;
@@ -542,27 +568,27 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
                 else delete next[item.id];
                 return next;
               })} /></div>
-              {item.status === "queued" && !editingImages && <button type="button" onClick={() => startImageEdit(item)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedImageIds.length ? "Change images for this handoff" : "Attach images to this handoff"}</button>}
+              {!removed && item.status === "queued" && !editingImages && <button type="button" onClick={() => startImageEdit(item)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedImageIds.length ? "Change images for this handoff" : "Attach images to this handoff"}</button>}
               {editingImages && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
                 <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Images for {target.name}</p>
                 <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Choose, reorder or upload images here. Save to change only this handoff; the source draft and other handoffs stay as they are.</p>
                 <ImageAttachmentPicker context="handoff" selectedIds={editingImages.ids} descriptions={editingImages.descriptions}
                   onChange={(ids) => setImageEdit((current) => current?.itemId === item.id ? { ...current, ids } : current)}
                   onDescriptionChange={(id, description) => setImageEdit((current) => current?.itemId === item.id ? { ...current, descriptions: { ...current.descriptions, [id]: description } } : current)}
-                  onBusyChange={setImageBusy} disabled={item.status !== "queued" || busy || mediaBusy || imageSavingId !== null} readOnly={item.status !== "queued"} />
+                  onBusyChange={setImageBusy} disabled={removed || item.status !== "queued" || busy || mediaBusy || imageSavingId !== null} readOnly={removed || item.status !== "queued"} />
                 {imageEditStale && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">These saved images changed elsewhere. Copy your descriptions if needed, then cancel and reopen this handoff.</p>}
-                {item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Copy any unsaved image descriptions before cancelling.</p>}
+                {!removed && item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Copy any unsaved image descriptions before cancelling.</p>}
                 <p className="mt-2 text-[11px] text-[var(--text-muted)]">Uploaded images remain in your private library even if you cancel this edit.</p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <button type="button" onClick={() => void saveImageEdit(editingImages)} disabled={item.status !== "queued" || busy || mediaBusy || imageBusy || imageSavingId !== null || imageEditStale || !imageEditChanged} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{imageSavingId === item.id ? "Saving…" : "Save images"}</button>
+                  <button type="button" onClick={() => void saveImageEdit(editingImages)} disabled={removed || item.status !== "queued" || busy || mediaBusy || imageBusy || imageSavingId !== null || imageEditStale || !imageEditChanged} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{imageSavingId === item.id ? "Saving…" : "Save images"}</button>
                   <button type="button" onClick={() => setImageEdit(null)} disabled={imageBusy || imageSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                 </div>
               </div>}
-              {item.status === "queued" && !videoEdit && <button type="button" onClick={() => setVideoEdits({ [item.id]: { expectedVideoId: item.videoId ?? null, value: item.videoId ?? null } })} disabled={busy || videoBusy} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.videoId ? "Change attached video" : "Attach a video"}</button>}
+              {!removed && item.status === "queued" && !videoEdit && <button type="button" onClick={() => setVideoEdits({ [item.id]: { expectedVideoId: item.videoId ?? null, value: item.videoId ?? null } })} disabled={busy || videoBusy} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.videoId ? "Change attached video" : "Attach a video"}</button>}
               {videoEdit && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
-                <VideoAttachmentPicker selectedId={videoEdit.value} onChange={(value) => setVideoEdits((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? videoEdit), value } }))} onBusyChange={setVideoBusy} disabled={item.status !== "queued" || busy || mediaBusy || videoBusy} />
+                <VideoAttachmentPicker selectedId={videoEdit.value} onChange={(value) => setVideoEdits((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? videoEdit), value } }))} onBusyChange={setVideoBusy} disabled={removed || item.status !== "queued" || busy || mediaBusy || videoBusy} />
                 {videoEditStale && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">The saved clip changed elsewhere. Cancel and reopen the latest handoff.</p>}
-                {item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Your unsaved video choice cannot be saved; cancel this edit after reviewing it.</p>}
+                {!removed && item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Your unsaved video choice cannot be saved; cancel this edit after reviewing it.</p>}
                 <p className="mt-2 text-[11px] text-[var(--text-muted)]">This changes only this handoff. Its text, reminder and images stay saved.</p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <button type="button" onClick={() => void updateSavedVideo(item.id, videoEdit.expectedVideoId, videoEdit.value)} disabled={busy || videoBusy || videoSavingId !== null || !canSaveVideo} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{videoSavingId === item.id ? "Saving…" : "Save video"}</button>
@@ -571,21 +597,21 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               </div>}
               {item.videoId && !videoEdit && <PrivateVideoPreview key={item.videoId} id={item.videoId} />}
               {item.videoId && <a href={`/api/videos/${encodeURIComponent(item.videoId)}`} download className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Download size={13} aria-hidden="true" /> Download saved video</a>}
-              {Boolean(item.mediaIds?.length || item.videoId) && <a href={`/api/assisted/${encodeURIComponent(item.id)}/package`} download className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download caption and media (.zip)</a>}
-              {((item.status === "queued" && !editingLink) || strandedPostUrl) && <div className="mt-3 max-w-xl">
-                <label htmlFor={`assisted-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">{item.status === "queued" ? "Public post link · optional" : "Unsaved link from this window"}</label>
-                <input id={`assisted-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={enteredUrl} readOnly={item.status !== "queued"} placeholder="https://social.example/your-post" aria-invalid={invalidUrl} aria-describedby={`assisted-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
-                <p id={`assisted-post-url-hint-${item.id}`} className={`mt-1 text-[11px] leading-4 ${invalidUrl || strandedPostUrl ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{strandedPostUrl ? "This handoff was marked posted elsewhere. Open the recorded link editor below to review and save this link." : invalidUrl ? "Use a public HTTPS post link with no embedded username or password." : "After posting, paste its link here if you have one. Plypost checks the link format, not the post or account."}</p>
+              {!removed && Boolean(item.mediaIds?.length || item.videoId) && <a href={`/api/assisted/${encodeURIComponent(item.id)}/package`} download className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"><Download size={13} aria-hidden="true" /> Download caption and media (.zip)</a>}
+              {((!removed && item.status === "queued" && !editingLink) || strandedPostUrl) && <div className="mt-3 max-w-xl">
+                <label htmlFor={`assisted-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">{removed || item.status === "posted" ? "Unsaved link from this window" : "Public post link · optional"}</label>
+                <input id={`assisted-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={enteredUrl} readOnly={removed || item.status !== "queued"} placeholder="https://social.example/your-post" aria-invalid={invalidUrl} aria-describedby={`assisted-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
+                <p id={`assisted-post-url-hint-${item.id}`} className={`mt-1 text-[11px] leading-4 ${invalidUrl || strandedPostUrl ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{removed ? "This handoff was removed elsewhere. Copy your unsaved link before closing this recovery copy." : strandedPostUrl ? "This handoff was marked posted elsewhere. Open the recorded link editor below to review and save this link." : invalidUrl ? "Use a public HTTPS post link with no embedded username or password." : "After posting, paste its link here if you have one. Plypost checks the link format, not the post or account."}</p>
               </div>}
               </details>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
-              {item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || hasOpenHandoffEdit || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => setUndoConfirmation({ id: item.id, receipt: assistedReceiptSnapshot(item) })} disabled={busy || editingOutcome || editingLink || outcomeSavingId !== null || linkSavingId !== null || confirmingUndo} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>}
+              {!removed && (item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || hasOpenHandoffEdit || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => setUndoConfirmation({ id: item.id, receipt: assistedReceiptSnapshot(item) })} disabled={busy || editingOutcome || editingLink || outcomeSavingId !== null || linkSavingId !== null || confirmingUndo} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>)}
               </div>
-              {item.status === "queued" && hasOpenHandoffEdit && <p role="status" className="mt-2 text-[11px] font-semibold text-[var(--warning)]">Save or cancel open edits before marking this post as published.</p>}
-              {item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
-              {confirmingUndo && <div className="mt-3 max-w-xl rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-[12px] text-[var(--text-secondary)]">
+              {!removed && hasOpenHandoffEdit && <p role="status" className="mt-2 text-[11px] font-semibold text-[var(--warning)]">Save or cancel open edits before {item.status === "queued" ? "marking this post as published or removing it" : "removing this handoff"}.</p>}
+              {!removed && item.status === "queued" && invalidUrl && <p role="alert" className="mt-2 text-[11px] font-semibold text-[var(--danger)]">Fix or remove the link in Post details before marking this item posted.</p>}
+              {!removed && confirmingUndo && <div className="mt-3 max-w-xl rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-[12px] text-[var(--text-secondary)]">
                 <p>Undoing removes the saved posted time, link and results from Plypost. It does not remove the post from the social platform.</p>
                 {undoStale && <p role="alert" className="mt-2 font-semibold text-[var(--danger)]">This posted record changed elsewhere. Cancel and review the latest version before undoing.</p>}
                 <div className="mt-3 flex flex-wrap gap-3">
@@ -594,21 +620,21 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
                 </div>
               </div>}
               {(item.status === "posted" || editingLink || editingOutcome) && <details id={`assisted-posted-record-${item.id}`} className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
-                <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">{item.status === "posted" ? "Posted record" : "Previous posted record edit"}{savedUrl ? " · link saved" : ""}{item.outcome ? " · results recorded" : ""}</summary>
+                <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">{removed ? "Removed posted record copy" : item.status === "posted" ? "Posted record" : "Previous posted record edit"}{savedUrl ? " · link saved" : ""}{item.outcome ? " · results recorded" : ""}</summary>
               <div className="mt-3 text-[11px] leading-5 text-[var(--text-muted)]">
                 {item.status === "posted" ? <p>Marked posted by you{item.postedAt ? ` · ${formatLocalDateTime(item.postedAt)}` : ""} · not verified by Plypost.</p> : <p role="alert" className="text-[var(--danger)]">This posted mark was undone elsewhere. Copy any unsaved link or results, then cancel the old edit.</p>}
                 <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
                   {savedUrl && <a href={savedUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--accent-text)] underline underline-offset-2"><ExternalLink size={11} /> Link you recorded · not verified</a>}
-                  {item.status === "posted" && !editingLink && <button type="button" onClick={() => { setPostUrls((current) => ({ ...current, [item.id]: strandedPostUrl ? enteredUrl : savedUrl ?? "" })); setEditingLinks((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || confirmingUndo || linkSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedUrl ? "Edit recorded link" : "Add recorded link"}</button>}
+                  {!removed && item.status === "posted" && !editingLink && <button type="button" onClick={() => { setPostUrls((current) => ({ ...current, [item.id]: strandedPostUrl ? enteredUrl : savedUrl ?? "" })); setEditingLinks((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || confirmingUndo || linkSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedUrl ? "Edit recorded link" : "Add recorded link"}</button>}
                 </div>
                 {editingLink && <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3">
                   <label htmlFor={`assisted-edit-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Public post link · self-reported</label>
-                  <input id={`assisted-edit-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={editedLink} placeholder="https://social.example/your-post" aria-invalid={invalidEditedLink} aria-describedby={`assisted-edit-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} disabled={busy || linkSavingId === item.id} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
+                  <input id={`assisted-edit-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={editedLink} readOnly={removed} placeholder="https://social.example/your-post" aria-invalid={invalidEditedLink} aria-describedby={`assisted-edit-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} disabled={busy || linkSavingId === item.id} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
                   <p id={`assisted-edit-post-url-hint-${item.id}`} className={`mt-1 text-[11px] leading-4 ${invalidEditedLink ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{invalidEditedLink ? "Use a public HTTPS post link with no embedded username or password." : "Plypost checks the link format, not the post or account. Your posted mark and completion time stay unchanged."}</p>
                   {linkEditStale && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">This posted record changed elsewhere. Copy your link if needed, then cancel and reopen the latest version.</p>}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={() => { if (normalizedEditedLink) void updateLink(item.id, normalizedEditedLink); }} disabled={busy || linkSavingId !== null || linkEditStale || !normalizedEditedLink || normalizedEditedLink === savedUrl} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{linkSavingId === item.id ? "Saving…" : "Save link"}</button>
-                    {savedUrl && <button type="button" onClick={() => { void updateLink(item.id, null); }} disabled={busy || linkSavingId !== null || linkEditStale} className="text-[12px] font-semibold text-[var(--danger)] disabled:opacity-50">Remove recorded link</button>}
+                    <button type="button" onClick={() => { if (normalizedEditedLink) void updateLink(item.id, normalizedEditedLink); }} disabled={removed || busy || linkSavingId !== null || linkEditStale || !normalizedEditedLink || normalizedEditedLink === savedUrl} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{linkSavingId === item.id ? "Saving…" : "Save link"}</button>
+                    {savedUrl && <button type="button" onClick={() => { void updateLink(item.id, null); }} disabled={removed || busy || linkSavingId !== null || linkEditStale} className="text-[12px] font-semibold text-[var(--danger)] disabled:opacity-50">Remove recorded link</button>}
                     <button type="button" onClick={() => closeLinkEditor(item.id)} disabled={busy || linkSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                   </div>
                 </div>}
@@ -616,7 +642,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               <div className="mt-3 max-w-xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 text-[12px]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-semibold text-[var(--text-secondary)]">Results you entered <span className="font-normal text-[var(--text-muted)]">· self-reported, not verified</span></p>
-                  {item.status === "posted" && !editingOutcome && <button type="button" onClick={() => { setOutcomeDrafts((current) => ({ ...current, [item.id]: outcomeForm(item) })); setEditingOutcomes((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || confirmingUndo || outcomeSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.outcome ? "Edit results" : "Record results"}</button>}
+                  {!removed && item.status === "posted" && !editingOutcome && <button type="button" onClick={() => { setOutcomeDrafts((current) => ({ ...current, [item.id]: outcomeForm(item) })); setEditingOutcomes((current) => ({ ...current, [item.id]: assistedReceiptSnapshot(item) })); }} disabled={busy || confirmingUndo || outcomeSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{item.outcome ? "Edit results" : "Record results"}</button>}
                 </div>
                 {item.outcome ? <div className="mt-2 space-y-1 text-[var(--text-muted)]">
                   {resultSummary && <p>{resultSummary}</p>}
@@ -627,17 +653,17 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
                   <div className="grid grid-cols-3 gap-2">
                     {(["views", "likes", "replies"] as const).map((key) => <div key={key}>
                       <label htmlFor={`assisted-outcome-${key}-${item.id}`} className="mb-1 block font-semibold capitalize text-[var(--text-secondary)]">{key}</label>
-                      <input id={`assisted-outcome-${key}-${item.id}`} type="text" inputMode="numeric" pattern="[0-9]*" value={resultDraft[key]} placeholder="—" onChange={(event) => changeOutcomeField(item, key, event.target.value)} disabled={busy || outcomeSavingId === item.id} className="w-full min-w-0 rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
+                      <input id={`assisted-outcome-${key}-${item.id}`} type="text" inputMode="numeric" pattern="[0-9]*" value={resultDraft[key]} readOnly={removed} placeholder="—" onChange={(event) => changeOutcomeField(item, key, event.target.value)} disabled={busy || outcomeSavingId === item.id} className="w-full min-w-0 rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
                     </div>)}
                   </div>
                   <label htmlFor={`assisted-outcome-notes-${item.id}`} className="mb-1 mt-3 block font-semibold text-[var(--text-secondary)]">What happened · optional</label>
-                  <textarea id={`assisted-outcome-notes-${item.id}`} value={resultDraft.notes} maxLength={MAX_ASSISTED_OUTCOME_NOTES} rows={2} placeholder="A short observation for your next plan" onChange={(event) => changeOutcomeField(item, "notes", event.target.value)} disabled={busy || outcomeSavingId === item.id} className="w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
+                  <textarea id={`assisted-outcome-notes-${item.id}`} value={resultDraft.notes} maxLength={MAX_ASSISTED_OUTCOME_NOTES} rows={2} readOnly={removed} placeholder="A short observation for your next plan" onChange={(event) => changeOutcomeField(item, "notes", event.target.value)} disabled={busy || outcomeSavingId === item.id} className="w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)] disabled:opacity-60" />
                   <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">Plypost does not fetch or verify these numbers, or send them to AI. Your posted time and link will stay unchanged.</p>
                   {outcomeEditStale && <p role="alert" className="mt-1 text-[11px] text-[var(--danger)]">This posted record changed elsewhere. Copy your notes if needed, then cancel and reopen the latest version.</p>}
                   {resultValidation.error && <p role="status" className="mt-1 text-[11px] text-[var(--danger)]">{resultValidation.error}</p>}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={() => { if (resultValidation.value) void updateOutcome(item.id, resultValidation.value); }} disabled={busy || outcomeSavingId !== null || outcomeEditStale || !resultValidation.value} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 font-semibold text-[var(--accent-text)] disabled:opacity-50">{outcomeSavingId === item.id ? "Saving…" : "Save results"}</button>
-                    {item.outcome && <button type="button" onClick={() => { void updateOutcome(item.id, null); }} disabled={busy || outcomeSavingId !== null || outcomeEditStale} className="font-semibold text-[var(--danger)] disabled:opacity-50">Clear results</button>}
+                    <button type="button" onClick={() => { if (resultValidation.value) void updateOutcome(item.id, resultValidation.value); }} disabled={removed || busy || outcomeSavingId !== null || outcomeEditStale || !resultValidation.value} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 font-semibold text-[var(--accent-text)] disabled:opacity-50">{outcomeSavingId === item.id ? "Saving…" : "Save results"}</button>
+                    {item.outcome && <button type="button" onClick={() => { void updateOutcome(item.id, null); }} disabled={removed || busy || outcomeSavingId !== null || outcomeEditStale} className="font-semibold text-[var(--danger)] disabled:opacity-50">Clear results</button>}
                     <button type="button" onClick={() => closeOutcomeEditor(item.id)} disabled={busy || outcomeSavingId !== null} className="font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                   </div>
                 </div>}
