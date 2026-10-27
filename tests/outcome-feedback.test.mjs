@@ -66,6 +66,8 @@ test("outcome parser accepts old items and rejects malformed or unverified feedb
   assert.equal(parse({ ...old, postedAt: undefined, outcome: valid.outcome }).length, 0);
   assert.deepEqual(parseAssistedOutcomeInput({ views: 0 }), { views: 0 });
   assert.equal(parseAssistedOutcomeInput({ notes: "  padded  " }), null);
+  assert.deepEqual(parseAssistedOutcomeInput({ notes: "😀".repeat(500) }), { notes: "😀".repeat(500) });
+  assert.equal(parseAssistedOutcomeInput({ notes: "😀".repeat(501) }), null);
 });
 
 test("only posted owner items accept self-reported results; post receipt survives changes", () => {

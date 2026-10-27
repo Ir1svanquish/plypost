@@ -1,6 +1,6 @@
 "use client";
 
-import { adaptDraft, platforms, type PlatformId } from "@/lib/platforms";
+import { adaptDraft, characterCount, platforms, type PlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
 import { compareText, type TextPart } from "@/lib/text-diff";
 import { AiLiteralNotice } from "@/components/ai-literal-notice";
@@ -60,7 +60,7 @@ export function AIReviewPanel({ source, original, suggestions, available, select
               <div className="min-w-0 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3"><p className="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--accent-text)]">Suggested · highlighted text new</p><p className="whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text)]">{highlighted(comparison.after, "suggested")}</p></div>
             </div>
             <label htmlFor={`ai-suggestion-${id}`} className="mt-3 block text-[11px] font-bold text-[var(--text-secondary)]">Edit suggested version</label>
-            <textarea id={`ai-suggestion-${id}`} value={suggestion} onChange={(event) => onEdit(id, event.target.value)} disabled={stale || busy} maxLength={5000} className="mt-1 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
+            <textarea id={`ai-suggestion-${id}`} value={suggestion} onChange={(event) => { if (characterCount(event.target.value) <= 5000) onEdit(id, event.target.value); }} disabled={stale || busy} className="mt-1 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
             <p className={`mt-1 text-right text-[11px] ${validation.valid ? "text-[var(--text-muted)]" : "text-[var(--danger)]"}`}>{validation.count}/{validation.limit} characters{validation.byteCount !== undefined && validation.byteLimit !== undefined ? ` · ${validation.byteCount}/${validation.byteLimit} bytes` : ""}</p>
           </details>
         </div>;

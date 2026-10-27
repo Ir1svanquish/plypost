@@ -54,7 +54,7 @@ export function AIHandoffAssistant({ destination, source, disabled = false, onAp
     {error && <p role="alert" className="mt-2 w-full rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</p>}
     {suggestion && <div className="mt-3 w-full rounded-xl border border-[var(--accent-border)] bg-[var(--surface)] p-3.5">
       <label htmlFor={`ai-handoff-${destination}`} className="text-[12px] font-bold text-[var(--text)]">AI suggestion · editable</label>
-      <textarea id={`ai-handoff-${destination}`} value={suggestion.text} maxLength={5000} onChange={(event) => setSuggestion({ ...suggestion, text: event.target.value })} disabled={busy || disabled} className="mt-2 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] p-3 text-[13px] leading-5 text-[var(--text)]" />
+      <textarea id={`ai-handoff-${destination}`} value={suggestion.text} onChange={(event) => { if (characterCount(event.target.value) <= 5000) setSuggestion({ ...suggestion, text: event.target.value }); }} disabled={busy || disabled} className="mt-2 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] p-3 text-[13px] leading-5 text-[var(--text)]" />
       <p className="mt-1 text-[11px] text-[var(--text-muted)]">{characterCount(edited)} / 5,000 characters · Check platform limits and media before posting.</p>
       {stale && <p role="alert" className="mt-2 text-[12px] font-semibold text-[var(--warning)]">The original text changed. Generate again to use the latest version.</p>}
       <AiLiteralNotice source={suggestion.source} suggestion={suggestion.text} />

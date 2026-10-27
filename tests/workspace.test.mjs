@@ -13,6 +13,13 @@ test("generated draft names follow edited text while custom names remain fixed",
   assert.equal(followAutoTitle("", "", "New caption"), "");
 });
 
+test("a generated title keeps complete emoji at the character limit", () => {
+  const opening = "a".repeat(119) + "😀" + " later";
+  assert.equal(draftTitle("", opening), "a".repeat(119) + "😀");
+  assert.equal(Array.from(draftTitle("", opening)).length, 120);
+  assert.equal(draftTitle("😀".repeat(121), ""), "😀".repeat(120));
+});
+
 test("a draft target is a real calendar day and does not become a publishing job", () => {
   const draft = { id: "dated-draft", title: "Launch idea", source: "Later", selected: [], variants: {},
     plannedDate: "2028-02-29", createdAt: stamp, updatedAt: stamp };

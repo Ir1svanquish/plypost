@@ -383,7 +383,7 @@ export function parseWorkspace(value: unknown): Workspace | null {
 }
 
 export function draftTitle(title: string, source: string): string {
-  return (title.trim() || source.trim().split(/\r?\n/)[0] || "Untitled draft").slice(0, 120);
+  return Array.from(title.trim() || source.trim().split(/\r?\n/)[0] || "Untitled draft").slice(0, 120).join("");
 }
 
 export function followAutoTitle(title: string, previousText: string, nextText: string): string {
