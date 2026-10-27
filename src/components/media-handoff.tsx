@@ -6,11 +6,12 @@ import { Check, ChevronDown, Copy, Download, Images } from "lucide-react";
 import { MAX_IMAGE_ALT_CHARS } from "@/lib/workspace";
 
 /** Review and retrieve the images attached to a saved plan or assisted item. */
-export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, onDirtyChange, variant = "handoff" }: {
+export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, onDirtyChange, onEditingChange, variant = "handoff" }: {
   mediaIds?: readonly string[];
   mediaAlt?: readonly string[];
   onUpdateDescriptions?: (expectedIds: string[], expectedAlt: string[], next: string[]) => Promise<boolean>;
   onDirtyChange?: (dirty: boolean) => void;
+  onEditingChange?: (editing: boolean) => void;
   variant?: "handoff" | "review";
 }) {
   const inputPrefix = useId();
@@ -24,6 +25,8 @@ export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, onDirty
   const [saving, setSaving] = useState(false);
   const onDirtyChangeRef = useRef(onDirtyChange);
   useEffect(() => { onDirtyChangeRef.current = onDirtyChange; }, [onDirtyChange]);
+  const onEditingChangeRef = useRef(onEditingChange);
+  useEffect(() => { onEditingChangeRef.current = onEditingChange; }, [onEditingChange]);
   const currentIds = mediaIds ?? [];
   const saved = currentIds.map((_, index) => mediaAlt?.[index] ?? "");
   const unavailable = editing && !onUpdateDescriptions;
@@ -35,6 +38,10 @@ export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, onDirty
     onDirtyChangeRef.current?.(editing && changed);
     return () => { onDirtyChangeRef.current?.(false); };
   }, [editing, changed]);
+  useEffect(() => {
+    onEditingChangeRef.current?.(editing);
+    return () => { onEditingChangeRef.current?.(false); };
+  }, [editing]);
   if (!currentIds.length && !editing) return null;
   const displayedIds = editing ? expectedIds : currentIds;
   const displayedAlt = editing ? expected : saved;
