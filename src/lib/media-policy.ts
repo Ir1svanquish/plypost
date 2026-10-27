@@ -10,12 +10,14 @@ export const imageLimits = {
   pinterest: 1,
 } as const;
 
-export function imageLimitForDestination(destination: string): number {
-  return imageLimits[destination as keyof typeof imageLimits] ?? MAX_POST_IMAGES;
+export function imageLimitForDestination(destination: string, hasVideo = false): number {
+  const limit = imageLimits[destination as keyof typeof imageLimits] ?? MAX_POST_IMAGES;
+  return destination === "x" && hasVideo ? limit - 1 : limit;
 }
 
-export function imageLimitWarning(destination: string, count: number): string | null {
+export function imageLimitWarning(destination: string, count: number, hasVideo = false): string | null {
   const limit = imageLimits[destination as keyof typeof imageLimits];
-  if (!limit || count <= limit) return null;
+  if (!limit || count <= imageLimitForDestination(destination, hasVideo)) return null;
+  if (destination === "x" && hasVideo) return "X allows up to 4 media items per post, including the video. Choose 3 or fewer images, or remove the video.";
   return `${destination === "x" ? "X" : destination[0].toUpperCase() + destination.slice(1)} accepts up to ${limit} images per post. Choose ${limit} or fewer before publishing there; your draft keeps all ${count}.`;
 }

@@ -13,7 +13,7 @@ import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
 import { AiLiteralNotice } from "@/components/ai-literal-notice";
 import { isManualAiDestination } from "@/lib/ai-handoff";
 import type { PreflightReport } from "@/lib/ai-preflight";
-import { imageLimitForDestination } from "@/lib/media-policy";
+import { imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 import { suggestedSlotIsReady } from "@/lib/slot-settings";
 
 export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; mediaIds: string[]; reminderEnabled?: false; videoId?: string };
@@ -87,9 +87,9 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const currentTime = Math.max(now || Date.now(), timeCheckedAt);
   const textFor = (id: AssistedDestinationId) => texts[id] ??
     (isPlatformId(id) ? draft.variants[id] ?? adaptDraft(draft.source, id) : draft.source);
-  const imagesFor = (id: AssistedDestinationId) => imageSelections[id] ??
-    (draft.mediaIds ?? []).slice(0, imageLimitForDestination(id));
   const videoFor = (id: AssistedDestinationId) => videoId && videoSelections[id] !== false ? videoId : null;
+  const imagesFor = (id: AssistedDestinationId) => imageSelections[id] ??
+    (draft.mediaIds ?? []).slice(0, imageLimitForDestination(id, Boolean(videoFor(id))));
   const invalidText = destinations.filter((id) => {
     const text = textFor(id);
     return isPlatformId(id) ? !validatePlatformText(id, text).valid : !text.trim() || characterCount(text) > 5000;
@@ -105,9 +105,11 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     const kind = missingHandoffMedia(id, imagesFor(id).length, Boolean(videoFor(id)));
     return kind ? [{ id, kind }] : [];
   });
+  const mediaLimitIssues = destinations.filter((id) =>
+    imagesFor(id).length > imageLimitForDestination(id, Boolean(videoFor(id))));
   const reviewDirty = !prepared && (attempted || !sameIds(destinations, initialDestinations) ||
     Object.entries(texts).some(([id, value]) => value !== (isPlatformId(id) ? draft.variants[id] ?? adaptDraft(draft.source, id) : draft.source)) ||
-    Object.entries(imageSelections).some(([id, ids]) => !sameIds(ids ?? [], (draft.mediaIds ?? []).slice(0, imageLimitForDestination(id)))) ||
+    Object.entries(imageSelections).some(([id, ids]) => !sameIds(ids ?? [], (draft.mediaIds ?? []).slice(0, imageLimitForDestination(id, Boolean(videoFor(id as AssistedDestinationId)))))) ||
     Object.values(reminders).some(Boolean) || slotApplied || videoId !== (draft.videoId ?? null) ||
     Boolean(videoId && Object.values(videoSelections).some((selected) => selected === false)));
   useEffect(() => { onStateChange({ dirty: reviewDirty, busy: submitting || videoBusy }); }, [reviewDirty, submitting, videoBusy, onStateChange]);
@@ -115,7 +117,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   useEffect(() => () => slotAbortRef.current?.abort(), []);
   const canPrepare = !stale && !editorDirty && !busy && !mediaBusy && !videoBusy && !submitting && !prepared &&
     (attempted ? Boolean(attemptedItemsRef.current) :
-      destinations.length > 0 && invalidText.length === 0 && invalidReminders.length === 0);
+      destinations.length > 0 && invalidText.length === 0 && invalidReminders.length === 0 && mediaLimitIssues.length === 0);
 
   function toggleDestination(id: AssistedDestinationId) {
     if (attempted || submitting) return;
@@ -363,7 +365,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         <div role="group" aria-label="Selected posts to review" className="flex flex-wrap gap-2">
           {destinations.map((id) => {
             const active = id === activeDestination;
-            const needsEdit = invalidText.includes(id) || invalidReminders.includes(id);
+            const needsEdit = invalidText.includes(id) || invalidReminders.includes(id) || mediaLimitIssues.includes(id);
             return <button key={id} type="button" aria-pressed={active} aria-controls="batch-active-editor" onClick={() => setFocusedDestination(id)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-semibold transition ${active ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--accent-border)]"}`}>
               {assistedDestinations[id].name}
               <span className={`text-[10px] ${needsEdit ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{needsEdit ? "Fix" : texts[id] !== undefined ? "Edited" : "Draft"}</span>
@@ -388,12 +390,13 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           <p id={`batch-text-${id}-validation`} className={`mt-1 text-[11px] ${valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}`}>{check ? `${check.count} / ${check.limit} ${id === "bluesky" ? "graphemes" : "characters"}` : `${characterCount(text)} / 5,000 characters`}{check?.byteCount !== undefined ? ` · ${check.byteCount} / ${check.byteLimit} UTF-8 bytes` : ""}{!valid ? " · Edit this text before confirming" : ""}</p>
           {draft.source.trim() && <AiLiteralNotice source={draft.source} suggestion={text} />}
           {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{missingMedia === "video" ? " No video is attached here; bring one when posting." : missingMedia ? " No photo or video is attached here; bring one when posting." : ""}</p>}
-          <PlatformImageSelection destination={id} sourceIds={draft.mediaIds ?? []} sourceAlt={draft.mediaAlt} selectedIds={imagesFor(id)} onChange={(ids) => setImageSelections((current) => ({ ...current, [id]: ids }))} disabled={attempted || editorDirty || busy || mediaBusy} />
+          <PlatformImageSelection destination={id} sourceIds={draft.mediaIds ?? []} sourceAlt={draft.mediaAlt} selectedIds={imagesFor(id)} hasVideo={Boolean(videoFor(id))} onChange={(ids) => setImageSelections((current) => ({ ...current, [id]: ids }))} disabled={attempted || editorDirty || busy || mediaBusy} />
           {videoId && <label className="mt-2 flex items-start gap-2 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold leading-5 text-[var(--text-secondary)]">
             <input type="checkbox" checked={Boolean(videoFor(id))} onChange={(event) => setVideoSelections((current) => ({ ...current, [id]: event.target.checked }))} disabled={attempted || editorDirty || busy || mediaBusy} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]" />
             Include the saved video in this {assistedDestinations[id].name} handoff
           </label>}
-          {imagesFor(id).length > 0 && videoFor(id) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">This handoff includes photos and a video. Check {assistedDestinations[id].name}&apos;s current rules before posting; deselect the photos above or turn off video here if it accepts only one format per post.</p>}
+          {id !== "x" && imagesFor(id).length > 0 && videoFor(id) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">This handoff includes photos and a video. Check {assistedDestinations[id].name}&apos;s current rules before posting; deselect the photos above or turn off video here if it accepts only one format per post.</p>}
+          {imageLimitWarning(id, imagesFor(id).length, Boolean(videoFor(id))) && <p role="alert" className="mt-2 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--danger)]">{imageLimitWarning(id, imagesFor(id).length, Boolean(videoFor(id)))}</p>}
           {draft.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {draft.placeLabel} · add on the platform yourself</p>}
           <div className="mt-3 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -431,6 +434,10 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
           {mediaGaps.map(({ id, kind }) => <button key={id} type="button" onClick={() => focusDestination(id)} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name} · {kind === "video" ? "video" : "photo or video"}</button>)}
         </div>
+      </div>}
+      {mediaLimitIssues.length > 0 && <div role="alert" className="rounded-lg bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--danger)]">
+        <p className="font-semibold">Review media counts before confirming</p>
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">{mediaLimitIssues.map((id) => <button key={id} type="button" onClick={() => focusDestination(id)} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name}</button>)}</div>
       </div>}
       {duplicateDestinations.length > 0 && <p role="status" className="rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[11px] leading-5 text-[var(--warning)]">{duplicateDestinations.map((id) => assistedDestinations[id].name).join(", ")} already {duplicateDestinations.length === 1 ? "has a handoff" : "have handoffs"} from this draft. Confirming will add another item for each selected platform.</p>}
       {attempted && <p role="status" className="text-[11px] leading-5 text-[var(--text-muted)]">If the request did not confirm, retry the same batch. Check Assisted before starting another batch.</p>}

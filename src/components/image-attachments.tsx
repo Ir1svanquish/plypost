@@ -6,7 +6,6 @@ import { ArrowDown, ArrowUp, Check, Download, ImagePlus, LoaderCircle, Trash2, X
 import { MAX_IMAGE_ALT_CHARS } from "@/lib/workspace";
 import { MAX_POST_IMAGES } from "@/lib/media-policy";
 
-const MAX_IMAGES = MAX_POST_IMAGES;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -29,6 +28,7 @@ type ImageAttachmentPickerProps = {
   disabled?: boolean;
   readOnly?: boolean;
   context?: "draft" | "handoff";
+  maxSelected?: number;
 };
 
 function isMediaAsset(value: unknown): value is MediaAsset {
@@ -65,7 +65,7 @@ async function responseError(response: Response, fallback: string) {
  * A private image library selector. Selection is controlled by its parent;
  * uploading an asset alone does not publish or attach it to saved work.
  */
-export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onDescriptionChange, onBusyChange, disabled = false, readOnly = false, context = "draft" }: ImageAttachmentPickerProps) {
+export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onDescriptionChange, onBusyChange, disabled = false, readOnly = false, context = "draft", maxSelected = MAX_POST_IMAGES }: ImageAttachmentPickerProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef(selectedIds);
@@ -122,10 +122,10 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
   async function uploadFiles(files: FileList | null) {
     if (!files?.length || loading || uploading || deletingId || disabled) return;
     setError("");
-    const remaining = MAX_IMAGES - selectedRef.current.length;
+    const remaining = maxSelected - selectedRef.current.length;
     const picked = Array.from(files);
     if (remaining <= 0) {
-      setError(`A ${subject} can use up to ${MAX_IMAGES} images. Remove one before adding another.`);
+      setError(`A ${subject} can use up to ${maxSelected} images. Remove one before adding another.`);
       return;
     }
     if (picked.length > remaining) {
@@ -159,7 +159,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
         const asset = payload && typeof payload === "object" && "media" in payload ? payload.media : null;
         if (!isMediaAsset(asset)) throw new Error(`Could not read the uploaded image ${file.name}.`);
         setMedia((current) => [asset, ...current.filter((item) => item.id !== asset.id)]);
-        const next = [...selectedRef.current.filter((id) => id !== asset.id), asset.id].slice(0, MAX_IMAGES);
+        const next = [...selectedRef.current.filter((id) => id !== asset.id), asset.id].slice(0, maxSelected);
         setSelection(next);
       }
     } catch (cause) {
@@ -175,10 +175,10 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
     if (disabled || loading || uploading || deletingId) return;
     if (selectedRef.current.includes(id)) {
       setSelection(selectedRef.current.filter((item) => item !== id));
-    } else if (selectedRef.current.length < MAX_IMAGES) {
+    } else if (selectedRef.current.length < maxSelected) {
       setSelection([...selectedRef.current, id]);
     } else {
-      setError(`A ${subject} can use up to ${MAX_IMAGES} images. Remove one before adding another.`);
+      setError(`A ${subject} can use up to ${maxSelected} images. Remove one before adding another.`);
     }
   }
 
@@ -227,12 +227,12 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
     <section className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 sm:p-5" aria-labelledby={`${inputId}-heading`} aria-busy={loading || uploading || deletingId !== null}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 id={`${inputId}-heading`} className="text-[13px] font-bold text-[var(--text)]">Images <span className="font-medium text-[var(--text-soft)]">· {selectedIds.length}/{MAX_IMAGES}</span></h3>
-          <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">JPEG, PNG or WebP · up to 5 MiB each. Keep up to 20 in a draft; the platform may allow fewer.</p>
+          <h3 id={`${inputId}-heading`} className="text-[13px] font-bold text-[var(--text)]">Images <span className="font-medium text-[var(--text-soft)]">· {selectedIds.length}/{maxSelected}</span></h3>
+          <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">JPEG, PNG or WebP · up to 5 MiB each.{context === "draft" ? " Keep up to 20 in a draft; the platform may allow fewer." : ""}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input ref={inputRef} id={inputId} type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" tabIndex={-1} aria-label="Choose images to upload" disabled={controlsBusy || selectedIds.length >= MAX_IMAGES} onChange={(event) => { void uploadFiles(event.target.files); event.target.value = ""; }} />
-          <button type="button" onClick={() => inputRef.current?.click()} disabled={controlsBusy || selectedIds.length >= MAX_IMAGES} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">
+          <input ref={inputRef} id={inputId} type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" tabIndex={-1} aria-label="Choose images to upload" disabled={controlsBusy || selectedIds.length >= maxSelected} onChange={(event) => { void uploadFiles(event.target.files); event.target.value = ""; }} />
+          <button type="button" onClick={() => inputRef.current?.click()} disabled={controlsBusy || selectedIds.length >= maxSelected} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">
             {uploading ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <ImagePlus size={14} aria-hidden="true" />}
             {uploading ? "Uploading…" : "Add images"}
           </button>
@@ -269,7 +269,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
           return <li key={item.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
             <div className="relative aspect-square overflow-hidden bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={item.name} fill sizes="(max-width: 640px) 50vw, 160px" className="object-cover" /></div>
             <div className="p-2"><p className="truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{item.name}</p><p className="mt-0.5 text-[10px] text-[var(--text-soft)]">{fileSize(item.sizeBytes)} · {item.width} × {item.height}</p>
-              <div className="mt-2 flex items-center justify-between gap-1"><button type="button" onClick={() => toggleImage(item.id)} disabled={controlsBusy || (!attached && selectedIds.length >= MAX_IMAGES)} aria-pressed={attached} aria-label={`Use ${item.name} in ${subject}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">{attached ? <Check size={12} aria-hidden="true" /> : <ImagePlus size={12} aria-hidden="true" />}{attached ? "Added" : "Use"}</button><div className="flex items-center gap-0.5"><a href={`${imageUrl(item.id)}?download=1`} download={item.name} title={`Download ${item.name}`} aria-label={`Download ${item.name}`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><Download size={14} aria-hidden="true" /></a>{context === "draft" && <button type="button" onClick={() => { void deleteAsset(item); }} disabled={controlsBusy} title={`Delete ${item.name} from library`} aria-label={`Delete ${item.name} from library`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50">{deletingId === item.id ? <LoaderCircle size={14} aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}</button>}</div></div>
+              <div className="mt-2 flex items-center justify-between gap-1"><button type="button" onClick={() => toggleImage(item.id)} disabled={controlsBusy || (!attached && selectedIds.length >= maxSelected)} aria-pressed={attached} aria-label={`Use ${item.name} in ${subject}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50">{attached ? <Check size={12} aria-hidden="true" /> : <ImagePlus size={12} aria-hidden="true" />}{attached ? "Added" : "Use"}</button><div className="flex items-center gap-0.5"><a href={`${imageUrl(item.id)}?download=1`} download={item.name} title={`Download ${item.name}`} aria-label={`Download ${item.name}`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><Download size={14} aria-hidden="true" /></a>{context === "draft" && <button type="button" onClick={() => { void deleteAsset(item); }} disabled={controlsBusy} title={`Delete ${item.name} from library`} aria-label={`Delete ${item.name} from library`} className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50">{deletingId === item.id ? <LoaderCircle size={14} aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}</button>}</div></div>
             </div>
           </li>;
         })}</ul>}

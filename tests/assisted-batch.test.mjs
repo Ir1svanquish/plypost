@@ -10,7 +10,8 @@ import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
 import { createVideo } from "../src/lib/server/video.ts";
-import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText } from "../src/lib/server/workspace.ts";
+import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "../src/lib/server/workspace.ts";
+import { imageLimitForDestination, imageLimitWarning } from "../src/lib/media-policy.ts";
 import { assistedContentSnapshot, assistedDeletionSnapshot, assistedState, hasManualReminder, parseWorkspace } from "../src/lib/workspace.ts";
 import { buildPlanAgenda } from "../src/lib/plan-agenda.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
@@ -128,6 +129,50 @@ test("each platform receives only its reviewed image subset, order and matching 
     mediaIds: ids.slice(0, 2), mediaAlt: ["", ""],
     scheduledFor: pinterest.scheduledFor, createdAt: new Date().toISOString(), status: "queued",
   }), /fewer images/);
+});
+
+test("X counts a saved video toward its four media items in every handoff path", async () => {
+  const ids = [];
+  for (let index = 0; index < 4; index++) {
+    ids.push((await createMedia(owner, {
+      name: `x-media-${index}.png`, type: "image/png",
+      bytes: await sharp({ create: { width: 4, height: 4, channels: 3,
+        background: { r: 40 + index * 20, g: 90, b: 150 } } }).png().toBuffer(),
+    })).media.id);
+  }
+  const clip = createVideo(owner, { name: "x-media.mp4", type: "video/mp4",
+    bytes: readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4")) }).video;
+  const saved = saveDraft(owner, { ...draft("X media review", ["bluesky"], {}, ids),
+    mediaAlt: ids.map((_, index) => `Photo ${index + 1}`), videoId: clip.id });
+  const time = new Date(Date.now() + 60_000).toISOString();
+  const x = { destination: "x", text: "Reviewed X copy", scheduledFor: time };
+
+  assert.equal(imageLimitForDestination("x"), 4);
+  assert.equal(imageLimitForDestination("x", true), 3);
+  assert.match(imageLimitWarning("x", 4, true), /4 media items/);
+  assert.equal(imageLimitWarning("linkedin", 4, true), null);
+  const [mixed] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...x, videoId: clip.id }]);
+  assert.deepEqual(mixed.mediaIds, ids.slice(0, 3));
+  assert.deepEqual(mixed.mediaAlt, ["Photo 1", "Photo 2", "Photo 3"]);
+  assert.equal(mixed.videoId, clip.id);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...x, mediaIds: ids, videoId: clip.id }]), /valid text and UTC timestamps/);
+  assert.throws(() => updateAssistedImages(owner, mixed.id, mixed.mediaIds, mixed.mediaAlt,
+    ids, ids.map(() => "")), /fewer images/);
+
+  const [photos] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...x, mediaIds: ids }]);
+  assert.deepEqual(photos.mediaIds, ids);
+  assert.equal(photos.videoId, undefined);
+  assert.throws(() => updateAssistedVideo(owner, photos.id, null, clip.id), /fewer images/);
+  assert.equal(updateAssistedImages(owner, photos.id, photos.mediaIds, photos.mediaAlt,
+    ids.slice(0, 3), ["", "", ""]), true);
+  assert.equal(updateAssistedVideo(owner, photos.id, null, clip.id), true);
+  assert.throws(() => addAssisted(owner, { id: randomUUID(), title: "Too much media",
+    ...x, mediaIds: ids, mediaAlt: ids.map(() => ""), videoId: clip.id,
+    createdAt: new Date().toISOString(), status: "queued" }), /fewer images/);
+  assert.equal(addAssisted(owner, { id: randomUUID(), title: "Four photos",
+    ...x, mediaIds: ids, mediaAlt: ids.map(() => ""),
+    createdAt: new Date().toISOString(), status: "queued" }).mediaIds.length, 4);
 });
 
 test("unmodified platform text uses the same adaptation shown in Create", () => {

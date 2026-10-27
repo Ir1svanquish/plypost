@@ -1653,8 +1653,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       setNotice({ kind: "error", text: "The assisted publishing list is full. Remove an old item first." });
       return false;
     }
-    const handoffMediaIds = selectedMediaIds ?? mediaIds.slice(0, imageLimitForDestination(assistDestination));
-    if (handoffMediaIds.length > imageLimitForDestination(assistDestination) ||
+    const handoffMediaIds = selectedMediaIds ?? mediaIds.slice(0, imageLimitForDestination(assistDestination, Boolean(videoId)));
+    if (handoffMediaIds.length > imageLimitForDestination(assistDestination, Boolean(videoId)) ||
         new Set(handoffMediaIds).size !== handoffMediaIds.length ||
         handoffMediaIds.some((id) => !mediaIds.includes(id))) {
       setNotice({ kind: "error", text: "Review the selected images for this platform before saving." });
@@ -1985,7 +1985,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
                         return <button key={id} type="button" aria-pressed={isSelected} onClick={() => togglePlatform(id)} className={`inline-flex min-w-0 items-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition sm:gap-2 sm:px-3 ${isSelected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--text)]" : "border-[var(--line)] bg-[var(--field)] text-[var(--text-muted)] hover:border-[var(--accent-border)]"}`}><PlatformMark id={id} size="small" /><span className="min-w-0 truncate">{platforms[id].name}</span><span className={`ml-auto hidden h-4 w-4 shrink-0 items-center justify-center rounded border sm:flex ${isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)]"}`}>{isSelected && <Check size={11} strokeWidth={3} />}</span></button>;
                       })}
                     </div>
-                    {selected.map((id) => imageLimitWarning(id, mediaIds.length)).filter((warning): warning is string => Boolean(warning)).map((warning) => <p key={warning} role="status" className="mt-2 flex items-start gap-1.5 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]"><CircleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />{warning}</p>)}
+                    {selected.map((id) => imageLimitWarning(id, mediaIds.length, Boolean(videoId))).filter((warning): warning is string => Boolean(warning)).map((warning) => <p key={warning} role="status" className="mt-2 flex items-start gap-1.5 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]"><CircleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />{warning}</p>)}
                     <details className="mt-4 rounded-xl border border-[var(--line)] px-4 py-3">
                       <summary className="cursor-pointer text-[12px] font-semibold text-[var(--text-secondary)]">Other networks · manual posting</summary>
                       <p className="mb-2 mt-4 text-[11px] font-semibold text-[var(--text-muted)]">Photo and text</p>

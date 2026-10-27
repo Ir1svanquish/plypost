@@ -6,16 +6,17 @@ import { assistedDestinations, type AssistedDestinationId } from "@/lib/assisted
 import { imageLimitForDestination } from "@/lib/media-policy";
 
 /** Pick a platform-specific subset from the saved draft without changing its image pool. */
-export function PlatformImageSelection({ destination, sourceIds, sourceAlt, selectedIds, onChange, disabled }: {
+export function PlatformImageSelection({ destination, sourceIds, sourceAlt, selectedIds, hasVideo, onChange, disabled }: {
   destination: AssistedDestinationId;
   sourceIds: readonly string[];
   sourceAlt?: readonly string[];
   selectedIds: readonly string[];
+  hasVideo: boolean;
   onChange: (ids: string[]) => void;
   disabled: boolean;
 }) {
   if (!sourceIds.length) return null;
-  const limit = imageLimitForDestination(destination);
+  const limit = imageLimitForDestination(destination, hasVideo);
   const name = assistedDestinations[destination].name;
 
   function toggle(id: string) {
@@ -35,7 +36,9 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
       <span className="text-[11px] font-semibold text-[var(--text-muted)]">{selectedIds.length} / {limit} selected</span>
     </div>
     <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">
-      {sourceIds.length > limit
+      {selectedIds.length > limit
+        ? `Remove ${selectedIds.length - limit} ${selectedIds.length - limit === 1 ? "image" : "images"}${destination === "x" && hasVideo ? " or detach the video" : ""} before confirming.`
+        : sourceIds.length > limit
         ? selectedIds.length >= limit
           ? `This platform can use ${limit} of ${sourceIds.length} draft images. Unselect one to choose another.`
           : `Choose up to ${limit} of ${sourceIds.length} draft images.`

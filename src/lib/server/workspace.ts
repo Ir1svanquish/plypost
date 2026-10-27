@@ -139,7 +139,7 @@ export function addAssisted(userId: string, value: unknown): AssistedPost {
   }
   transaction((db) => {
     assertOwnedMedia(userId, item.mediaIds ?? []);
-    if ((item.mediaIds?.length ?? 0) > imageLimitForDestination(item.destination)) {
+    if ((item.mediaIds?.length ?? 0) > imageLimitForDestination(item.destination, Boolean(item.videoId))) {
       throw new Error("Select fewer images for this platform before preparing its handoff.");
     }
     assertOwnedVideo(userId, item.videoId);
@@ -167,7 +167,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
         (entry.reminderEnabled !== undefined && typeof entry.reminderEnabled !== "boolean") ||
         (entry.text !== undefined && (typeof entry.text !== "string" || !entry.text.trim() || characterCount(entry.text) > 5000)) ||
         (entry.videoId !== undefined && !validUuid(entry.videoId)) ||
-        (entry.mediaIds !== undefined && (!validMediaIds(entry.mediaIds) || entry.mediaIds.length > imageLimitForDestination(entry.destination as string))))) {
+        (entry.mediaIds !== undefined && (!validMediaIds(entry.mediaIds) || entry.mediaIds.length > imageLimitForDestination(entry.destination as string, Boolean(entry.videoId)))))) {
     throw new Error("Choose a saved draft and one to eleven destinations with valid text and UTC timestamps.");
   }
   const requested = items as BatchHandoff[];
@@ -239,7 +239,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
       }
       // Omitted selection supports older clients; current clients send an explicit list,
       // including [] when no images should travel with this handoff.
-      const selectedMediaIds = mediaIds ?? draftImageIds.slice(0, imageLimitForDestination(destination));
+      const selectedMediaIds = mediaIds ?? draftImageIds.slice(0, imageLimitForDestination(destination, Boolean(videoId)));
       const selectedMediaAlt = selectedMediaIds.map((id) => draft.mediaAlt?.[draftImageIds.indexOf(id)] ?? "");
       const item: AssistedPost = {
         id: randomUUID(), title: draftTitle(draft.title, draft.source), destination, text,
@@ -364,6 +364,9 @@ export function updateAssistedVideo(userId: string, id: string, expectedVideoId:
     }
     if (videoId === expectedVideoId) return true;
     if (videoId !== null) assertOwnedVideo(userId, videoId);
+    if ((current.mediaIds?.length ?? 0) > imageLimitForDestination(current.destination, videoId !== null)) {
+      throw new Error("Select fewer images for this platform before attaching a video.");
+    }
     const updated: AssistedPost = { ...current };
     if (videoId === null) delete updated.videoId;
     else updated.videoId = videoId as string;
@@ -385,7 +388,7 @@ export function updateAssistedImages(userId: string, id: string, expectedMediaId
     const row = db.prepare("SELECT payload FROM assisted WHERE id=? AND user_id=?").get(id, userId) as DraftRow | undefined;
     if (!row) throw new AssistedConflictError("This handoff is no longer available. Refresh the list before editing.");
     const current = JSON.parse(row.payload) as AssistedPost;
-    if (nextIds.length > imageLimitForDestination(current.destination)) {
+    if (nextIds.length > imageLimitForDestination(current.destination, Boolean(current.videoId))) {
       throw new Error("Select fewer images for this platform before preparing its handoff.");
     }
     const savedIds = current.mediaIds ?? [];

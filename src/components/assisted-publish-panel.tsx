@@ -160,8 +160,9 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   }, [items, openEditIds]);
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
-  const selectedMediaIds = (imageSelections[destination] ?? sourceMediaIds.slice(0, imageLimitForDestination(destination)))
+  const selectedMediaIds = (imageSelections[destination] ?? sourceMediaIds.slice(0, imageLimitForDestination(destination, Boolean(videoId))))
     .filter((id) => sourceMediaIds.includes(id));
+  const composerMediaWarning = imageLimitWarning(destination, selectedMediaIds.length, Boolean(videoId));
   const missingComposerMedia = missingHandoffMedia(destination, selectedMediaIds.length, Boolean(videoId));
   const videoFirst = assistedVideoDisplayIds.some((id) => id === destination);
   const validation = isPlatformId(destination) ? validatePlatformText(destination, text) : null;
@@ -184,7 +185,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   const visibleItemIds = new Set(visibleItems.map((item) => item.id));
   const itemById = new Map(renderedItems.map((item) => [item.id, item]));
   const imageSelectionDirty = Object.entries(imageSelections).some(([id, selectedIds]) => {
-    const defaultIds = sourceMediaIds.slice(0, imageLimitForDestination(id as AssistedDestinationId));
+    const defaultIds = sourceMediaIds.slice(0, imageLimitForDestination(id as AssistedDestinationId, Boolean(videoId)));
     return selectedIds?.length !== defaultIds.length || selectedIds.some((imageId, index) => imageId !== defaultIds[index]);
   });
   const imageEditDirty = Boolean(imageEdit && itemById.has(imageEdit.itemId) &&
@@ -230,6 +231,10 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     setVideoTouched(false);
     setImageSelections({});
   }, [active, startExpanded, initialVideoId]);
+
+  useEffect(() => {
+    if (active && !videoTouched) setVideoId(initialVideoId);
+  }, [active, initialVideoId, videoTouched]);
 
   useEffect(() => {
     if (lastCollapseComposerToken.current === collapseComposerToken) return;
@@ -454,10 +459,11 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
           <textarea id="assisted-text" value={text} onChange={(event) => { if (characterCount(event.target.value) <= 5000) onTextChange(event.target.value); }} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
           {!isPlatformId(destination) && isManualAiDestination(destination) && <AIHandoffAssistant key={`ai-${destination}`} destination={destination} source={text} disabled={busy} onApply={onTextChange} />}
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint}{sourceMediaIds.length > 0 ? " Saved images are available for manual download; upload them on the platform yourself." : ""}</p>
-          <PlatformImageSelection destination={destination} sourceIds={sourceMediaIds} sourceAlt={sourceMediaAlt} selectedIds={selectedMediaIds} onChange={(ids) => setImageSelections((current) => ({ ...current, [destination]: ids }))} disabled={busy || mediaBusy} />
+          <PlatformImageSelection destination={destination} sourceIds={sourceMediaIds} sourceAlt={sourceMediaAlt} selectedIds={selectedMediaIds} hasVideo={Boolean(videoId)} onChange={(ids) => setImageSelections((current) => ({ ...current, [destination]: ids }))} disabled={busy || mediaBusy} />
           <button type="button" onClick={onEditImages} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">{sourceMediaIds.length > 0 ? "Edit the image pool in Create" : "Add images in Create"}</button>
           <details key={`video-${destination}`} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { setVideoId(id); setVideoTouched(true); }} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
-          {selectedMediaIds.length > 0 && videoId && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">This handoff includes photos and a video. Check {selected.name}&apos;s current rules before posting. Deselect the photos above or remove the video if it accepts only one format per post.</p>}
+          {destination !== "x" && selectedMediaIds.length > 0 && videoId && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">This handoff includes photos and a video. Check {selected.name}&apos;s current rules before posting. Deselect the photos above or remove the video if it accepts only one format per post.</p>}
+          {composerMediaWarning && <p role="alert" className="mt-2 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--danger)]">{composerMediaWarning}</p>}
           {selected.needsMedia && <p className={`mt-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${missingComposerMedia ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{missingComposerMedia === "video" ? "No video attached here. Attach one or bring a video when you publish on YouTube." : missingComposerMedia ? "No photo or video attached here. Bring one when you publish." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
             <p className={validation.valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}>{validation.count} / {validation.limit} {destination === "bluesky" ? "graphemes" : "characters"}{validation.byteCount !== undefined ? ` · ${validation.byteCount} / ${validation.byteLimit} UTF-8 bytes` : ""}</p>
@@ -465,7 +471,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
           </div>}
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <button type="button" onClick={() => void addPost()} disabled={busy || mediaBusy || videoBusy || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {mediaBusy || videoBusy ? "Wait for media…" : busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
+          <button type="button" onClick={() => void addPost()} disabled={busy || mediaBusy || videoBusy || Boolean(composerMediaWarning) || !text.trim() || validation?.valid === false || Boolean(time && !isValidLocalDateTime(time, now))} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[13px] font-bold text-white disabled:opacity-50"><CalendarClock size={15} /> {mediaBusy || videoBusy ? "Wait for media…" : busy ? "Saving..." : time ? "Save reminder" : "Add to checklist"}</button>
           {notificationPermission === "default" && <button type="button" onClick={onEnableNotifications} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><Bell size={14} /> Enable browser alerts</button>}
           <span className="text-[12px] leading-5 text-[var(--text-soft)]">{notificationPermission === "granted" ? "Browser alerts enabled while this page is open." : "Due items appear here while this page is open."}</span>
         </div>
@@ -529,7 +535,8 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               textEdit.value.trim() !== item.text && textEditCount <= 5000 && textEditValidation?.valid !== false);
             const videoEdit = videoEdits[item.id];
             const videoEditStale = Boolean(videoEdit && videoEdit.expectedVideoId !== (item.videoId ?? null));
-            const canSaveVideo = Boolean(!removed && item.status === "queued" && videoEdit && !videoEditStale && videoEdit.value !== videoEdit.expectedVideoId);
+            const canSaveVideo = Boolean(!removed && item.status === "queued" && videoEdit && !videoEditStale && videoEdit.value !== videoEdit.expectedVideoId &&
+              !imageLimitWarning(item.destination, item.mediaIds?.length ?? 0, Boolean(videoEdit.value)));
             const editingImages = imageEdit?.itemId === item.id ? imageEdit : null;
             const savedImageIds = item.mediaIds ?? [];
             const savedImageAlt = savedImageIds.map((_, index) => item.mediaAlt?.[index] ?? "");
@@ -569,8 +576,8 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
                 </div>
               </div>}
               {item.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {item.placeLabel} <span className="text-[var(--text-soft)]">(add on the platform yourself)</span></p>}
-              {imageLimitWarning(item.destination, item.mediaIds?.length ?? 0) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(item.destination, item.mediaIds?.length ?? 0)}</p>}
-              {savedImageIds.length > 0 && item.videoId && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Photos and a video are saved for this {target.name} handoff. Check whether it accepts both in one post. You can change the images or video below before publishing.</p>}
+              {imageLimitWarning(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId)) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId))}</p>}
+              {item.destination !== "x" && savedImageIds.length > 0 && item.videoId && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Photos and a video are saved for this {target.name} handoff. Check whether it accepts both in one post. You can change the images or video below before publishing.</p>}
               <div hidden={Boolean(editingImages)}><MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={!removed && item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} onEditingChange={(editing) => setDescriptionEditingIds((current) => {
                 if (Boolean(current[item.id]) === editing) return current;
                 const next = { ...current };
@@ -588,15 +595,16 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               {editingImages && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
                 <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Images for {target.name}</p>
                 <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Choose, reorder or upload images here. Save to change only this handoff; the source draft and other handoffs stay as they are.</p>
-                <ImageAttachmentPicker context="handoff" selectedIds={editingImages.ids} descriptions={editingImages.descriptions}
+                <ImageAttachmentPicker context="handoff" selectedIds={editingImages.ids} descriptions={editingImages.descriptions} maxSelected={imageLimitForDestination(item.destination, Boolean(item.videoId))}
                   onChange={(ids) => setImageEdit((current) => current?.itemId === item.id ? { ...current, ids } : current)}
                   onDescriptionChange={(id, description) => setImageEdit((current) => current?.itemId === item.id ? { ...current, descriptions: { ...current.descriptions, [id]: description } } : current)}
                   onBusyChange={setImageBusy} disabled={removed || item.status !== "queued" || busy || mediaBusy || imageSavingId !== null} readOnly={removed || item.status !== "queued"} />
                 {imageEditStale && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">These saved images changed elsewhere. Copy your descriptions if needed, then cancel and reopen this handoff.</p>}
+                {imageLimitWarning(item.destination, editingImages.ids.length, Boolean(item.videoId)) && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">{imageLimitWarning(item.destination, editingImages.ids.length, Boolean(item.videoId))}</p>}
                 {!removed && item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Copy any unsaved image descriptions before cancelling.</p>}
                 <p className="mt-2 text-[11px] text-[var(--text-muted)]">Uploaded images remain in your private library even if you cancel this edit.</p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <button type="button" onClick={() => void saveImageEdit(editingImages)} disabled={removed || item.status !== "queued" || busy || mediaBusy || imageBusy || imageSavingId !== null || imageEditStale || !imageEditChanged} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{imageSavingId === item.id ? "Saving…" : "Save images"}</button>
+                  <button type="button" onClick={() => void saveImageEdit(editingImages)} disabled={removed || item.status !== "queued" || busy || mediaBusy || imageBusy || imageSavingId !== null || imageEditStale || !imageEditChanged || Boolean(imageLimitWarning(item.destination, editingImages.ids.length, Boolean(item.videoId)))} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{imageSavingId === item.id ? "Saving…" : "Save images"}</button>
                   <button type="button" onClick={() => setImageEdit(null)} disabled={imageBusy || imageSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button>
                 </div>
               </div>}
@@ -604,6 +612,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               {videoEdit && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
                 <VideoAttachmentPicker selectedId={videoEdit.value} onChange={(value) => setVideoEdits((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? videoEdit), value } }))} onBusyChange={setVideoBusy} disabled={removed || item.status !== "queued" || busy || mediaBusy || videoBusy} />
                 {videoEditStale && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">The saved clip changed elsewhere. Cancel and reopen the latest handoff.</p>}
+                {imageLimitWarning(item.destination, savedImageIds.length, Boolean(videoEdit.value)) && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">{imageLimitWarning(item.destination, savedImageIds.length, Boolean(videoEdit.value))}</p>}
                 {!removed && item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Your unsaved video choice cannot be saved; cancel this edit after reviewing it.</p>}
                 <p className="mt-2 text-[11px] text-[var(--text-muted)]">This changes only this handoff. Its text, reminder and images stay saved.</p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
