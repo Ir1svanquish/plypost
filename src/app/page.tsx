@@ -1608,10 +1608,16 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     }
   }
 
-  async function copyAssisted(text: string, destination: AssistedDestinationId) {
+  async function copyAssisted(text: string, destination: AssistedDestinationId, mode: "saved" | "editing" | "conflict" | "removed") {
     try {
       await navigator.clipboard.writeText(text);
-      setNotice({ kind: "success", text: `${assistedDestinations[destination].name} text copied. Open the platform and paste it there.` });
+      setNotice({ kind: "success", text: mode === "removed"
+        ? "Unsaved text copied. Put it in a new draft before closing this temporary copy."
+        : mode === "conflict"
+          ? "Unsaved text copied. Review the latest handoff before saving or publishing it."
+        : mode === "editing"
+          ? "Current edit copied. Save it in Plypost before marking the post as published."
+          : `${assistedDestinations[destination].name} text copied. Open the platform and paste it there.` });
     } catch {
       setNotice({ kind: "error", text: "Clipboard access is unavailable. Open Post details to select the text manually." });
     }

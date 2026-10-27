@@ -38,7 +38,7 @@ type Props = {
   onTimeChange: (time: string) => void;
   onAdd: (videoId?: string, selectedMediaIds?: string[]) => Promise<boolean>;
   onSetReminder: (post: AssistedPost, scheduledFor: string | null) => Promise<void>;
-  onCopy: (text: string, destination: AssistedDestinationId) => void;
+  onCopy: (text: string, destination: AssistedDestinationId, mode: "saved" | "editing" | "conflict" | "removed") => void;
   onMarkPosted: (post: AssistedPost, postUrl?: string) => Promise<boolean>;
   onUpdateText: (id: string, expectedText: string, text: string) => Promise<boolean>;
   onUpdateVideo: (id: string, expectedVideoId: string | null, videoId: string | null) => Promise<boolean>;
@@ -512,6 +512,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
             const sourceDraft = item.sourceDraftId ? drafts.find((draft) => draft.id === item.sourceDraftId) : undefined;
             const textEdit = textEdits[item.id];
             const textEditStale = Boolean(textEdit && textEdit.expectedText !== item.text);
+            const copyMode = textEdit ? (removed ? "removed" : item.status !== "queued" || textEditStale ? "conflict" : "editing") : "saved";
             const textEditCount = textEdit ? characterCount(textEdit.value) : 0;
             const textEditValidation = textEdit && isPlatformId(item.destination)
               ? validatePlatformText(item.destination, textEdit.value.trim()) : null;
@@ -611,7 +612,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               </div>}
               </details>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => onCopy(removed && textEdit ? textEdit.value : item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> {removed && textEdit ? "Copy unsaved text" : "Copy text"}</button>
+                <button type="button" onClick={() => onCopy(textEdit?.value ?? item.text, item.destination, copyMode)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> {copyMode === "removed" || copyMode === "conflict" ? "Copy unsaved text" : copyMode === "editing" ? "Copy current edit" : "Copy text"}</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
               {!removed && (item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || hasOpenHandoffEdit || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => setUndoConfirmation({ id: item.id, receipt: assistedReceiptSnapshot(item) })} disabled={busy || editingOutcome || editingLink || outcomeSavingId !== null || linkSavingId !== null || confirmingUndo} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>)}
               </div>
