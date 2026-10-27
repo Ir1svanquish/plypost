@@ -14,6 +14,7 @@ import { AiLiteralNotice } from "@/components/ai-literal-notice";
 import { isManualAiDestination } from "@/lib/ai-handoff";
 import type { PreflightReport } from "@/lib/ai-preflight";
 import { imageLimitForDestination } from "@/lib/media-policy";
+import { suggestedSlotIsReady } from "@/lib/slot-settings";
 
 export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; mediaIds: string[]; reminderEnabled?: false; videoId?: string };
 export type BatchPrepareResult = "prepared" | "rejected" | "uncertain";
@@ -52,6 +53,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const [slotApplied, setSlotApplied] = useState(false);
   const [slotBusy, setSlotBusy] = useState(false);
   const [slotError, setSlotError] = useState<string | null>(null);
+  const [timeCheckedAt, setTimeCheckedAt] = useState(0);
   const [attempted, setAttempted] = useState(false);
   const [prepared, setPrepared] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -63,6 +65,8 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const batchIdRef = useRef<string | null>(null);
   const attemptedItemsRef = useRef<BatchHandoffItem[] | null>(null);
   const attemptedSlotModeRef = useRef(false);
+  const slotRequestVersion = useRef(0);
+  const slotAbortRef = useRef<AbortController | null>(null);
   const submittingRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const reviewRef = useRef<HTMLDivElement>(null);
@@ -79,7 +83,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     ? focusedDestination : destinations[0] ?? null;
   const priorHandoffs = existing.filter((item) => item.sourceDraftId === draft.id);
   const duplicateDestinations = destinations.filter((id) => priorHandoffs.some((item) => item.destination === id));
-  const currentTime = now || Date.now();
+  const currentTime = Math.max(now || Date.now(), timeCheckedAt);
   const textFor = (id: AssistedDestinationId) => texts[id] ??
     (isPlatformId(id) ? draft.variants[id] ?? adaptDraft(draft.source, id) : draft.source);
   const imagesFor = (id: AssistedDestinationId) => imageSelections[id] ??
@@ -88,8 +92,10 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     const text = textFor(id);
     return isPlatformId(id) ? !validatePlatformText(id, text).valid : !text.trim() || characterCount(text) > 5000;
   });
+  const expiredSlotPlatforms = selectedSlotPlatforms.filter((id) => slotApplied &&
+    !suggestedSlotIsReady(slotTimes[id], currentTime));
   const invalidReminders = destinations.filter((id) => slotApplied && isPlatformId(id)
-    ? !slotTimes[id] || Date.parse(slotTimes[id]!) < currentTime + 10_000
+    ? expiredSlotPlatforms.includes(id)
     : reminders[id] && !isValidLocalDateTime(reminders[id]!, currentTime));
   const mediaGaps = destinations.flatMap((id) => {
     const kind = missingHandoffMedia(id, imagesFor(id).length, Boolean(videoId));
@@ -101,6 +107,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     Object.values(reminders).some(Boolean) || slotApplied || videoId !== (draft.videoId ?? null));
   useEffect(() => { onStateChange({ dirty: reviewDirty, busy: submitting || videoBusy }); }, [reviewDirty, submitting, videoBusy, onStateChange]);
   useEffect(() => () => onStateChange({ dirty: false, busy: false }), [onStateChange]);
+  useEffect(() => () => slotAbortRef.current?.abort(), []);
   const canPrepare = !stale && !editorDirty && !busy && !mediaBusy && !videoBusy && !submitting && !prepared &&
     (attempted ? Boolean(attemptedItemsRef.current) :
       destinations.length > 0 && invalidText.length === 0 && invalidReminders.length === 0);
@@ -108,6 +115,8 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   function toggleDestination(id: AssistedDestinationId) {
     if (attempted || submitting) return;
     if (isPlatformId(id)) {
+      slotRequestVersion.current += 1;
+      slotAbortRef.current?.abort(); slotAbortRef.current = null; setSlotBusy(false);
       setSlotPreview(null); setSlotTimes({}); setSlotApplied(false); setSlotError(null);
     }
     if (!destinations.includes(id)) setFocusedDestination(id);
@@ -130,6 +139,8 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     if (submitting || videoBusy || !window.confirm(attempted
       ? "Discard this review? A handoff request may already have completed. Check Assisted before starting another batch."
       : "Discard your unconfirmed handoff review edits? The saved draft will stay unchanged.")) return;
+    slotRequestVersion.current += 1;
+    slotAbortRef.current?.abort(); slotAbortRef.current = null; setSlotBusy(false);
     batchIdRef.current = null;
     attemptedItemsRef.current = null;
     attemptedSlotModeRef.current = false;
@@ -148,13 +159,15 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     if (field === "reminder" && slotApplied && isPlatformId(id)) {
       const slots = document.getElementById("batch-weekly-slots") as HTMLDetailsElement | null;
       if (slots) slots.open = true;
-      requestAnimationFrame(() => document.getElementById("batch-custom-reminders")?.focus());
+      requestAnimationFrame(() => document.getElementById(expiredSlotPlatforms.includes(id) ? "batch-refresh-slots" : "batch-custom-reminders")?.focus());
       return;
     }
     requestAnimationFrame(() => document.getElementById(field === "reminder" ? `batch-reminder-${id}-date` : `batch-text-${id}`)?.focus());
   }
 
   function prepareAnother() {
+    slotRequestVersion.current += 1;
+    slotAbortRef.current?.abort(); slotAbortRef.current = null; setSlotBusy(false);
     batchIdRef.current = null;
     attemptedItemsRef.current = null;
     attemptedSlotModeRef.current = false;
@@ -193,22 +206,39 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
 
   async function previewSlots() {
     if (slotBusy || attempted || !selectedSlotPlatforms.length) return;
+    const requestVersion = ++slotRequestVersion.current;
+    const controller = new AbortController();
+    slotAbortRef.current = controller;
     setSlotBusy(true); setSlotError(null); setSlotPreview(null); setSlotTimes({}); setSlotApplied(false);
     try {
       const response = await fetch("/api/slots", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "suggest", destinations: selectedSlotPlatforms }) });
+        body: JSON.stringify({ action: "suggest", destinations: selectedSlotPlatforms }), signal: controller.signal });
       const body = await response.json() as { timeZone?: string; suggestions?: { platform: PlatformId; scheduledFor: string; skippedConflicts: number }[]; error?: string };
       if (!response.ok || !body.timeZone || !Array.isArray(body.suggestions) || body.suggestions.length !== selectedSlotPlatforms.length ||
+          new Set(body.suggestions.map((item) => item.platform)).size !== selectedSlotPlatforms.length ||
           body.suggestions.some((item) => !selectedSlotPlatforms.includes(item.platform) || !Number.isFinite(Date.parse(item.scheduledFor)))) {
         throw new Error(body.error || "Could not preview free slots.");
       }
-      setSlotPreview({ timeZone: body.timeZone, suggestions: body.suggestions });
-    } catch (cause) { setSlotError(cause instanceof Error ? cause.message : "Could not preview free slots."); }
-    finally { setSlotBusy(false); }
+      if (requestVersion === slotRequestVersion.current)
+        setSlotPreview({ timeZone: body.timeZone, suggestions: body.suggestions });
+    } catch (cause) {
+      if (requestVersion === slotRequestVersion.current)
+        setSlotError(cause instanceof Error ? cause.message : "Could not preview free slots.");
+    }
+    finally {
+      if (slotAbortRef.current === controller) slotAbortRef.current = null;
+      if (requestVersion === slotRequestVersion.current) setSlotBusy(false);
+    }
   }
 
   function applySuggestedSlots() {
     if (!slotPreview) return;
+    if (slotPreview.suggestions.some((item) => !suggestedSlotIsReady(item.scheduledFor, Date.now()))) {
+      setSlotPreview(null);
+      setSlotError("These suggested times have passed. Preview the next free slots.");
+      requestAnimationFrame(() => document.getElementById("batch-preview-slots")?.focus());
+      return;
+    }
     setSlotTimes(Object.fromEntries(slotPreview.suggestions.map((item) => [item.platform, item.scheduledFor])));
     setSlotApplied(true);
     requestAnimationFrame(() => document.getElementById("batch-slot-applied-status")?.focus());
@@ -227,9 +257,14 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
 
   async function prepare() {
     if (submittingRef.current || !canPrepare) return;
+    const checkedAt = Date.now();
     if (!attempted && destinations.some((id) => slotApplied && isPlatformId(id)
-      ? !slotTimes[id] || Date.parse(slotTimes[id]!) < Date.now() + 10_000
-      : reminders[id] && !isValidLocalDateTime(reminders[id]!, Date.now()))) return;
+      ? !suggestedSlotIsReady(slotTimes[id], checkedAt)
+      : reminders[id] && !isValidLocalDateTime(reminders[id]!, checkedAt))) {
+      setTimeCheckedAt(checkedAt);
+      if (slotApplied) setSlotError("A suggested time has passed. Find new times before confirming.");
+      return;
+    }
     const items = attemptedItemsRef.current ?? (() => {
       const timestamp = Date.now();
       return destinations.map((destination) => {
@@ -308,10 +343,10 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           </div>
         </div>
       </details>
-      {!attempted && <details id="batch-weekly-slots" className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Weekly posting slots · optional{slotApplied ? " · applied" : ""}</summary><div className="mt-3 border-t border-[var(--line)] pt-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Suggestions start at least 10 minutes from now. Slots apply to the four draft platforms; other platforms can use custom reminder times.</p>
+      {!attempted && <details id="batch-weekly-slots" className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Weekly posting slots · optional{slotApplied ? " · applied" : ""}</summary><div className="mt-3 border-t border-[var(--line)] pt-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button id="batch-preview-slots" type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Suggestions start at least 10 minutes from now. Slots apply to the four draft platforms; other platforms can use custom reminder times.</p>
         {slotError && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{slotError}</p>}
         {slotPreview && !slotApplied && <div className="mt-3 space-y-2"><p className="text-[11px] font-bold text-[var(--text-secondary)]">Suggested in {slotPreview.timeZone}</p>{slotPreview.suggestions.map((item) => <p key={item.platform} className="text-[12px] text-[var(--text-secondary)]">{platforms[item.platform].name}: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(item.scheduledFor))}{item.skippedConflicts ? ` · ${item.skippedConflicts} occupied ${item.skippedConflicts === 1 ? "slot" : "slots"} skipped` : ""}</p>)}<button type="button" onClick={applySuggestedSlots} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]">Use these reminder times</button></div>}
-        {slotApplied && <div className="mt-3 flex flex-wrap items-center gap-3"><p id="batch-slot-applied-status" tabIndex={-1} role="status" className="rounded text-[12px] font-semibold text-[var(--positive)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">Suggested times added for review below.</p><button id="batch-custom-reminders" type="button" onClick={useCustomReminderTimes} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use custom reminder times</button></div>}
+        {slotApplied && <div className="mt-3 flex flex-wrap items-center gap-3"><p id="batch-slot-applied-status" tabIndex={-1} role="status" className={`rounded text-[12px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${expiredSlotPlatforms.length ? "text-[var(--danger)]" : "text-[var(--positive)]"}`}>{expiredSlotPlatforms.length ? "A suggested time has passed. Find new times before confirming." : "Suggested times added for review below."}</p>{expiredSlotPlatforms.length > 0 && <button id="batch-refresh-slots" type="button" disabled={slotBusy} onClick={() => void previewSlots()} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-45">Find new times</button>}<button id="batch-custom-reminders" type="button" onClick={useCustomReminderTimes} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use custom reminder times</button></div>}
       </div></details>}
       {destinations.length > 0 ? <div>
         <p className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Review each post · {destinations.length} selected</p>

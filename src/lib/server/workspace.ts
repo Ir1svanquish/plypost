@@ -8,6 +8,7 @@ import { validatePlatformText } from "../platform-validation";
 import { assertOwnedMedia, listMedia } from "./media";
 import { assertOwnedVideo, listVideos } from "./video";
 import { slotIsFree } from "./slots";
+import { suggestedSlotIsReady } from "../slot-settings";
 import { workspaceDataRevision } from "./workspace-revision";
 
 type DraftRow = { payload: string };
@@ -211,7 +212,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
       throw new Error("Review text for every platform added after saving this draft.");
     }
     if (requireFreeSlots && requested.some((item) =>
-      isPlatformId(item.destination) && item.reminderEnabled !== false && (Date.parse(item.scheduledFor) < Date.now() + 10_000 ||
+      isPlatformId(item.destination) && item.reminderEnabled !== false && (!suggestedSlotIsReady(item.scheduledFor, Date.now()) ||
       !slotIsFree(db, userId, item.destination, item.scheduledFor)))) {
       throw new Error("A suggested slot is now occupied or too soon. Preview free slots again.");
     }

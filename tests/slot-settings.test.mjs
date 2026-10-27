@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSlotSettings, slotCandidates, slotMinute } from "../src/lib/slot-settings.ts";
+import { parseSlotSettings, slotCandidates, slotMinute, suggestedSlotIsReady } from "../src/lib/slot-settings.ts";
+
+test("suggested reminders expire at the same ten-second boundary used during confirmation", () => {
+  const now = Date.parse("2026-10-27T10:00:00.000Z");
+  assert.equal(suggestedSlotIsReady(new Date(now + 10_000).toISOString(), now), true);
+  assert.equal(suggestedSlotIsReady(new Date(now + 9_999).toISOString(), now), false);
+  assert.equal(suggestedSlotIsReady(undefined, now), false);
+  assert.equal(suggestedSlotIsReady("not-a-date", now), false);
+});
 
 test("weekly slot settings reject invalid zones, duplicate rules and malformed times", () => {
   const valid = { timeZone: "America/New_York", rules: [{ platform: "bluesky", day: 0, time: "09:30" }] };

@@ -92,3 +92,8 @@ export function slotCandidates(settings: SlotSettings, platform: PlatformId, aft
 export function slotMinute(instant: string): number {
   return Math.floor(Date.parse(instant) / 60_000);
 }
+
+export function suggestedSlotIsReady(instant: string | undefined, now: number): boolean {
+  const timestamp = instant ? Date.parse(instant) : NaN;
+  return Number.isFinite(timestamp) && timestamp >= now + 10_000;
+}
