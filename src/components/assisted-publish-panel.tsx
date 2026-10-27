@@ -55,6 +55,7 @@ type Props = {
   mastodonInstance?: string;
   focusItemId?: string;
   startExpanded?: boolean;
+  collapseComposerToken?: number;
   startWithVideoGroup?: boolean;
 };
 
@@ -103,7 +104,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, active, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, sourceMediaIds, sourceMediaAlt, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onDirtyChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, startWithVideoGroup = false }: Props) {
+export function AssistedPublishPanel({ items, drafts, active, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, sourceMediaIds, sourceMediaAlt, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onDirtyChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, collapseComposerToken = 0, startWithVideoGroup = false }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -120,6 +121,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   const [undoConfirmation, setUndoConfirmation] = useState<{ id: string; receipt: AssistedReceiptSnapshot } | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(startExpanded);
+  const lastCollapseComposerToken = useRef(collapseComposerToken);
   const [composerInitialized, setComposerInitialized] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("to-post");
   const [destinationFilter, setDestinationFilter] = useState<AssistedDestinationId | "all">("all");
@@ -228,6 +230,12 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     setVideoTouched(false);
     setImageSelections({});
   }, [active, startExpanded, initialVideoId]);
+
+  useEffect(() => {
+    if (lastCollapseComposerToken.current === collapseComposerToken) return;
+    lastCollapseComposerToken.current = collapseComposerToken;
+    setComposerOpen(false);
+  }, [collapseComposerToken]);
 
   useEffect(() => {
     if (previousDestination.current === destination) return;
