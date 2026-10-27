@@ -28,7 +28,7 @@ import { ServerSchedulePanel } from "@/components/server-schedule-panel";
 import { StrategyPanel } from "@/components/strategy-panel";
 import { PostingResultsPanel } from "@/components/posting-results-panel";
 import { AssistedPublishPanel } from "@/components/assisted-publish-panel";
-import { BatchHandoffPanel, type BatchHandoffItem, type BatchPrepareResult } from "@/components/batch-handoff-panel";
+import { BatchHandoffPanel, type BatchHandoffItem, type BatchPrepareResult, type BatchReviewState } from "@/components/batch-handoff-panel";
 import { WeeklySlotsPanel } from "@/components/weekly-slots-panel";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { AccountPanel } from "@/components/account-panel";
@@ -253,7 +253,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   const [title, setTitle] = useState("");
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [currentDraftVersion, setCurrentDraftVersion] = useState<string | null>(null);
-  const [batchLaunch, setBatchLaunch] = useState<{ draftId: string; token: number } | null>(null);
+  const [batchLaunch, setBatchLaunch] = useState<{ draft: SavedDraft; token: number } | null>(null);
+  const [batchReviewState, setBatchReviewState] = useState<BatchReviewState>({ dirty: false, busy: false });
   const batchLaunchCounter = useRef(0);
   const [draftConflict, setDraftConflict] = useState(false);
   const [editorOrigin, setEditorOrigin] = useState<EditorOrigin>("starter");
@@ -300,10 +301,10 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     currentSavedDraft?.updatedAt !== currentDraftVersion));
 
   useEffect(() => {
-    if (view !== "compose" || !batchLaunch || currentSavedDraft?.id !== batchLaunch.draftId) return;
+    if (view !== "compose" || !batchLaunch || currentDraftId !== batchLaunch.draft.id) return;
     const frame = window.requestAnimationFrame(() => document.getElementById("batch-handoff-heading")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     return () => window.cancelAnimationFrame(frame);
-  }, [view, batchLaunch, currentSavedDraft?.id]);
+  }, [view, batchLaunch, currentDraftId]);
 
   useEffect(() => {
     const dialog = switchDialogRef.current;
@@ -317,14 +318,14 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   }, [legacyReviewOpen]);
 
   useEffect(() => {
-    if (!hydrated || !(editorDirty || strategyDirty || assistedDirty || pendingDraftSave)) return;
+    if (!hydrated || !(editorDirty || strategyDirty || assistedDirty || pendingDraftSave || batchReviewState.dirty || batchReviewState.busy)) return;
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warnBeforeLeaving);
     return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
-  }, [editorDirty, strategyDirty, assistedDirty, pendingDraftSave, hydrated]);
+  }, [editorDirty, strategyDirty, assistedDirty, pendingDraftSave, batchReviewState, hydrated]);
 
   useEffect(() => {
     const syncView = () => {
@@ -649,7 +650,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   }, [email, hydrated]);
 
   function recoverEditorCopy(copy: OtherEditorCopy) {
-    if (editorDirty || needsDraftRecovery || pendingDraftSave || strategyDirty || assistedDirty || draftSaveBusyRef.current ||
+    if (editorDirty || needsDraftRecovery || pendingDraftSave || strategyDirty || assistedDirty || batchReviewState.dirty || batchReviewState.busy || draftSaveBusyRef.current ||
         mediaBusyRef.current || videoBusyRef.current || generating || restoringBackupRef.current) {
       setNotice({ kind: "error", text: "Save or discard the current changes before opening another browser copy." });
       return;
@@ -1005,13 +1006,17 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 
   async function prepareEditorHandoffs() {
     if (draftSaveBusyRef.current || mediaBusyRef.current || videoBusyRef.current || restoringBackupRef.current) return;
+    if (batchReviewState.dirty || batchReviewState.busy) {
+      setNotice({ kind: "error", text: "Finish or discard the open handoff review before starting another." });
+      return;
+    }
     if (needsDraftRecovery) {
       setNotice({ kind: "error", text: "This draft changed in another window. Review the latest version or save your edits as a new draft first." });
       return;
     }
     if (!editorDirty && currentSavedDraft && !pendingDraftSave) {
       batchLaunchCounter.current += 1;
-      setBatchLaunch({ draftId: currentSavedDraft.id, token: batchLaunchCounter.current });
+      setBatchLaunch({ draft: currentSavedDraft, token: batchLaunchCounter.current });
       return;
     }
     const originalRevision = editorRevision.current;
@@ -1025,7 +1030,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       return;
     }
     batchLaunchCounter.current += 1;
-    setBatchLaunch({ draftId: stored.id, token: batchLaunchCounter.current });
+    setBatchLaunch({ draft: stored, token: batchLaunchCounter.current });
   }
 
   function resetMediaPicker() {
@@ -1037,6 +1042,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 
   function applyEditorSwitch(next: EditorSwitch) {
     editorRevision.current += 1;
+    setBatchReviewState({ dirty: false, busy: false });
     setPendingDraftSave(null);
     resetMediaPicker();
     setAiUndo(null);
@@ -1044,7 +1050,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     const prepareHandoffs = next.kind === "draft" && Boolean(next.prepareHandoffs);
     if (prepareHandoffs && next.kind === "draft") {
       batchLaunchCounter.current += 1;
-      setBatchLaunch({ draftId: next.draft.id, token: batchLaunchCounter.current });
+      setBatchLaunch({ draft: next.draft, token: batchLaunchCounter.current });
     } else {
       setBatchLaunch(null);
     }
@@ -1121,6 +1127,10 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 
   function requestEditorSwitch(next: EditorSwitch) {
     if (switchSavingRef.current) return;
+    if (batchReviewState.busy) {
+      setNotice({ kind: "error", text: "Wait for the handoff review to finish before changing drafts." });
+      return;
+    }
     if (draftSaveBusyRef.current || mediaBusyRef.current || videoBusyRef.current || generating || restoringBackupRef.current) {
       setNotice({ kind: "error", text: draftSaveBusyRef.current
         ? "Wait for the current draft save to finish before changing drafts."
@@ -1130,6 +1140,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
         : "Wait for backup restoration to finish before changing drafts." });
       return;
     }
+    if (batchReviewState.dirty && !window.confirm("Change drafts and discard the unconfirmed handoff review? The saved draft will stay unchanged.")) return;
     if (editorDirty || pendingDraftSave) {
       setPendingEditorSwitch(next);
       return;
@@ -1395,7 +1406,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 
   async function restoreFullBackup(file: File) {
     if (backupMutation.current) return;
-    if (draftSaveBusyRef.current || pendingDraftSave || assistedMutation.current) {
+    if (draftSaveBusyRef.current || pendingDraftSave || assistedMutation.current || batchReviewState.busy) {
       setNotice({ kind: "error", text: "Finish the current save or handoff update before restoring a backup." });
       return;
     }
@@ -1417,7 +1428,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     try {
       const latest = await refreshWorkspace();
       if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
-      const unsavedWarning = `${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Your unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Your unsaved manual posting edits will be lost." : ""}`;
+      const unsavedWarning = `${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${batchReviewState.dirty ? " Your unconfirmed handoff review will be lost." : ""}${strategyDirty ? " Your unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Your unsaved manual posting edits will be lost." : ""}`;
       if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedWarning} This cannot be undone.`)) return;
       restoringBackupRef.current = true;
       setRestoringBackup(true);
@@ -1432,6 +1443,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       restored = true;
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
+      setBatchLaunch(null);
+      setBatchReviewState({ dirty: false, busy: false });
       setDraftConflict(false);
       setPendingDraftSave(null);
       setEditorOrigin("new");
@@ -1465,7 +1478,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 
   async function importWorkspace(file: File) {
     if (backupMutation.current) return;
-    if (draftSaveBusyRef.current || pendingDraftSave || assistedMutation.current) {
+    if (draftSaveBusyRef.current || pendingDraftSave || assistedMutation.current || batchReviewState.busy) {
       setNotice({ kind: "error", text: "Finish the current save or handoff update before importing a backup." });
       return;
     }
@@ -1482,12 +1495,14 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       }
       const latest = await refreshWorkspace();
       if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
-      if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Unsaved manual posting edits will be lost." : ""}`)) return;
+      if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${batchReviewState.dirty ? " Your unconfirmed handoff review will be lost." : ""}${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Unsaved manual posting edits will be lost." : ""}`)) return;
       await changeWorkspace("import", { backup: raw, expectedRevision: latest.workspaceRevision });
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
+      setBatchLaunch(null);
+      setBatchReviewState({ dirty: false, busy: false });
       setDraftConflict(false);
       setPendingDraftSave(null);
       setEditorOrigin("new");
@@ -1514,6 +1529,10 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   async function importLegacyWorkspace() {
     if (!legacyWorkspace || legacyImportBusy) return;
     const replaceSaved = legacyWorkspace.drafts.length > 0 || legacyWorkspace.schedule.length > 0;
+    if (replaceSaved && batchReviewState.busy) {
+      setLegacyImportError("Wait for the handoff review to finish before moving browser data.");
+      return;
+    }
     setLegacyImportBusy(true);
     setLegacyImportError(null);
     try {
@@ -1525,6 +1544,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       if (replaceSaved) {
         setCurrentDraftId(null);
         setCurrentDraftVersion(null);
+        setBatchLaunch(null);
+        setBatchReviewState({ dirty: false, busy: false });
         setDraftConflict(false);
         setPendingDraftSave(null);
         setStrategyRefreshEpoch((epoch) => epoch + 1);
@@ -1774,12 +1795,13 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 
   async function requestSignOut() {
     if (logoutBusy) return;
-    if (draftSaveBusy || switchSaving || assistedBusy || backupBusy || restoringBackup || mediaBusy || videoBusy || legacyImportBusy) {
+    if (draftSaveBusy || switchSaving || assistedBusy || backupBusy || restoringBackup || mediaBusy || videoBusy || legacyImportBusy || batchReviewState.busy) {
       setNotice({ kind: "error", text: "Wait for the current save, restore or upload to finish before signing out." });
       return;
     }
     const unsaved = [
       editorDirty && "draft edits",
+      batchReviewState.dirty && "unconfirmed handoff review edits",
       strategyDirty && "brand profile or AI idea edits",
       assistedDirty && "manual posting edits",
       pendingDraftSave && "an unconfirmed draft save",
@@ -1824,8 +1846,9 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
         <main className="app-main mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
           {view === "schedule" && schedule.some((post) => post.status === "queued") && (!workerLastSeen || now - Date.parse(workerLastSeen) > 30_000) && <div role="status" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Simulation worker is offline. Scheduled items will wait until a worker runs for this Plypost installation.</div>}
           {legacyStorageError && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Older browser data could not be validated. It was left unchanged; check it before clearing this browser's storage.</div>}
+          {view !== "compose" && (batchReviewState.dirty || batchReviewState.busy) && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Your unconfirmed handoff review is still open in Create.</span><button type="button" onClick={() => openView("compose")} className="font-bold text-[var(--accent-text)]">Continue review →</button></div>}
           {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} drafts, {legacyWorkspace.schedule.length} planned items and {legacyWorkspace.assisted.length} assisted items in older browser storage. Review before moving them into this account.</span><button type="button" onClick={() => { setLegacyImportError(null); setLegacyReviewOpen(true); }} className="font-bold text-[var(--accent-text)]">Review migration →</button></div>}
-          {view === "compose" && <div id="compose" className="section-anchor mx-auto max-w-[850px]">
+          {(view === "compose" || batchReviewState.dirty || batchReviewState.busy) && <div id="compose" hidden={view !== "compose"} className="section-anchor mx-auto max-w-[850px]">
           <div className="mb-5">
             <h1 className="text-[27px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[30px]">Create</h1>
           </div>
@@ -1973,7 +1996,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
               </section>}
               {showBlueskyLive && selected.includes("bluesky") && active === "bluesky" && <BlueskyLivePanel connection={blueskyConnection} connectionLoading={blueskyLoading} connectionError={blueskyError} selected active text={textFor("bluesky")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
               {showMastodonLive && selected.includes("mastodon") && active === "mastodon" && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[12px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
-              {currentSavedDraft && batchLaunch?.draftId === currentSavedDraft.id && <BatchHandoffPanel key={`${currentSavedDraft.id}:${currentSavedDraft.updatedAt}:${batchLaunch.token}`} startExpanded draft={currentSavedDraft} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy || videoBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} />}
+              {batchLaunch && (currentDraftId === batchLaunch.draft.id || batchReviewState.dirty || batchReviewState.busy) && <BatchHandoffPanel key={`${batchLaunch.draft.id}:${batchLaunch.token}`} startExpanded draft={batchLaunch.draft} stale={!currentSavedDraft || currentSavedDraft.updatedAt !== batchLaunch.draft.updatedAt} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy || videoBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); openView("assisted"); }} onOpenLatest={currentSavedDraft ? () => void openLatestDraft() : undefined} onStateChange={setBatchReviewState} />}
               <details className="px-1 text-[12px] text-[var(--text-muted)]"><summary className="cursor-pointer font-semibold">More actions</summary><div className="mt-3 flex flex-wrap items-center gap-4"><button type="button" onClick={() => openView("drafts")} className="font-semibold text-[var(--accent-text)]">Draft library</button><button type="button" onClick={() => openManualComposer()} className="font-semibold text-[var(--accent-text)]">Prepare one manual post</button><button type="button" onClick={simulatePublish} disabled={!canPublish} className="font-semibold text-[var(--accent-text)] disabled:opacity-45">{publishing ? "Simulating…" : "Run demo simulation"}</button></div></details>
           </div>
           </div>}
@@ -2014,7 +2037,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       <p id="legacy-review-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">This browser copy has no account label. Check the items below before moving them into <strong className="text-[var(--text)]">{email}</strong>.</p>
       <p className="mt-3 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">
         {legacyWorkspace.drafts.length || legacyWorkspace.schedule.length
-          ? `Importing replaces this account’s drafts and publishing plan, and clears its AI weekly plans. Existing assisted items stay; missing browser items are added. Due queued plans may be simulated by the worker.${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Unsaved manual posting edits will be lost." : ""}`
+          ? `Importing replaces this account’s drafts and publishing plan, and clears its AI weekly plans. Existing assisted items stay; missing browser items are added. Due queued plans may be simulated by the worker.${batchReviewState.dirty ? " Your unconfirmed handoff review will be lost." : ""}${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Unsaved manual posting edits will be lost." : ""}`
           : "Importing adds missing assisted items. This account’s drafts, publishing plan, AI weekly plans and assisted items stay in place."}
       </p>
       <div className="mt-5 max-h-[40vh] space-y-5 overflow-y-auto pr-1">

@@ -17,6 +17,7 @@ import { imageLimitForDestination } from "@/lib/media-policy";
 
 export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; mediaIds: string[]; reminderEnabled?: false; videoId?: string };
 export type BatchPrepareResult = "prepared" | "rejected" | "uncertain";
+export type BatchReviewState = { dirty: boolean; busy: boolean };
 
 type Props = {
   draft: SavedDraft;
@@ -25,15 +26,23 @@ type Props = {
   editorDirty: boolean;
   busy: boolean;
   mediaBusy: boolean;
+  stale: boolean;
   startExpanded?: boolean;
   onPrepare: (draftId: string, expectedUpdatedAt: string, batchId: string, items: BatchHandoffItem[], requireFreeSlots: boolean) => Promise<BatchPrepareResult>;
   onOpenAssisted: () => void;
+  onOpenLatest?: () => void;
+  onStateChange: (state: BatchReviewState) => void;
 };
 
-export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, mediaBusy, startExpanded = false, onPrepare, onOpenAssisted }: Props) {
-  const [open, setOpen] = useState(startExpanded);
-  const [destinations, setDestinations] = useState<AssistedDestinationId[]>(() => platformDisplayIds.filter((id) =>
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, mediaBusy, stale, startExpanded = false, onPrepare, onOpenAssisted, onOpenLatest, onStateChange }: Props) {
+  const [initialDestinations] = useState<AssistedDestinationId[]>(() => platformDisplayIds.filter((id) =>
     draft.selected.includes(id) && !existing.some((item) => item.sourceDraftId === draft.id && item.destination === id)));
+  const [open, setOpen] = useState(startExpanded);
+  const [destinations, setDestinations] = useState<AssistedDestinationId[]>(() => initialDestinations);
   const [focusedDestination, setFocusedDestination] = useState<AssistedDestinationId | null>(null);
   const [reminders, setReminders] = useState<Partial<Record<AssistedDestinationId, string>>>({});
   const [texts, setTexts] = useState<Partial<Record<AssistedDestinationId, string>>>({});
@@ -86,7 +95,13 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     const kind = missingHandoffMedia(id, imagesFor(id).length, Boolean(videoId));
     return kind ? [{ id, kind }] : [];
   });
-  const canPrepare = !editorDirty && !busy && !mediaBusy && !videoBusy && !submitting && !prepared &&
+  const reviewDirty = !prepared && (attempted || !sameIds(destinations, initialDestinations) ||
+    Object.entries(texts).some(([id, value]) => value !== (isPlatformId(id) ? draft.variants[id] ?? adaptDraft(draft.source, id) : draft.source)) ||
+    Object.entries(imageSelections).some(([id, ids]) => !sameIds(ids ?? [], (draft.mediaIds ?? []).slice(0, imageLimitForDestination(id)))) ||
+    Object.values(reminders).some(Boolean) || slotApplied || videoId !== (draft.videoId ?? null));
+  useEffect(() => { onStateChange({ dirty: reviewDirty, busy: submitting || videoBusy }); }, [reviewDirty, submitting, videoBusy, onStateChange]);
+  useEffect(() => () => onStateChange({ dirty: false, busy: false }), [onStateChange]);
+  const canPrepare = !stale && !editorDirty && !busy && !mediaBusy && !videoBusy && !submitting && !prepared &&
     (attempted ? Boolean(attemptedItemsRef.current) :
       destinations.length > 0 && invalidText.length === 0 && invalidReminders.length === 0);
 
@@ -111,6 +126,23 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     requestAnimationFrame(() => triggerRef.current?.focus());
   }
 
+  function discardReview() {
+    if (submitting || videoBusy || !window.confirm(attempted
+      ? "Discard this review? A handoff request may already have completed. Check Assisted before starting another batch."
+      : "Discard your unconfirmed handoff review edits? The saved draft will stay unchanged.")) return;
+    batchIdRef.current = null;
+    attemptedItemsRef.current = null;
+    attemptedSlotModeRef.current = false;
+    setAttempted(false);
+    setDestinations(initialDestinations);
+    setFocusedDestination(null);
+    setReminders({}); setTexts({}); setImageSelections({});
+    setVideoId(draft.videoId ?? null);
+    setSlotPreview(null); setSlotTimes({}); setSlotApplied(false); setSlotError(null);
+    setPreflightReports({}); setPreflightErrors({});
+    closeReview();
+  }
+
   function focusDestination(id: AssistedDestinationId) {
     setFocusedDestination(id);
     requestAnimationFrame(() => document.getElementById(`batch-text-${id}`)?.focus());
@@ -122,8 +154,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     attemptedSlotModeRef.current = false;
     setAttempted(false);
     setPrepared(false);
-    setDestinations(platformDisplayIds.filter((id) => draft.selected.includes(id) && !existing.some((item) =>
-      item.sourceDraftId === draft.id && item.destination === id)));
+    setDestinations(initialDestinations);
     setFocusedDestination(null);
     setReminders({});
     setTexts({});
@@ -227,7 +258,9 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
       <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--accent-text)]"><Copy size={12} aria-hidden="true" /> Manual</span>
     </div>
     {editorDirty && <p role="status" className="mt-4 rounded-xl bg-[var(--warning-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--warning)]">Save your latest editor changes first. Handoffs use the saved version of this draft.</p>}
+    {stale && <p role="alert" className="mt-4 rounded-xl bg-[var(--warning-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--warning)]">This saved draft changed or was deleted in another window. Your review edits are still here, but cannot be confirmed against the old version. Copy anything you need{onOpenLatest ? <>, then <button type="button" onClick={onOpenLatest} className="font-bold underline underline-offset-2">open the latest draft</button>.</> : " before starting a new draft."}</p>}
     {!editorDirty && !open && !prepared && <button ref={triggerRef} type="button" onClick={openReview} aria-expanded={open} aria-controls="batch-handoff-review" disabled={busy || mediaBusy} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] font-bold text-[var(--accent-text)] transition hover:bg-[var(--surface-hover)] disabled:opacity-45">Review manual handoffs <ArrowRight size={15} aria-hidden="true" /></button>}
+    {!open && reviewDirty && <button type="button" onClick={discardReview} disabled={submitting || videoBusy} className="mt-2 text-[12px] font-semibold text-[var(--danger)] underline underline-offset-2 disabled:opacity-45">Discard review edits</button>}
     {priorHandoffs.length > 0 && !prepared && <p className="mt-3 text-[11px] leading-5 text-[var(--text-muted)]">{priorHandoffs.length} {priorHandoffs.length === 1 ? "handoff" : "handoffs"} already prepared from this draft. Previously prepared platforms are unchecked by default. <button type="button" onClick={onOpenAssisted} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">View existing handoffs</button></p>}
     {prepared && <div role="status" className="mt-4 rounded-xl border border-[var(--positive)] bg-[var(--positive-soft)] p-4 text-[12px] leading-5 text-[var(--positive)]"><p className="flex items-center gap-2 font-bold"><Check size={15} aria-hidden="true" /> Handoffs added to Assisted.</p><p className="mt-1">Copy the saved text and download any media, then publish from your own accounts. Plypost has not posted anything.</p><div className="mt-3 flex flex-wrap gap-4"><button type="button" onClick={onOpenAssisted} className="inline-flex items-center gap-1 font-bold underline underline-offset-2">Open Assisted <ArrowRight size={13} aria-hidden="true" /></button><button type="button" onClick={prepareAnother} className="font-semibold underline underline-offset-2">Prepare another batch</button></div></div>}
     {open && !prepared && <div id="batch-handoff-review" ref={reviewRef} role="dialog" aria-modal="false" aria-labelledby="batch-handoff-review-heading" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape" && !submitting) { event.preventDefault(); closeReview(); } }} className="mt-5 space-y-4 border-t border-[var(--line)] pt-5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
@@ -323,7 +356,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
       </div>}
       {duplicateDestinations.length > 0 && <p role="status" className="rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[11px] leading-5 text-[var(--warning)]">{duplicateDestinations.map((id) => assistedDestinations[id].name).join(", ")} already {duplicateDestinations.length === 1 ? "has a handoff" : "have handoffs"} from this draft. Confirming will add another item for each selected platform.</p>}
       {attempted && <p role="status" className="text-[11px] leading-5 text-[var(--text-muted)]">If the request did not confirm, retry the same batch. Check Assisted before starting another batch.</p>}
-      <div className="flex flex-wrap items-center justify-end gap-3"><button type="button" onClick={closeReview} disabled={submitting} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-45">Close review</button><button type="button" onClick={() => void prepare()} disabled={!canPrepare} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-45"><Check size={15} aria-hidden="true" />{submitting ? "Preparing…" : attempted ? "Retry same batch" : `Confirm ${destinations.length} ${destinations.length === 1 ? "handoff" : "handoffs"}`}</button></div>
+      <div className="flex flex-wrap items-center justify-end gap-3">{reviewDirty && <button type="button" onClick={discardReview} disabled={submitting || videoBusy} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--danger)] disabled:opacity-45">Discard review edits</button>}<button type="button" onClick={closeReview} disabled={submitting} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-45">Close review</button><button type="button" onClick={() => void prepare()} disabled={!canPrepare} className="gradient-button inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-45"><Check size={15} aria-hidden="true" />{submitting ? "Preparing…" : attempted ? "Retry same batch" : `Confirm ${destinations.length} ${destinations.length === 1 ? "handoff" : "handoffs"}`}</button></div>
     </div>}
   </section>;
 }
