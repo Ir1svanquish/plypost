@@ -10,7 +10,7 @@ import { formatLocalDateTime, isValidLocalDateTime, LocalDateField, LocalDateTim
 import { MediaHandoff } from "@/components/media-handoff";
 
 type Props = {
-  drafts: SavedDraft[]; schedule: ScheduledPost[]; assisted: AssistedPost[]; realMastodon: RealMastodonSchedule[]; showRealMastodon: boolean; realQueueError: string | null; value: string; now: number; canSchedule: boolean;
+  drafts: SavedDraft[]; schedule: ScheduledPost[]; assisted: AssistedPost[]; realMastodon: RealMastodonSchedule[]; showRealMastodon: boolean; realQueueError: string | null; value: string; now: number; workerLastSeen: string | null; canSchedule: boolean;
   runningId: string | null; onValueChange: (value: string) => void; onAdd: () => void;
   onLoad: (post: ScheduledPost) => void; onRun: (post: ScheduledPost) => void; onRemove: (post: ScheduledPost) => void;
   onReschedule: (post: ScheduledPost, scheduledForIso: string) => Promise<void>;
@@ -87,7 +87,7 @@ function DraftTargetForm({ draft, value, error, saving, onChange, onCancel, onSu
   </form>;
 }
 
-export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, showRealMastodon, realQueueError, value, now, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onRescheduleAssisted, onOpenAssisted, onOpenDraft, onPrepareDraft, onSetDraftTargetDate, onOpenRealMastodon, onPrepareManual }: Props) {
+export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, showRealMastodon, realQueueError, value, now, workerLastSeen, canSchedule, runningId, onValueChange, onAdd, onLoad, onRun, onRemove, onReschedule, onRescheduleAssisted, onOpenAssisted, onOpenDraft, onPrepareDraft, onSetDraftTargetDate, onOpenRealMastodon, onPrepareManual }: Props) {
   const [month, setMonth] = useState<Month>(() => {
     const today = new Date(now || Date.now());
     return { year: today.getFullYear(), index: today.getMonth() };
@@ -106,6 +106,8 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
   const [targetError, setTargetError] = useState("");
   const [targetSaving, setTargetSaving] = useState(false);
   const queuedCount = schedule.filter((post) => post.status === "queued").length;
+  const workerTimestamp = workerLastSeen ? Date.parse(workerLastSeen) : NaN;
+  const simulationWorkerOffline = queuedCount > 0 && (!Number.isFinite(workerTimestamp) || now - workerTimestamp > 30_000);
   const manualReminderCount = assisted.filter((post) => post.status === "queued" && hasManualReminder(post)).length;
   const datedDraftCount = drafts.filter((draft) => draft.plannedDate).length;
   const undatedDrafts = drafts.filter((draft) => !draft.plannedDate).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -269,7 +271,7 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
   return <section id="schedule" className="section-anchor panel-border soft-shadow mt-8 overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="schedule-heading">
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-6 py-5 sm:px-7">
       <div><h2 id="schedule-heading" className="text-[17px] font-bold">Content calendar</h2><p className="mt-1 text-[13px] text-[var(--text-muted)]">Draft target dates and manual reminders{hasRealMastodon ? ", plus connected Mastodon posts" : ""}{hasSimulations ? ", plus demo simulations" : ""}.</p></div>
-      <div className="flex flex-wrap items-center gap-2">{hasRealMastodon && <span className="inline-flex min-h-8 items-center rounded-full bg-[var(--positive-soft)] px-2.5 text-[12px] leading-none font-semibold text-[var(--positive)]">{realQueuedCount} real Mastodon queued</span>}<button type="button" onClick={showDraftTargets} disabled={datedDraftCount === 0} className="inline-flex min-h-8 items-center rounded-full bg-[var(--field)] px-2.5 text-[12px] leading-none font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:cursor-default">{datedDraftCount} dated drafts</button>{hasSimulations && <span className="inline-flex min-h-8 items-center rounded-full bg-[var(--accent-soft)] px-2.5 text-[12px] leading-none font-semibold text-[var(--accent-text)]">{queuedCount} demo simulations queued</span>}<span className="inline-flex min-h-8 items-center rounded-full bg-[var(--warning-soft)] px-2.5 text-[12px] leading-none font-semibold text-[var(--warning)]">{manualReminderCount} manual reminders</span>{undatedChecklist.length > 0 && <button type="button" onClick={() => onOpenAssisted(undatedChecklist[0])} className="inline-flex min-h-8 items-center rounded-full bg-[var(--field)] px-2.5 text-[12px] leading-none font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{undatedChecklist.length} undated {undatedChecklist.length === 1 ? "checklist item" : "checklist items"}</button>}</div>
+      <div className="flex flex-wrap items-center gap-2">{hasRealMastodon && <span className="inline-flex min-h-8 items-center rounded-full bg-[var(--positive-soft)] px-2.5 text-[12px] leading-none font-semibold text-[var(--positive)]">{realQueuedCount} real Mastodon queued</span>}<button type="button" onClick={showDraftTargets} disabled={datedDraftCount === 0} className="inline-flex min-h-8 items-center rounded-full bg-[var(--field)] px-2.5 text-[12px] leading-none font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:cursor-default">{datedDraftCount} dated {datedDraftCount === 1 ? "draft" : "drafts"}</button>{hasSimulations && <span className="inline-flex min-h-8 items-center rounded-full bg-[var(--accent-soft)] px-2.5 text-[12px] leading-none font-semibold text-[var(--accent-text)]">{queuedCount} demo {queuedCount === 1 ? "simulation" : "simulations"} queued</span>}<span className="inline-flex min-h-8 items-center rounded-full bg-[var(--warning-soft)] px-2.5 text-[12px] leading-none font-semibold text-[var(--warning)]">{manualReminderCount} manual {manualReminderCount === 1 ? "reminder" : "reminders"}</span>{undatedChecklist.length > 0 && <button type="button" onClick={() => onOpenAssisted(undatedChecklist[0])} className="inline-flex min-h-8 items-center rounded-full bg-[var(--field)] px-2.5 text-[12px] leading-none font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{undatedChecklist.length} undated {undatedChecklist.length === 1 ? "checklist item" : "checklist items"}</button>}</div>
     </div>
     {undatedDrafts.length > 0 && <div className="border-t border-[var(--line)] px-6 py-5 sm:px-7" aria-labelledby="undated-drafts-heading">
       <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 id="undated-drafts-heading" className="text-[15px] font-bold text-[var(--text)]">Drafts without a target day</h3><p className="mt-1 text-[12px] text-[var(--text-muted)]">Place an idea on the calendar when you know when to work on it. A target day does not set a reminder or publish it.</p></div><span className="rounded-full bg-[var(--field)] px-2.5 py-1 text-[11px] font-bold text-[var(--text-secondary)]">{undatedDrafts.length} to plan</span></div>
@@ -281,11 +283,12 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
     </div>}
     <details className="border-t border-[var(--line)] px-6 py-4 sm:px-7">
       <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Demo simulation · optional</summary>
+      {simulationWorkerOffline && <p role="status" className="mt-4 rounded-lg border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Simulation worker is offline. Queued demo items will wait until a worker runs for this Plypost installation.</p>}
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1"><LocalDateTimeField id="schedule-time" label="Simulation time" value={value} minTimestamp={now + 10_000} onChange={onValueChange} /></div>
         <button type="button" onClick={onAdd} disabled={!canSchedule || !isValidLocalDateTime(value, now + 10_000)} className="gradient-button inline-flex h-[43px] items-center justify-center gap-2 rounded-xl px-4 text-[13px] font-bold text-white disabled:opacity-50 sm:mb-[22px]"><CalendarClock size={15} /> Add simulation</button>
       </div>
-      <p className="mt-3 text-[12px] leading-5 text-[var(--text-soft)]">{hasRealMastodon ? <>Only individually confirmed real Mastodon items can reach a social platform. Simulation and manual items never post through the worker. A worker must run for this installation to process due real and simulated tasks.</> : <>Simulations create demo receipts only. A worker must run for this installation to process due simulations. Manual handoffs are published by you on the platform.</>}</p>
+      <p className="mt-3 text-[12px] leading-5 text-[var(--text-soft)]">{hasRealMastodon ? <>Only individually confirmed real Mastodon items can reach a social platform. Simulation and manual items never post through the worker. {!simulationWorkerOffline && "A worker must run for this installation to process due real and simulated tasks."}</> : <>Simulations create demo receipts only. {!simulationWorkerOffline && "A worker must run for this installation to process due simulations."} Manual handoffs are published by you on the platform.</>}</p>
     </details>
     {hasRealMastodon && realQueueError && <p role="alert" className="mx-6 my-4 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)] sm:mx-7">The real Mastodon queue could not refresh. Its calendar counts and statuses may be out of date. Use Refresh status in Mastodon auto-publish below.</p>}
     {attentionItems.length > 0 && <div className="border-t border-[var(--line)] bg-[var(--surface-muted)] px-6 py-5 sm:px-7" aria-labelledby="plan-attention-heading">
