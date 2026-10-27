@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { audit, database, transaction } from "./db";
+import { safeImageName } from "./media-name";
 import { MAX_POST_IMAGES } from "../media-policy";
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -67,15 +68,6 @@ function itemFromRow(row: MediaRow): MediaItem {
     createdAt: row.created_at,
     url: `/api/media/${row.id}`,
   };
-}
-
-function safeName(value: string): string {
-  const base = value.replaceAll("\\", "/").split("/").at(-1) || "image";
-  const name = [...base].filter((character) => {
-    const code = character.codePointAt(0) ?? 0;
-    return code > 31 && code !== 127;
-  }).join("").trim() || "image";
-  return name.slice(0, 120);
 }
 
 function imageMime(format: SupportedImageFormat): string {
@@ -171,7 +163,7 @@ export async function createMedia(userId: string, file: { name: string; type: st
     if (usage.count >= MAX_OWNER_MEDIA_COUNT) throw new MediaError("Media library is full (200 images).", 409);
     if (usage.bytes + encoded.length > MAX_OWNER_MEDIA_BYTES) throw new MediaError("Media library has reached its 64 MiB storage limit.", 409);
     const row: MediaRow = {
-      id: randomUUID(), original_name: safeName(file.name), mime_type: imageMime(format),
+      id: randomUUID(), original_name: safeImageName(file.name), mime_type: imageMime(format),
       byte_size: encoded.length, width, height, created_at: new Date().toISOString(),
     };
     db.prepare("INSERT INTO media(id,user_id,original_name,mime_type,byte_size,width,height,sha256,body,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")

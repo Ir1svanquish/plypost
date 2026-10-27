@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import sharp from "sharp";
 import { transaction, audit } from "./db";
 import { listMedia, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_OWNER_MEDIA_BYTES, MAX_OWNER_MEDIA_COUNT } from "./media";
+import { safeImageName } from "./media-name";
 import { listVideos, MAX_OWNER_VIDEO_BYTES, MAX_OWNER_VIDEO_COUNT, MAX_VIDEO_BYTES, safeVideoName, validVideoBytes } from "./video";
 import { parseWorkspace, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
 import { parseBrandBrief, parseWeeklyPlan, type BrandBrief, type WeeklyPlan } from "../strategy";
@@ -103,15 +104,6 @@ function validTimezone(value: unknown): value is string {
       !/^(?:UTC|[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){1,3})$/.test(value)) return false;
   try { new Intl.DateTimeFormat("en-US", { timeZone: value }); return true; }
   catch { return false; }
-}
-
-function safeName(value: string): string {
-  const base = value.replaceAll("\\", "/").split("/").at(-1) || "image";
-  const name = [...base].filter((character) => {
-    const code = character.codePointAt(0) ?? 0;
-    return code > 31 && code !== 127;
-  }).join("").trim() || "image";
-  return name.slice(0, 120);
 }
 
 function mediaReferences(value: unknown): string[] {
@@ -345,7 +337,7 @@ async function prepareMedia(raw: unknown, signal?: AbortSignal): Promise<Prepare
     if (digests.has(digest)) invalid("Backup contains duplicate images.");
     digests.add(digest);
     prepared.push({
-      oldId: entry.id, newId: randomUUID(), name: safeName(entry.name), mimeType: entry.mimeType,
+      oldId: entry.id, newId: randomUUID(), name: safeImageName(entry.name), mimeType: entry.mimeType,
       sizeBytes: encoded.length, width, height, createdAt: entry.createdAt, sha256: digest, body: encoded,
     });
     if (entry.base64 instanceof DecodedBackupAsset) entry.base64 = null;

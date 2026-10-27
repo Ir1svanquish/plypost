@@ -20,13 +20,28 @@ const routeContext = (id) => ({ params: Promise.resolve({ id }) });
 
 after(() => { closeDatabase(); if (temporary.startsWith(tmpdir())) rmSync(temporary, { recursive: true, force: true }); });
 
-function imageRequest(bytes, { withCookie = true, origin = "http://localhost", type = "image/png" } = {}) {
+function imageRequest(bytes, { withCookie = true, origin = "http://localhost", type = "image/png", name = "example.png" } = {}) {
   const form = new globalThis.FormData();
-  form.append("file", new globalThis.Blob([new Uint8Array(bytes)], { type }), "example.png");
+  form.append("file", new globalThis.Blob([new Uint8Array(bytes)], { type }), name);
   return new globalThis.Request(base, {
     method: "POST", headers: { origin, ...(withCookie ? { cookie } : {}) }, body: form,
   });
 }
+
+test("a long image filename with emoji stays valid through upload and download", async () => {
+  const png = await sharp({ create: { width: 5, height: 6, channels: 3, background: "#119977" } }).png().toBuffer();
+  const created = await upload(imageRequest(png, { name: `${"a".repeat(119)}😀.png` }));
+  assert.equal(created.status, 201);
+  const { media } = await created.json();
+  assert.equal(media.name.endsWith(".png"), true);
+  const listing = await list(new globalThis.Request(base, { headers: { cookie } }));
+  assert.equal((await listing.json()).media.find((item) => item.id === media.id)?.name === media.name, true);
+  assert.doesNotThrow(() => encodeURIComponent(media.name));
+  const response = await read(new globalThis.Request(`${base}/${media.id}?download=1`, { headers: { cookie } }), routeContext(media.id));
+  assert.equal(response.status, 200);
+  assert.ok(response.headers.get("content-disposition")?.startsWith("attachment; filename*=UTF-8''"));
+  assert.equal((await remove(new globalThis.Request(`${base}/${media.id}`, { method: "DELETE", headers: { cookie, origin: "http://localhost" } }), routeContext(media.id))).status, 200);
+});
 
 test("media routes require the owner session and same-origin uploads", async () => {
   const png = await sharp({ create: { width: 3, height: 4, channels: 3, background: "#ff3322" } }).png().toBuffer();

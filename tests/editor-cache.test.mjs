@@ -65,6 +65,15 @@ test("a new tab copied from an opener gets a new editor identity while reload ke
   assert.equal(ensureEditorTabId(clonedSession, "document-c", "navigate", () => "tab-c"), "tab-c");
 });
 
+test("another tab's recovery preview keeps a complete emoji at its limit", () => {
+  const local = storage();
+  writeOwnerEditorCache(local, "first@example.test", "tab-a", JSON.stringify({
+    source: `${"a".repeat(79)}😀 after`, hasUnsavedWork: true, cachedAt: 10,
+  }));
+  const [copy] = otherOwnerEditorCopies(local, "first@example.test", "tab-b");
+  assert.equal(copy.preview, `${"a".repeat(79)}😀`);
+});
+
 test("clean browser copies are omitted from recovery without deleting stored data", () => {
   const local = storage();
   writeOwnerEditorCache(local, "first@example.test", "tab-a", JSON.stringify({ source: "Saved draft", hasUnsavedWork: false, cachedAt: 10 }));

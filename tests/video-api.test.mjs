@@ -22,11 +22,25 @@ const context = (id) => ({ params: Promise.resolve({ id }) });
 const mp4 = readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4"));
 after(() => { closeDatabase(); if (temporary.startsWith(tmpdir())) rmSync(temporary, { recursive: true, force: true }); });
 
-function uploadRequest(bytes = mp4, { origin = "http://localhost", withCookie = true, type = "video/mp4" } = {}) {
+function uploadRequest(bytes = mp4, { origin = "http://localhost", withCookie = true, type = "video/mp4", name = "launch.mp4" } = {}) {
   const form = new globalThis.FormData();
-  form.append("file", new globalThis.Blob([new Uint8Array(bytes)], { type }), "launch.mp4");
+  form.append("file", new globalThis.Blob([new Uint8Array(bytes)], { type }), name);
   return new globalThis.Request(base, { method: "POST", headers: { origin, ...(withCookie ? { cookie } : {}) }, body: form });
 }
+
+test("a long video filename with emoji stays valid through upload and download", async () => {
+  const bytes = Buffer.concat([mp4, Buffer.from([77])]);
+  const created = await upload(uploadRequest(bytes, { name: `${"b".repeat(109)}😀.mp4` }));
+  assert.equal(created.status, 201);
+  const { video } = await created.json();
+  const listing = await list(new globalThis.Request(base, { headers: { cookie } }));
+  assert.equal((await listing.json()).videos.find((item) => item.id === video.id)?.name === video.name, true);
+  assert.doesNotThrow(() => encodeURIComponent(video.name));
+  const response = await download(new globalThis.Request(`${base}/${video.id}`, { headers: { cookie } }), context(video.id));
+  assert.equal(response.status, 200);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+  assert.equal((await remove(new globalThis.Request(`${base}/${video.id}`, { method: "DELETE", headers: { cookie, origin: "http://localhost" } }), context(video.id))).status, 200);
+});
 
 test("video routes require owner and serve private playback ranges and attachment downloads", async () => {
   assert.equal((await list(new globalThis.Request(base))).status, 401);

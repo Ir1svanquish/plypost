@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, database, transaction } from "./db";
+import { unicodePrefixByCodeUnits } from "./media-name";
 
 export const MAX_VIDEO_BYTES = 32 * 1024 * 1024;
 export const MAX_OWNER_VIDEO_BYTES = 64 * 1024 * 1024;
@@ -65,8 +66,9 @@ export function safeVideoName(value: string, mimeType: string): string {
     .split("").filter((character) => {
       const code = character.charCodeAt(0);
       return code > 31 && code !== 127;
-    }).join("").trim().slice(0, 110) || "video";
-  return `${stem}.${extensions[mimeType] ?? "mp4"}`;
+    }).join("").trim();
+  const shortStem = unicodePrefixByCodeUnits(stem, 110) || "video";
+  return `${shortStem}.${extensions[mimeType] ?? "mp4"}`;
 }
 
 export function listVideos(userId: string): VideoItem[] {

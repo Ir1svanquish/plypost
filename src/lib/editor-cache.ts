@@ -86,7 +86,7 @@ export function otherOwnerEditorCopies(storage: EditorStorage, email: string, ta
       const preview = [data.title, data.source, ...Object.values(data.variants && typeof data.variants === "object" ? data.variants : {})]
         .find((item) => typeof item === "string" && item.trim()) as string | undefined;
       copies.push({ tabId: key.slice(prefix.length), value, updatedAt: data.cachedAt,
-        preview: preview?.trim().replace(/\s+/g, " ").slice(0, 80) || "Untitled draft" });
+        preview: Array.from(preview?.trim().replace(/\s+/g, " ") || "Untitled draft").slice(0, 80).join("") });
     } catch { /* Ignore an unreadable browser copy; keep the original storage entry intact. */ }
   }
   return copies.sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 10);
