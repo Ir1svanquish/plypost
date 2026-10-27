@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { adaptDraft, characterCount, platforms, type PlatformId } from "@/lib/platforms";
 import { validatePlatformText } from "@/lib/platform-validation";
 import { compareText, type TextPart } from "@/lib/text-diff";
@@ -26,11 +27,14 @@ function highlighted(parts: TextPart[], kind: "current" | "suggested") {
 }
 
 export function AIReviewPanel({ source, original, suggestions, available, selected, stale, busy, onToggle, onEdit, onApply, onDiscard }: Props) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const detailsRefs = useRef<Partial<Record<PlatformId, HTMLDetailsElement | null>>>({});
+  useEffect(() => { headingRef.current?.focus(); }, []);
   const invalidSelected = selected.some((id) => !validatePlatformText(id, suggestions[id] ?? "").valid);
   return <section aria-label="Review AI drafts" className="mt-4 rounded-xl border border-[var(--accent-border)] bg-[var(--surface)] p-4">
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div>
-        <h3 className="text-[13px] font-bold text-[var(--text)]">Review before replacing</h3>
+        <h3 ref={headingRef} tabIndex={-1} className="text-[13px] font-bold text-[var(--text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">Review before replacing</h3>
         <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Compare and edit each suggestion before using it. Changed numbers, weekdays or links start unchecked. Applying a version also selects its platform.</p>
       </div>
       <button type="button" onClick={onDiscard} disabled={busy} className="text-[12px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text)] disabled:opacity-45">Discard suggestions</button>
@@ -49,19 +53,19 @@ export function AIReviewPanel({ source, original, suggestions, available, select
             </label>
             <div className="flex flex-wrap items-center gap-2">
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${comparison.changed ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "bg-[var(--surface)] text-[var(--text-muted)]"}`}>{comparison.changed ? "Changed" : "No edits"}</span>
-              {!validation.valid && <span className="text-[11px] font-semibold text-[var(--danger)]">{suggestion.trim() ? "Too long" : "Empty suggestion"}</span>}
+              {!validation.valid && <button type="button" onClick={() => { const details = detailsRefs.current[id]; if (details) details.open = true; document.getElementById(`ai-suggestion-${id}`)?.focus(); }} disabled={stale || busy} className="text-[11px] font-semibold text-[var(--danger)] underline underline-offset-2 disabled:opacity-50">{suggestion.trim() ? "Too long · edit" : "Empty suggestion · edit"}</button>}
             </div>
           </div>
           <AiLiteralNotice source={source} suggestion={suggestion} />
-          <details className="mt-2">
+          <details ref={(element) => { detailsRefs.current[id] = element; }} className="mt-2">
             <summary className="cursor-pointer text-[11px] font-semibold text-[var(--accent-text)]">Compare and edit</summary>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <div className="min-w-0 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3"><p className="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-soft)]">Current · highlighted text replaced</p><p className="whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{highlighted(comparison.before, "current")}</p></div>
               <div className="min-w-0 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3"><p className="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--accent-text)]">Suggested · highlighted text new</p><p className="whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text)]">{highlighted(comparison.after, "suggested")}</p></div>
             </div>
             <label htmlFor={`ai-suggestion-${id}`} className="mt-3 block text-[11px] font-bold text-[var(--text-secondary)]">Edit {platforms[id].name} suggestion</label>
-            <textarea id={`ai-suggestion-${id}`} value={suggestion} onChange={(event) => { if (characterCount(event.target.value) <= 5000) onEdit(id, event.target.value); }} disabled={stale || busy} className="mt-1 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
-            <p className={`mt-1 text-right text-[11px] ${validation.valid ? "text-[var(--text-muted)]" : "text-[var(--danger)]"}`}>{validation.count}/{validation.limit} characters{validation.byteCount !== undefined && validation.byteLimit !== undefined ? ` · ${validation.byteCount}/${validation.byteLimit} bytes` : ""}</p>
+            <textarea id={`ai-suggestion-${id}`} aria-invalid={!validation.valid} aria-describedby={`ai-suggestion-count-${id}`} value={suggestion} onChange={(event) => { if (characterCount(event.target.value) <= 5000) onEdit(id, event.target.value); }} disabled={stale || busy} className="mt-1 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
+            <p id={`ai-suggestion-count-${id}`} className={`mt-1 text-right text-[11px] ${validation.valid ? "text-[var(--text-muted)]" : "text-[var(--danger)]"}`}>{validation.count}/{validation.limit} characters{validation.byteCount !== undefined && validation.byteLimit !== undefined ? ` · ${validation.byteCount}/${validation.byteLimit} bytes` : ""}</p>
           </details>
         </div>;
       })}

@@ -61,6 +61,7 @@ const interimSampleDraft =
   "A good idea deserves more than a copy-paste post.\n\nsoflow helps you shape one draft for every corner of the internet. Pick your channels, fine-tune each version, and share with confidence.";
 
 type AIReview = {
+  generation: number;
   source: string;
   original: Partial<Record<PlatformId, string>>;
   suggestions: Partial<Record<PlatformId, string>>;
@@ -217,6 +218,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   const [mediaBusy, setMediaBusy] = useState(false);
   const [aiUndo, setAiUndo] = useState<Partial<Record<PlatformId, string>> | null>(null);
   const [aiReview, setAiReview] = useState<AIReview | null>(null);
+  const aiReviewGeneration = useRef(0);
   const [aiApplyIds, setAiApplyIds] = useState<PlatformId[]>([]);
   const editorRevision = useRef(0);
   const [notice, setNotice] = useState<Notice>(null);
@@ -804,7 +806,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
         setNotice({ kind: "error", text: "The editor changed while AI was working, so your edits were kept. Generate again when ready." });
         return;
       }
-      setAiReview({ source, original: previousVariants, suggestions: data.variants, platforms: requested, revision: revisionAtStart });
+      setAiReview({ generation: ++aiReviewGeneration.current, source, original: previousVariants, suggestions: data.variants, platforms: requested, revision: revisionAtStart });
       const preselected = selected.length ? requested.filter((id) => {
         const details = compareAiLiterals(source, data.variants?.[id] ?? "");
         return details.missing.length === 0 && details.added.length === 0;
@@ -840,9 +842,10 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     setVariants(next);
     const nextSelected = platformDisplayIds.filter((id) => selected.includes(id) || chosen.includes(id));
     setSelected(nextSelected);
-    if (!nextSelected.includes(active)) setActive(nextSelected[0]);
+    setActive(chosen[0]);
     setAiReview(null);
     setNotice({ kind: "success", text: `Applied ${chosen.length} selected ${chosen.length === 1 ? "version" : "versions"}. Check facts and tone before sharing.` });
+    requestAnimationFrame(() => document.getElementById("platform-draft")?.focus());
   }
 
   async function simulatePublish() {
@@ -1941,7 +1944,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
                       setNotice({ kind: "success", text: "AI draft added. Check the wording and facts before sharing." });
                       return true;
                     }} />
-                  {aiReview && <AIReviewPanel
+                  {aiReview && <AIReviewPanel key={aiReview.generation}
                     source={aiReview.source}
                     original={aiReview.original}
                     suggestions={aiReview.suggestions}
@@ -1959,7 +1962,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
                       if (details.missing.length || details.added.length) setAiApplyIds((current) => current.filter((item) => item !== id));
                     }}
                     onApply={applyAIReview}
-                    onDiscard={() => { setAiReview(null); setNotice(null); }}
+                    onDiscard={() => { setAiReview(null); setNotice(null); requestAnimationFrame(() => sourceInputRef.current?.focus()); }}
                   />}
                   {aiUndo && <button type="button" onClick={() => { editorRevision.current += 1; setVariants(aiUndo); setAiUndo(null); setAiReview(null); setNotice({ kind: "success", text: "Previous platform drafts restored." }); }} className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--accent-text)]"><RotateCcw size={13} /> Undo AI changes</button>}
                   <div className="mt-5 border-t border-[var(--line)] pt-5">
