@@ -115,7 +115,7 @@ type Receipt = {
   publishedAt: string;
   content: string;
 };
-type Notice = { kind: "success" | "error"; text: string } | null;
+type Notice = { kind: "success" | "error"; text: string; persistent?: boolean } | null;
 type EditorContent = {
   title: string;
   source: string;
@@ -706,7 +706,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   }, []);
 
   useEffect(() => {
-    if (!notice) return;
+    if (!notice || notice.persistent) return;
     const timer = window.setTimeout(() => setNotice(null), 8000);
     return () => window.clearTimeout(timer);
   }, [notice]);
@@ -1482,7 +1482,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       setSlotsRefreshEpoch((epoch) => epoch + 1);
       setNotice({ kind: "success", text: "Full backup restored. Saved drafts, weekly slots, brand plans, handoffs, results, images, and videos are available in this account." });
     } catch (error) {
-      setNotice({ kind: "error", text: restored
+      setNotice({ kind: "error", persistent: restored || restoreRequested && !confirmedRejection, text: restored
         ? "Full backup was restored, but the view could not refresh. Reload to see the saved work."
         : restoreRequested && !confirmedRejection
           ? "Restore result not confirmed. Reload and inspect your saved work before trying again."
@@ -1542,7 +1542,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     } catch (error) {
       const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
       const uncertain = status === undefined || typeof status === "number" && (status >= 500 || status >= 200 && status < 300);
-      setNotice({ kind: "error", text: importRequested && uncertain
+      setNotice({ kind: "error", persistent: importRequested && uncertain, text: importRequested && uncertain
         ? "Import result not confirmed. Reload and inspect your saved work before trying again."
         : error instanceof Error ? error.message : "Could not import backup." });
     } finally {
@@ -2025,7 +2025,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           </div>
           </div>}
 
-          {notice && <div role="status" className={`fixed bottom-4 left-4 right-4 z-50 flex items-start gap-2 rounded-xl border px-4 py-3 text-[13px] leading-5 shadow-xl sm:left-auto sm:max-w-md ${notice.kind === "success" ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]" : "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"}`}>{notice.kind === "success" ? <CheckCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}{notice.text}</div>}
+          {notice && <div role={notice.persistent ? "alert" : "status"} className={`fixed bottom-4 left-4 right-4 z-50 flex items-start gap-2 rounded-xl border px-4 py-3 text-[13px] leading-5 shadow-xl sm:left-auto sm:max-w-md ${notice.kind === "success" ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]" : "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"}`}>{notice.kind === "success" ? <CheckCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}<span className="min-w-0 flex-1">{notice.text}</span>{notice.persistent && <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notice" className="shrink-0 rounded p-0.5 hover:bg-black/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"><X size={15} aria-hidden="true" /></button>}</div>}
 
           {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable. Unsaved editor text may not survive a reload. Items already saved to your account remain in the database.</div>}
 

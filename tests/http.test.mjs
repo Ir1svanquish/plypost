@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { passwordHash } from "../src/lib/server/auth.ts";
 import { assistedContentSnapshot, assistedDeletionSnapshot } from "../src/lib/workspace.ts";
+import { inspectPendingDraftSave } from "../src/lib/draft-save-recovery.ts";
 import { randomUUID } from "node:crypto";
 import { isPortIsReserved } from "next/dist/lib/helpers/get-reserved-port.js";
 
@@ -282,6 +283,49 @@ test("text backup import rejects a stale workspace revision", async () => {
   const imported = await post("/api/workspace", { action: "import", backup, expectedRevision: current.workspaceRevision });
   assert.equal(imported.status, 200);
   assert.deepEqual((await imported.json()).drafts, []);
+});
+
+test("a discarded draft save response can be reconciled without a duplicate", async () => {
+  const stamp = new Date().toISOString();
+  const draft = { id: randomUUID(), title: "Response lost", source: "Keep this sentence", selected: ["bluesky"],
+    variants: {}, createdAt: stamp, updatedAt: stamp };
+  const pending = { snapshot: draft, expectedUpdatedAt: null, asCopy: false };
+  const response = await post("/api/workspace", { action: "save-draft", item: draft, expectedUpdatedAt: null });
+  assert.equal(response.status, 200);
+  await response.body.cancel();
+
+  const latest = await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json();
+  const stored = latest.drafts.find((item) => item.id === draft.id);
+  assert.equal(inspectPendingDraftSave(pending, stored), "committed");
+  assert.equal(latest.drafts.filter((item) => item.id === draft.id).length, 1);
+  assert.equal((await post("/api/workspace", { action: "save-draft", item: draft, expectedUpdatedAt: null })).status, 409);
+});
+
+test("a discarded full restore response leaves inspectable data and rejects an old retry", async () => {
+  const download = await fetch(`${baseUrl}/api/backup`, { headers: { Cookie: cookie } });
+  assert.equal(download.status, 200);
+  const archive = await download.json();
+  const before = await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json();
+  const stamp = new Date().toISOString();
+  const extra = { id: randomUUID(), title: "Added after export", source: "Do not keep this after restore",
+    selected: ["bluesky"], variants: {}, createdAt: stamp, updatedAt: stamp };
+  assert.equal((await post("/api/workspace", { action: "save-draft", item: extra, expectedUpdatedAt: null })).status, 200);
+  const reviewed = await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json();
+  assert.notEqual(reviewed.workspaceRevision, before.workspaceRevision);
+
+  const restore = () => fetch(`${baseUrl}/api/backup`, { method: "POST", headers: {
+    "Content-Type": "application/json", Origin: baseUrl, Cookie: cookie,
+    "X-Plypost-Workspace-Revision": reviewed.workspaceRevision,
+  }, body: JSON.stringify(archive) });
+  const response = await restore();
+  assert.equal(response.status, 200);
+  await response.body.cancel();
+
+  const latest = await (await fetch(`${baseUrl}/api/workspace`, { headers: { Cookie: cookie } })).json();
+  assert.equal(latest.drafts.some((item) => item.id === extra.id), false);
+  assert.equal(latest.drafts.length, archive.drafts.length);
+  assert.notEqual(latest.workspaceRevision, reviewed.workspaceRevision);
+  assert.equal((await restore()).status, 409);
 });
 
 test("rejects cross-origin changes and revokes logout session", async () => {
