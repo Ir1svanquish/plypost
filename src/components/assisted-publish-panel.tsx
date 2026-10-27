@@ -157,6 +157,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     if (statusFilter === "due") return assistedState(item, now) === "due";
     return assistedState(item, now) === statusFilter;
   });
+  const visibleItemIds = new Set(visibleItems.map((item) => item.id));
   const itemById = new Map(items.map((item) => [item.id, item]));
   const imageSelectionDirty = Object.entries(imageSelections).some(([id, selectedIds]) => {
     const defaultIds = sourceMediaIds.slice(0, imageLimitForDestination(id as AssistedDestinationId));
@@ -169,7 +170,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   const localDirty = imageSelectionDirty || (videoTouched && videoId !== initialVideoId) || imageEditDirty ||
     Object.entries(textEdits).some(([id, edit]) => itemById.get(id)?.status === "queued" && edit.value !== edit.expectedText) ||
     Object.entries(videoEdits).some(([id, edit]) => itemById.get(id)?.status === "queued" && edit.value !== edit.expectedVideoId) ||
-    Object.entries(descriptionDirtyIds).some(([id, dirty]) => dirty && itemById.get(id)?.status === "queued") ||
+    Object.entries(descriptionDirtyIds).some(([id, dirty]) => dirty && itemById.has(id)) ||
     Object.entries(postUrls).some(([id, url]) => {
       const item = itemById.get(id);
       return item?.status === "queued" ? Boolean(url) : item?.status === "posted" && Boolean(editingLinks[id]) && url !== (item.postUrl ?? "");
@@ -435,11 +436,11 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
       </div>}
       {items.length === 0 ? (
         <div className="flex flex-col items-center border-t border-[var(--line)] px-6 py-9 text-center"><Bell size={22} className="text-[var(--accent-text)]" /><p className="mt-2 text-[13px] font-semibold text-[var(--text-secondary)]">No assisted posts yet</p><p className="mt-1 text-[12px] text-[var(--text-soft)]">Add one above to start a manual publishing checklist.</p></div>
-      ) : visibleItems.length === 0 ? (
-        <div className="border-t border-[var(--line)] px-6 py-8 text-center sm:px-7"><p className="text-[13px] font-semibold text-[var(--text-secondary)]">No posts in this view</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">Choose another status or platform to see more.</p></div>
       ) : (
-        <div className="divide-y divide-[var(--line)] border-t border-[var(--line)]">
-          {visibleItems.map((item) => {
+        <>
+        {visibleItems.length === 0 && <div className="border-t border-[var(--line)] px-6 py-8 text-center sm:px-7"><p className="text-[13px] font-semibold text-[var(--text-secondary)]">No posts in this view</p><p className="mt-1 text-[12px] text-[var(--text-muted)]">Choose another status or platform to see more.</p></div>}
+        <div hidden={visibleItems.length === 0} className="divide-y divide-[var(--line)] border-t border-[var(--line)]">
+          {items.map((item) => {
             const state = assistedState(item, now);
             const reminder = hasManualReminder(item);
             const editingReminder = reminderEdit?.itemId === item.id ? reminderEdit : null;
@@ -484,7 +485,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
             const imageEditChanged = Boolean(editingImages && (editingImages.ids.length !== editingImages.expectedIds.length ||
               editingImages.ids.some((id, index) => id !== editingImages.expectedIds[index] ||
                 (editingImages.descriptions[id] ?? "").trim() !== editingImages.expectedAlt[index])));
-            return <article key={item.id} id={`assisted-item-${item.id}`} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
+            return <article key={item.id} id={`assisted-item-${item.id}`} hidden={!visibleItemIds.has(item.id)} tabIndex={-1} className={`scroll-mt-24 px-6 py-4 outline-none sm:px-7 ${focusItemId === item.id ? "bg-[var(--accent-soft)] ring-2 ring-inset ring-[var(--accent-border)]" : ""}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[14px] font-bold text-[var(--text)]">{target.name}</h3><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "due" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : state === "posted" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>{state === "due" ? "Due now · publish manually" : state === "posted" ? "Marked posted by you" : state === "unscheduled" ? "No reminder" : "Upcoming"}</span></div><p className="mt-1 text-[12px] text-[var(--text-muted)]">{reminder ? formatLocalDateTime(item.scheduledFor) : "Publish when you are ready"}{item.status === "queued" && <> · <button type="button" onClick={() => setReminderEdit({ itemId: item.id, value: reminder ? localDateTimeValue(new Date(item.scheduledFor)) : "", error: "" })} disabled={busy || reminderSavingId !== null} className="font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{reminder ? "Change reminder" : "Add reminder"}</button></>}</p><p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text-secondary)]">{item.text}</p>{item.status === "queued" && missingMedia && <p className="mt-1 text-[11px] font-semibold text-[var(--warning)]">{missingMedia === "video" ? "No video attached here. Bring one when posting." : "No photo or video attached here. Bring one when posting."}</p>}{item.sourceDraftId && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Prepared from saved draft{sourceDraft && <> · <button type="button" onClick={() => onOpenSourceDraft(sourceDraft)} className="font-semibold text-[var(--accent-text)] underline underline-offset-2">Open draft</button></>}</p>}{item.contentEditedAt && <p className="mt-1 text-[11px] text-[var(--text-soft)]">Handoff text revised {formatLocalDateTime(item.contentEditedAt)}</p>}</div>
                 <button type="button" aria-label={`Remove ${target.name} handoff: ${accessiblePostPreview.slice(0, 80)}${accessiblePostPreview.length > 80 ? "…" : ""}`} onClick={() => onRemove(item)} disabled={busy} className="rounded-lg p-1.5 text-[var(--text-soft)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><Trash2 size={14} /></button>
@@ -620,6 +621,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
             </article>;
           })}
         </div>
+        </>
       )}
     </section>
   );
