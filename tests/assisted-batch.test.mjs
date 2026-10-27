@@ -148,6 +148,19 @@ test("one saved clip can be reused across a batch without allowing foreign or ch
   assert.equal(listWorkspace(owner).assisted.length, before);
 });
 
+test("each reviewed handoff can omit a draft video without changing the other platform", () => {
+  const bytes = readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4"));
+  const clip = createVideo(owner, { name: "mixed-media.mp4", type: "video/mp4", bytes }).video;
+  const saved = saveDraft(owner, { ...draft("Two platform choices"), videoId: clip.id });
+  const [sky, linked] = handoffs();
+  const prepared = prepareAssistedBatch(owner, saved.id, randomUUID(), [
+    { ...sky, videoId: clip.id }, linked,
+  ], false, saved.updatedAt);
+  assert.equal(prepared.find((item) => item.destination === "bluesky").videoId, clip.id);
+  assert.equal(prepared.find((item) => item.destination === "linkedin").videoId, undefined);
+  assert.equal(listWorkspace(owner).drafts.find((item) => item.id === saved.id).videoId, clip.id);
+});
+
 test("reviewed handoffs cover every assisted destination without changing the saved draft", () => {
   const saved = saveDraft(owner, draft("Source for manual posts", ["bluesky", "mastodon", "linkedin", "threads"], { bluesky: "Saved Bluesky" }));
   const limited = saveDraft(owner, draft("Limited", ["bluesky", "linkedin"], {}));

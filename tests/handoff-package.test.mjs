@@ -122,3 +122,19 @@ test("video handoff ZIP contains exact saved clip and caption", async () => {
   assert.equal(strFromU8(files["caption.txt"]), "Watch this clip\n");
   assert.match(strFromU8(files["handoff.txt"]), /Video: video\/clip\.mp4/);
 });
+
+test("mixed media handoff ZIP includes both files and a platform compatibility reminder", async () => {
+  const imageBytes = await sharp({ create: { width: 3, height: 2, channels: 3, background: "#2244aa" } }).png().toBuffer();
+  const image = (await createMedia(owner, { name: "cover.png", type: "image/png", bytes: imageBytes })).media;
+  const videoBytes = readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4"));
+  const video = createVideo(owner, { name: "clip.mp4", type: "video/mp4", bytes: videoBytes }).video;
+  const now = new Date().toISOString();
+  const saved = addAssisted(owner, { id: randomUUID(), title: "Mixed", destination: "linkedin", text: "Caption",
+    mediaIds: [image.id], mediaAlt: ["Cover"], videoId: video.id,
+    scheduledFor: now, createdAt: now, status: "queued" });
+  const files = unzipSync(buildHandoffPackage(owner, saved.id).bytes);
+  assert.deepEqual(Object.keys(files).sort(), ["caption.txt", "handoff.txt", "images/01.png", "video/clip.mp4"]);
+  assert.deepEqual(Buffer.from(files["images/01.png"]), getMedia(owner, image.id).bytes);
+  assert.deepEqual(Buffer.from(files["video/clip.mp4"]), videoBytes);
+  assert.match(strFromU8(files["handoff.txt"]), /Check whether this platform accepts both in one post/);
+});

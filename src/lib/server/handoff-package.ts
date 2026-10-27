@@ -68,6 +68,9 @@ function prepareHandoffPackage(userId: string, id: string): { files: PackageFile
     } });
     notes.push("", `Video: ${path}`, `Original name: ${video.original_name}`);
   }
+  if (item.mediaIds?.length && item.videoId) {
+    notes.push("", "This package contains photos and a video. Check whether this platform accepts both in one post; use only the supported media when publishing.");
+  }
   const missingMedia = missingHandoffMedia(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId));
   if (missingMedia === "video") notes.push("", "No video is attached to this handoff. Bring your video separately.");
   else if (missingMedia) notes.push("", "No photo or video is attached to this handoff. Bring one separately.");
