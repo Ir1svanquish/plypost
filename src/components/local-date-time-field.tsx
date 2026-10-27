@@ -8,6 +8,7 @@ type Props = {
   value: string;
   minTimestamp: number;
   optional?: boolean;
+  readOnly?: boolean;
   onChange: (value: string) => void;
 };
 
@@ -50,7 +51,7 @@ export function LocalDateField({ id, label, value, onChange }: { id: string; lab
   </div>;
 }
 
-export function LocalDateTimeField({ id, label, value, minTimestamp, optional = false, onChange }: Props) {
+export function LocalDateTimeField({ id, label, value, minTimestamp, optional = false, readOnly = false, onChange }: Props) {
   const [date = "", time = ""] = value ? value.split("T", 2) : [];
   const invalid = Boolean(value) && !isValidLocalDateTime(value, minTimestamp);
   const hintId = `${id}-hint`;
@@ -64,11 +65,11 @@ export function LocalDateTimeField({ id, label, value, minTimestamp, optional = 
     <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] gap-2">
       <label className="min-w-0">
         <span className="mb-1 block text-[11px] font-semibold text-[var(--text-muted)]">Date</span>
-        <input id={`${id}-date`} type="text" inputMode="numeric" autoComplete="off" maxLength={10} placeholder="YYYY-MM-DD" value={date} aria-invalid={invalid} aria-describedby={hintId} onChange={(event) => update(formatTypedDigits(event.target.value, [4, 2, 2]), time)} className="w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
+        <input id={`${id}-date`} type="text" inputMode="numeric" autoComplete="off" maxLength={10} placeholder="YYYY-MM-DD" value={date} readOnly={readOnly} aria-invalid={invalid} aria-describedby={hintId} onChange={(event) => update(formatTypedDigits(event.target.value, [4, 2, 2]), time)} className="w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
       </label>
       <label className="min-w-0">
         <span className="mb-1 block text-[11px] font-semibold text-[var(--text-muted)]">Time (24h)</span>
-        <input id={`${id}-time`} type="text" inputMode="numeric" autoComplete="off" maxLength={5} placeholder="HH:mm" value={time} aria-invalid={invalid} aria-describedby={hintId} onChange={(event) => update(date, formatTypedDigits(event.target.value, [2, 2]))} className="w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
+        <input id={`${id}-time`} type="text" inputMode="numeric" autoComplete="off" maxLength={5} placeholder="HH:mm" value={time} readOnly={readOnly} aria-invalid={invalid} aria-describedby={hintId} onChange={(event) => update(date, formatTypedDigits(event.target.value, [2, 2]))} className="w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
       </label>
     </div>
     <p id={hintId} aria-live="polite" className={`mt-1.5 text-[11px] leading-4 ${invalid ? "text-[var(--danger)]" : "text-[var(--text-soft)]"}`}>

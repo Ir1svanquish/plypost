@@ -27,6 +27,7 @@ type ImageAttachmentPickerProps = {
   onDescriptionChange: (id: string, description: string) => void;
   onBusyChange: (busy: boolean) => void;
   disabled?: boolean;
+  readOnly?: boolean;
   context?: "draft" | "handoff";
 };
 
@@ -64,7 +65,7 @@ async function responseError(response: Response, fallback: string) {
  * A private image library selector. Selection is controlled by its parent;
  * uploading an asset alone does not publish or attach it to saved work.
  */
-export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onDescriptionChange, onBusyChange, disabled = false, context = "draft" }: ImageAttachmentPickerProps) {
+export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onDescriptionChange, onBusyChange, disabled = false, readOnly = false, context = "draft" }: ImageAttachmentPickerProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef(selectedIds);
@@ -248,7 +249,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
           </div>
         </div>
         <label htmlFor={`${inputId}-${item.id}-alt`} className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Image description <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
-        <input id={`${inputId}-${item.id}-alt`} type="text" value={descriptions[item.id] ?? ""} onChange={(event) => onDescriptionChange(item.id, Array.from(event.target.value).filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127).join(""))} disabled={controlsBusy} maxLength={MAX_IMAGE_ALT_CHARS} placeholder="Describe what this image shows" className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-2.5 py-2 text-[12px] text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
+        <input id={`${inputId}-${item.id}-alt`} type="text" value={descriptions[item.id] ?? ""} onChange={(event) => onDescriptionChange(item.id, Array.from(event.target.value).filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127).join(""))} disabled={controlsBusy && !readOnly} readOnly={readOnly} maxLength={MAX_IMAGE_ALT_CHARS} placeholder="Describe what this image shows" className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-2.5 py-2 text-[12px] text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
       </li>)}</ul>}
       {selectedIds.length === 0 && !loading && <p className="mt-3 text-[12px] text-[var(--text-soft)]">No images selected for this {subject}.</p>}
 
