@@ -31,6 +31,14 @@ export function ThemeSwitcher() {
   useEffect(() => { setPreference(savedPreference()); }, []);
 
   useEffect(() => {
+    const syncPreference = (event: StorageEvent) => {
+      if (event.key === storageKey || event.key === null) setPreference(savedPreference());
+    };
+    window.addEventListener("storage", syncPreference);
+    return () => window.removeEventListener("storage", syncPreference);
+  }, []);
+
+  useEffect(() => {
     if (preference === null) return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
