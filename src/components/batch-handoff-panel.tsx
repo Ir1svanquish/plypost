@@ -207,6 +207,24 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     finally { setSlotBusy(false); }
   }
 
+  function applySuggestedSlots() {
+    if (!slotPreview) return;
+    setSlotTimes(Object.fromEntries(slotPreview.suggestions.map((item) => [item.platform, item.scheduledFor])));
+    setSlotApplied(true);
+    requestAnimationFrame(() => document.getElementById("batch-slot-applied-status")?.focus());
+  }
+
+  function useCustomReminderTimes() {
+    const destination = activeDestination && isPlatformId(activeDestination) ? activeDestination : selectedSlotPlatforms[0];
+    setSlotApplied(false);
+    setSlotTimes({});
+    setSlotPreview(null);
+    if (destination) {
+      setFocusedDestination(destination);
+      requestAnimationFrame(() => document.getElementById(`batch-reminder-${destination}-date`)?.focus());
+    }
+  }
+
   async function prepare() {
     if (submittingRef.current || !canPrepare) return;
     if (!attempted && destinations.some((id) => slotApplied && isPlatformId(id)
@@ -290,10 +308,10 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           </div>
         </div>
       </details>
-      {!attempted && <details id="batch-weekly-slots" className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Weekly posting slots · optional{slotApplied ? " · applied" : ""}</summary><div className="mt-3 border-t border-[var(--line)] pt-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Slots apply to the four draft platforms. Other platforms can use custom reminder times.</p>
+      {!attempted && <details id="batch-weekly-slots" className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Weekly posting slots · optional{slotApplied ? " · applied" : ""}</summary><div className="mt-3 border-t border-[var(--line)] pt-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Suggestions start at least 10 minutes from now. Slots apply to the four draft platforms; other platforms can use custom reminder times.</p>
         {slotError && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{slotError}</p>}
-        {slotPreview && !slotApplied && <div className="mt-3 space-y-2"><p className="text-[11px] font-bold text-[var(--text-secondary)]">Suggested in {slotPreview.timeZone}</p>{slotPreview.suggestions.map((item) => <p key={item.platform} className="text-[12px] text-[var(--text-secondary)]">{platforms[item.platform].name}: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(item.scheduledFor))}{item.skippedConflicts ? ` · ${item.skippedConflicts} occupied ${item.skippedConflicts === 1 ? "slot" : "slots"} skipped` : ""}</p>)}<button type="button" onClick={() => { setSlotTimes(Object.fromEntries(slotPreview.suggestions.map((item) => [item.platform, item.scheduledFor]))); setSlotApplied(true); }} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]">Use these reminder times</button></div>}
-        {slotApplied && <div className="mt-3 flex flex-wrap items-center gap-3"><p role="status" className="text-[12px] font-semibold text-[var(--positive)]">Suggested times added for review below.</p><button id="batch-custom-reminders" type="button" onClick={() => { setSlotApplied(false); setSlotTimes({}); setSlotPreview(null); }} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use custom reminder times</button></div>}
+        {slotPreview && !slotApplied && <div className="mt-3 space-y-2"><p className="text-[11px] font-bold text-[var(--text-secondary)]">Suggested in {slotPreview.timeZone}</p>{slotPreview.suggestions.map((item) => <p key={item.platform} className="text-[12px] text-[var(--text-secondary)]">{platforms[item.platform].name}: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(item.scheduledFor))}{item.skippedConflicts ? ` · ${item.skippedConflicts} occupied ${item.skippedConflicts === 1 ? "slot" : "slots"} skipped` : ""}</p>)}<button type="button" onClick={applySuggestedSlots} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]">Use these reminder times</button></div>}
+        {slotApplied && <div className="mt-3 flex flex-wrap items-center gap-3"><p id="batch-slot-applied-status" tabIndex={-1} role="status" className="rounded text-[12px] font-semibold text-[var(--positive)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">Suggested times added for review below.</p><button id="batch-custom-reminders" type="button" onClick={useCustomReminderTimes} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use custom reminder times</button></div>}
       </div></details>}
       {destinations.length > 0 ? <div>
         <p className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Review each post · {destinations.length} selected</p>
@@ -350,7 +368,10 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
       {!attempted && (invalidText.length > 0 || invalidReminders.length > 0) && <div role="alert" className="rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]">
         <p className="font-semibold">Fix these posts before confirming:</p>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-          {destinations.filter((id) => invalidText.includes(id) || invalidReminders.includes(id)).map((id) => <button key={id} type="button" onClick={() => focusDestination(id, invalidText.includes(id) ? "text" : "reminder")} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name} · {invalidText.includes(id) ? "text" : ""}{invalidText.includes(id) && invalidReminders.includes(id) ? " and " : ""}{invalidReminders.includes(id) ? "reminder" : ""}</button>)}
+          {destinations.filter((id) => invalidText.includes(id) || invalidReminders.includes(id)).map((id) => <span key={id} className="inline-flex flex-wrap gap-2">
+            {invalidText.includes(id) && <button type="button" onClick={() => focusDestination(id, "text")} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name} · text</button>}
+            {invalidReminders.includes(id) && <button type="button" onClick={() => focusDestination(id, "reminder")} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name} · reminder</button>}
+          </span>)}
         </div>
       </div>}
       {!attempted && mediaGaps.length > 0 && <div role="status" className="rounded-lg bg-[var(--warning-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--warning)]">
