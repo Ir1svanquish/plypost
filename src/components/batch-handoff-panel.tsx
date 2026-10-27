@@ -143,9 +143,15 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     closeReview();
   }
 
-  function focusDestination(id: AssistedDestinationId) {
+  function focusDestination(id: AssistedDestinationId, field: "text" | "reminder" = "text") {
     setFocusedDestination(id);
-    requestAnimationFrame(() => document.getElementById(`batch-text-${id}`)?.focus());
+    if (field === "reminder" && slotApplied && isPlatformId(id)) {
+      const slots = document.getElementById("batch-weekly-slots") as HTMLDetailsElement | null;
+      if (slots) slots.open = true;
+      requestAnimationFrame(() => document.getElementById("batch-custom-reminders")?.focus());
+      return;
+    }
+    requestAnimationFrame(() => document.getElementById(field === "reminder" ? `batch-reminder-${id}-date` : `batch-text-${id}`)?.focus());
   }
 
   function prepareAnother() {
@@ -284,10 +290,10 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           </div>
         </div>
       </details>
-      {!attempted && <details className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Weekly posting slots · optional{slotApplied ? " · applied" : ""}</summary><div className="mt-3 border-t border-[var(--line)] pt-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Slots apply to the four draft platforms. Other platforms can use custom reminder times.</p>
+      {!attempted && <details id="batch-weekly-slots" className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Weekly posting slots · optional{slotApplied ? " · applied" : ""}</summary><div className="mt-3 border-t border-[var(--line)] pt-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Slots apply to the four draft platforms. Other platforms can use custom reminder times.</p>
         {slotError && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{slotError}</p>}
         {slotPreview && !slotApplied && <div className="mt-3 space-y-2"><p className="text-[11px] font-bold text-[var(--text-secondary)]">Suggested in {slotPreview.timeZone}</p>{slotPreview.suggestions.map((item) => <p key={item.platform} className="text-[12px] text-[var(--text-secondary)]">{platforms[item.platform].name}: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(item.scheduledFor))}{item.skippedConflicts ? ` · ${item.skippedConflicts} occupied ${item.skippedConflicts === 1 ? "slot" : "slots"} skipped` : ""}</p>)}<button type="button" onClick={() => { setSlotTimes(Object.fromEntries(slotPreview.suggestions.map((item) => [item.platform, item.scheduledFor]))); setSlotApplied(true); }} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]">Use these reminder times</button></div>}
-        {slotApplied && <div className="mt-3 flex flex-wrap items-center gap-3"><p role="status" className="text-[12px] font-semibold text-[var(--positive)]">Suggested times added for review below.</p><button type="button" onClick={() => { setSlotApplied(false); setSlotTimes({}); setSlotPreview(null); }} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use custom reminder times</button></div>}
+        {slotApplied && <div className="mt-3 flex flex-wrap items-center gap-3"><p role="status" className="text-[12px] font-semibold text-[var(--positive)]">Suggested times added for review below.</p><button id="batch-custom-reminders" type="button" onClick={() => { setSlotApplied(false); setSlotTimes({}); setSlotPreview(null); }} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use custom reminder times</button></div>}
       </div></details>}
       {destinations.length > 0 ? <div>
         <p className="mb-2 text-[12px] font-bold text-[var(--text-secondary)]">Review each post · {destinations.length} selected</p>
@@ -313,9 +319,9 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
         const preflightStale = Boolean(preflight && (preflight.source !== draft.source || preflight.text !== text));
         return <div key={id} id="batch-active-editor" className="min-w-0 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4">
           <label htmlFor={`batch-text-${id}`} className="text-[13px] font-bold text-[var(--text)]">{assistedDestinations[id].name} text</label>
-          <textarea id={`batch-text-${id}`} value={text} onChange={(event) => setTexts((current) => ({ ...current, [id]: event.target.value }))} disabled={attempted} className="mt-2 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-70" />
+          <textarea id={`batch-text-${id}`} value={text} onChange={(event) => setTexts((current) => ({ ...current, [id]: event.target.value }))} disabled={attempted} aria-invalid={!valid} aria-describedby={`batch-text-${id}-validation`} className="mt-2 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-70" />
           {!isPlatformId(id) && isManualAiDestination(id) && <AIHandoffAssistant destination={id} source={text} disabled={attempted || editorDirty || busy || mediaBusy} onApply={(next) => setTexts((current) => ({ ...current, [id]: next }))} />}
-          <p className={`mt-1 text-[11px] ${valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}`}>{check ? `${check.count} / ${check.limit} ${id === "bluesky" ? "graphemes" : "characters"}` : `${characterCount(text)} / 5,000 characters`}{check?.byteCount !== undefined ? ` · ${check.byteCount} / ${check.byteLimit} UTF-8 bytes` : ""}{!valid ? " · Edit this text before confirming" : ""}</p>
+          <p id={`batch-text-${id}-validation`} className={`mt-1 text-[11px] ${valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}`}>{check ? `${check.count} / ${check.limit} ${id === "bluesky" ? "graphemes" : "characters"}` : `${characterCount(text)} / 5,000 characters`}{check?.byteCount !== undefined ? ` · ${check.byteCount} / ${check.byteLimit} UTF-8 bytes` : ""}{!valid ? " · Edit this text before confirming" : ""}</p>
           {draft.source.trim() && <AiLiteralNotice source={draft.source} suggestion={text} />}
           {!isPlatformId(id) && <p className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">{assistedDestinations[id].hint}{missingMedia === "video" ? " No video is attached here; bring one when posting." : missingMedia ? " No photo or video is attached here; bring one when posting." : ""}</p>}
           <PlatformImageSelection destination={id} sourceIds={draft.mediaIds ?? []} sourceAlt={draft.mediaAlt} selectedIds={imagesFor(id)} onChange={(ids) => setImageSelections((current) => ({ ...current, [id]: ids }))} disabled={attempted || editorDirty || busy || mediaBusy} />
@@ -344,7 +350,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
       {!attempted && (invalidText.length > 0 || invalidReminders.length > 0) && <div role="alert" className="rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]">
         <p className="font-semibold">Fix these posts before confirming:</p>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-          {destinations.filter((id) => invalidText.includes(id) || invalidReminders.includes(id)).map((id) => <button key={id} type="button" onClick={() => focusDestination(id)} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name} · {invalidText.includes(id) ? "text" : ""}{invalidText.includes(id) && invalidReminders.includes(id) ? " and " : ""}{invalidReminders.includes(id) ? "reminder" : ""}</button>)}
+          {destinations.filter((id) => invalidText.includes(id) || invalidReminders.includes(id)).map((id) => <button key={id} type="button" onClick={() => focusDestination(id, invalidText.includes(id) ? "text" : "reminder")} className="font-semibold underline underline-offset-2">{assistedDestinations[id].name} · {invalidText.includes(id) ? "text" : ""}{invalidText.includes(id) && invalidReminders.includes(id) ? " and " : ""}{invalidReminders.includes(id) ? "reminder" : ""}</button>)}
         </div>
       </div>}
       {!attempted && mediaGaps.length > 0 && <div role="status" className="rounded-lg bg-[var(--warning-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--warning)]">
