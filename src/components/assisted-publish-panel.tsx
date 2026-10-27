@@ -51,6 +51,7 @@ type Props = {
   onEnableNotifications: () => void;
   onEditImages: () => void;
   onOpenSourceDraft: (draft: SavedDraft) => void;
+  onDirtyChange: (dirty: boolean) => void;
   mastodonInstance?: string;
   focusItemId?: string;
   startExpanded?: boolean;
@@ -102,7 +103,7 @@ function safeMastodonOrigin(instance?: string): string | null {
   } catch { return null; }
 }
 
-export function AssistedPublishPanel({ items, drafts, active, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, sourceMediaIds, sourceMediaAlt, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, startWithVideoGroup = false }: Props) {
+export function AssistedPublishPanel({ items, drafts, active, destination, text, customText, time, now, workspaceReady, busy, mediaBusy, sourceMediaIds, sourceMediaAlt, initialVideoId = null, notificationPermission, onDestinationChange, onTextChange, onResetText, onTimeChange, onDirtyChange, onAdd, onSetReminder, onCopy, onMarkPosted, onUpdateText, onUpdateVideo, onUpdateImages, onUpdateDescriptions, onUpdatePostUrl, onUpdateOutcome, onUndo, onRemove, onEnableNotifications, onEditImages, onOpenSourceDraft, mastodonInstance, focusItemId, startExpanded = false, startWithVideoGroup = false }: Props) {
   const [postUrls, setPostUrls] = useState<Record<string, string>>({});
   const [textEdits, setTextEdits] = useState<Record<string, { expectedText: string; value: string }>>({});
   const [textSavingId, setTextSavingId] = useState<string | null>(null);
@@ -128,7 +129,9 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   const [showVideoDestinations, setShowVideoDestinations] = useState(() => startWithVideoGroup || assistedVideoDisplayIds.some((id) => id === destination));
   const previousDestination = useRef(destination);
   const [videoId, setVideoId] = useState<string | null>(initialVideoId);
+  const [videoTouched, setVideoTouched] = useState(false);
   const [imageSelections, setImageSelections] = useState<Partial<Record<AssistedDestinationId, string[]>>>({});
+  const [descriptionDirtyIds, setDescriptionDirtyIds] = useState<Record<string, boolean>>({});
   const [videoBusy, setVideoBusy] = useState(false);
   const handledFocusRef = useRef<string | null>(null);
   const futureReminderCount = upcomingManualReminders(items, now).length;
@@ -154,6 +157,32 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     if (statusFilter === "due") return assistedState(item, now) === "due";
     return assistedState(item, now) === statusFilter;
   });
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const imageSelectionDirty = Object.entries(imageSelections).some(([id, selectedIds]) => {
+    const defaultIds = sourceMediaIds.slice(0, imageLimitForDestination(id as AssistedDestinationId));
+    return selectedIds?.length !== defaultIds.length || selectedIds.some((imageId, index) => imageId !== defaultIds[index]);
+  });
+  const imageEditDirty = Boolean(imageEdit && itemById.get(imageEdit.itemId)?.status === "queued" &&
+    (imageEdit.ids.length !== imageEdit.expectedIds.length ||
+    imageEdit.ids.some((id, index) => id !== imageEdit.expectedIds[index] ||
+      (imageEdit.descriptions[id] ?? "").trim() !== imageEdit.expectedAlt[index])));
+  const localDirty = imageSelectionDirty || (videoTouched && videoId !== initialVideoId) || imageEditDirty ||
+    Object.entries(textEdits).some(([id, edit]) => itemById.get(id)?.status === "queued" && edit.value !== edit.expectedText) ||
+    Object.entries(videoEdits).some(([id, edit]) => itemById.get(id)?.status === "queued" && edit.value !== edit.expectedVideoId) ||
+    Object.entries(descriptionDirtyIds).some(([id, dirty]) => dirty && itemById.get(id)?.status === "queued") ||
+    Object.entries(postUrls).some(([id, url]) => {
+      const item = itemById.get(id);
+      return item?.status === "queued" ? Boolean(url) : item?.status === "posted" && Boolean(editingLinks[id]) && url !== (item.postUrl ?? "");
+    }) ||
+    Object.entries(outcomeDrafts).some(([id, form]) => {
+      const item = itemById.get(id);
+      return item?.status === "posted" && Boolean(editingOutcomes[id]) &&
+        (Object.keys(form) as (keyof OutcomeForm)[]).some((key) => form[key] !== outcomeForm(item)[key]);
+    }) ||
+    Boolean(reminderEdit && itemById.get(reminderEdit.itemId)?.status === "queued" &&
+      reminderEdit.value !== (hasManualReminder(itemById.get(reminderEdit.itemId)!) ?
+        localDateTimeValue(new Date(itemById.get(reminderEdit.itemId)!.scheduledFor)) : ""));
+  useEffect(() => { onDirtyChange(localDirty); }, [localDirty, onDirtyChange]);
   const hasFocusedItem = Boolean(focusItemId && visibleItems.some((item) => item.id === focusItemId));
   const mastodonOrigin = safeMastodonOrigin(mastodonInstance);
 
@@ -167,6 +196,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     if (!active || !startExpanded) return;
     setComposerOpen(true);
     setVideoId(initialVideoId);
+    setVideoTouched(false);
     setImageSelections({});
   }, [active, startExpanded, initialVideoId]);
 
@@ -324,7 +354,10 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   async function addPost() {
     setStatusFilter("to-post");
     setDestinationFilter("all");
-    if (await onAdd(videoId ?? undefined, selectedMediaIds)) setImageSelections({});
+    if (await onAdd(videoId ?? undefined, selectedMediaIds)) {
+      setImageSelections({});
+      setVideoTouched(false);
+    }
   }
 
   async function markPosted(post: AssistedPost, postUrl?: string) {
@@ -373,7 +406,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
           <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint} Saved images are available for manual download; upload them on the platform yourself.</p>
           <PlatformImageSelection destination={destination} sourceIds={sourceMediaIds} sourceAlt={sourceMediaAlt} selectedIds={selectedMediaIds} onChange={(ids) => setImageSelections((current) => ({ ...current, [destination]: ids }))} disabled={busy || mediaBusy} />
           <button type="button" onClick={onEditImages} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit the image pool in Create</button>
-          <details key={`video-${destination}`} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={setVideoId} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
+          <details key={`video-${destination}`} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { setVideoId(id); setVideoTouched(true); }} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
           {selected.needsMedia && <p className={`mt-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${missingComposerMedia ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{missingComposerMedia === "video" ? "No video attached here. Attach one or bring a video when you publish on YouTube." : missingComposerMedia ? "No photo or video attached here. Bring one when you publish." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
             <p className={validation.valid ? "text-[var(--text-muted)]" : "font-semibold text-[var(--danger)]"}>{validation.count} / {validation.limit} {destination === "bluesky" ? "graphemes" : "characters"}{validation.byteCount !== undefined ? ` · ${validation.byteCount} / ${validation.byteLimit} UTF-8 bytes` : ""}</p>
@@ -479,7 +512,13 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               </div>}
               {item.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {item.placeLabel} <span className="text-[var(--text-soft)]">(add on the platform yourself)</span></p>}
               {imageLimitWarning(item.destination, item.mediaIds?.length ?? 0) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(item.destination, item.mediaIds?.length ?? 0)}</p>}
-              {!editingImages && <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} />}
+              {!editingImages && <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} onDirtyChange={(dirty) => setDescriptionDirtyIds((current) => {
+                if (Boolean(current[item.id]) === dirty) return current;
+                const next = { ...current };
+                if (dirty) next[item.id] = true;
+                else delete next[item.id];
+                return next;
+              })} />}
               {item.status === "queued" && !editingImages && <button type="button" onClick={() => startImageEdit(item)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedImageIds.length ? "Change images for this handoff" : "Attach images to this handoff"}</button>}
               {item.status === "queued" && editingImages && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
                 <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Images for {target.name}</p>

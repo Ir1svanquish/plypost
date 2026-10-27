@@ -1,15 +1,16 @@
 "use client";
 
 import Image from "next/image";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, Copy, Download, Images } from "lucide-react";
 import { MAX_IMAGE_ALT_CHARS } from "@/lib/workspace";
 
 /** Review and retrieve the images attached to a saved plan or assisted item. */
-export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, variant = "handoff" }: {
+export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, onDirtyChange, variant = "handoff" }: {
   mediaIds?: readonly string[];
   mediaAlt?: readonly string[];
   onUpdateDescriptions?: (expectedIds: string[], expectedAlt: string[], next: string[]) => Promise<boolean>;
+  onDirtyChange?: (dirty: boolean) => void;
   variant?: "handoff" | "review";
 }) {
   const inputPrefix = useId();
@@ -21,14 +22,20 @@ export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, variant
   const [expected, setExpected] = useState<string[]>([]);
   const [draft, setDraft] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  useEffect(() => { onDirtyChangeRef.current = onDirtyChange; }, [onDirtyChange]);
   const currentIds = mediaIds ?? [];
-  if (!currentIds.length && !editing) return null;
   const saved = currentIds.map((_, index) => mediaAlt?.[index] ?? "");
   const unavailable = editing && !onUpdateDescriptions;
   const stale = editing && (currentIds.length !== expectedIds.length ||
     currentIds.some((id, index) => id !== expectedIds[index]) ||
     saved.some((description, index) => description !== expected[index]));
   const changed = draft.some((description, index) => description.trim() !== expected[index]);
+  useEffect(() => {
+    onDirtyChangeRef.current?.(editing && changed);
+    return () => { onDirtyChangeRef.current?.(false); };
+  }, [editing, changed]);
+  if (!currentIds.length && !editing) return null;
   const displayedIds = editing ? expectedIds : currentIds;
   const displayedAlt = editing ? expected : saved;
 

@@ -234,6 +234,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   const [strategyRefreshEpoch, setStrategyRefreshEpoch] = useState(0);
   const [slotsRefreshEpoch, setSlotsRefreshEpoch] = useState(0);
   const [strategyDirty, setStrategyDirty] = useState(false);
+  const [assistedPanelDirty, setAssistedPanelDirty] = useState(false);
   const backupMutation = useRef(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
   const restoringBackupRef = useRef(false);
@@ -290,6 +291,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   currentDraftIdRef.current = currentDraftId;
   const canSaveEditor = hasDraftContent(editorContent) && (!plannedDate || validCalendarDate(plannedDate));
   const editorDirty = hasUnsavedEditorChanges(editorContent, currentDraftId, drafts, editorOrigin);
+  const assistedDirty = assistedPanelDirty || Boolean(assistTime) || Object.keys(assistOverrides).length > 0;
   const currentSavedDraft = currentDraftId ? drafts.find((draft) => draft.id === currentDraftId) ?? null : null;
   const needsDraftRecovery = !pendingDraftSave && (draftConflict || Boolean(currentDraftId && workspaceReady &&
     currentSavedDraft?.updatedAt !== currentDraftVersion));
@@ -312,14 +314,14 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   }, [legacyReviewOpen]);
 
   useEffect(() => {
-    if (!hydrated || !editorDirty) return;
+    if (!hydrated || !(editorDirty || strategyDirty || assistedDirty || pendingDraftSave)) return;
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warnBeforeLeaving);
     return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
-  }, [editorDirty, hydrated]);
+  }, [editorDirty, strategyDirty, assistedDirty, pendingDraftSave, hydrated]);
 
   useEffect(() => {
     const syncView = () => {
@@ -1373,7 +1375,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     try {
       const latest = await refreshWorkspace();
       if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
-      const unsavedWarning = `${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Your unsaved brand profile or AI idea edits will be lost." : ""}`;
+      const unsavedWarning = `${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Your unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Your unsaved manual posting edits will be lost." : ""}`;
       if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedWarning} This cannot be undone.`)) return;
       restoringBackupRef.current = true;
       setRestoringBackup(true);
@@ -1438,7 +1440,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       }
       const latest = await refreshWorkspace();
       if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
-      if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`)) return;
+      if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Unsaved manual posting edits will be lost." : ""}`)) return;
       await changeWorkspace("import", { backup: raw, expectedRevision: latest.workspaceRevision });
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
@@ -1572,6 +1574,11 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     if (await runAssistedAction("add-assisted", { item }, `Added ${assistedDestinations[assistDestination].name} to your assisted publishing list. You will publish it yourself.`)) {
       setNow(Date.now());
       setAssistTime("");
+      setAssistOverrides((current) => {
+        const next = { ...current };
+        delete next[assistDestination];
+        return next;
+      });
       return true;
     }
     return false;
@@ -1726,6 +1733,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     const unsaved = [
       editorDirty && "draft edits",
       strategyDirty && "brand profile or AI idea edits",
+      assistedDirty && "manual posting edits",
       pendingDraftSave && "an unconfirmed draft save",
     ].filter(Boolean);
     if (unsaved.length && !window.confirm(`Sign out and leave ${unsaved.join(", ")}? These changes will not be saved automatically.`)) return;
@@ -1933,7 +1941,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           </div>
           <div hidden={view !== "assisted"}>
             <div className="mb-2"><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--accent-text)]">Assisted</p><h1 className="text-[29px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[34px]">Manual posting</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Review your checklist and finish each post in its own app.</p></div>
-            <AssistedPublishPanel items={assisted} drafts={drafts} active={view === "assisted"} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} startWithVideoGroup={openAssistedVideoGroup} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} sourceMediaIds={mediaIds} sourceMediaAlt={mediaAlt} initialVideoId={videoId} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
+            <AssistedPublishPanel items={assisted} drafts={drafts} active={view === "assisted"} focusItemId={focusedAssistedId ?? undefined} startExpanded={openAssistedComposer} startWithVideoGroup={openAssistedVideoGroup} destination={assistDestination} text={assistText} customText={assistTextIsCustom} time={assistTime} now={now} workspaceReady={workspaceReady} busy={assistedBusy} mediaBusy={mediaBusy} sourceMediaIds={mediaIds} sourceMediaAlt={mediaAlt} initialVideoId={videoId} notificationPermission={notificationPermission} onDestinationChange={setAssistDestination} onTextChange={setAssistedComposerText} onResetText={resetAssistedComposerText} onTimeChange={setAssistTime} onDirtyChange={setAssistedPanelDirty} onAdd={addAssistedPost} onSetReminder={rescheduleAssistedPost} onCopy={copyAssisted} onMarkPosted={markAssistedPosted} onUpdateText={updateAssistedSavedText} onUpdateVideo={updateAssistedVideo} onUpdateImages={updateAssistedImages} onUpdateDescriptions={updateAssistedDescriptions} onUpdatePostUrl={updateAssistedPostUrl} onUpdateOutcome={updateAssistedOutcome} onUndo={undoAssistedPosted} onRemove={removeAssisted} onEnableNotifications={enableNotifications} onEditImages={() => openView("compose")} onOpenSourceDraft={loadDraft} mastodonInstance={mastodonConnection?.configured ? mastodonConnection.instance : undefined} />
           </div>
           {view === "account" && <AccountPanel email={email} auditLog={auditLog} activity={activity} onClearActivity={() => setActivity([])} onLogout={requestSignOut} logoutBusy={logoutBusy} logoutError={logoutError} mastodonConnection={mastodonConnection} mastodonLoading={mastodonLoading} mastodonError={mastodonError} onRefreshMastodon={refreshMastodonConnection} blueskyConnection={blueskyConnection} blueskyLoading={blueskyLoading} blueskyError={blueskyError} onRefreshBluesky={refreshBlueskyConnection} editorDirty={editorDirty} onExport={exportWorkspace} onImport={importWorkspace} onFullExport={downloadFullBackup} onFullImport={restoreFullBackup} backupBusy={backupBusy} />}
         </main>
@@ -1950,7 +1958,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       <p id="legacy-review-description" className="mt-3 text-[13px] leading-6 text-[var(--text-muted)]">This browser copy has no account label. Check the items below before moving them into <strong className="text-[var(--text)]">{email}</strong>.</p>
       <p className="mt-3 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">
         {legacyWorkspace.drafts.length || legacyWorkspace.schedule.length
-          ? `Importing replaces this account’s drafts and publishing plan, and clears its AI weekly plans. Existing assisted items stay; missing browser items are added. Due queued plans may be simulated by the worker.${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}`
+          ? `Importing replaces this account’s drafts and publishing plan, and clears its AI weekly plans. Existing assisted items stay; missing browser items are added. Due queued plans may be simulated by the worker.${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Unsaved manual posting edits will be lost." : ""}`
           : "Importing adds missing assisted items. This account’s drafts, publishing plan, AI weekly plans and assisted items stay in place."}
       </p>
       <div className="mt-5 max-h-[40vh] space-y-5 overflow-y-auto pr-1">
