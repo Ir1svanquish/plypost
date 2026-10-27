@@ -140,11 +140,12 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     const ids = new Set([...Object.keys(textEdits), ...Object.keys(videoEdits), ...Object.keys(editingLinks), ...Object.keys(editingOutcomes)]);
     for (const [id, editing] of Object.entries(descriptionEditingIds)) if (editing) ids.add(id);
     for (const [id, dirty] of Object.entries(descriptionDirtyIds)) if (dirty) ids.add(id);
-    for (const [id, url] of Object.entries(postUrls)) if (url) ids.add(id);
+    const knownUrls = new Map([...lastSeenItems, ...items].map((item) => [item.id, item.postUrl ?? ""]));
+    for (const [id, url] of Object.entries(postUrls)) if (url && url !== (knownUrls.get(id) ?? "")) ids.add(id);
     if (imageEdit) ids.add(imageEdit.itemId);
     if (reminderEdit) ids.add(reminderEdit.itemId);
     return ids;
-  }, [textEdits, videoEdits, editingLinks, editingOutcomes, descriptionEditingIds, descriptionDirtyIds, postUrls, imageEdit, reminderEdit]);
+  }, [textEdits, videoEdits, editingLinks, editingOutcomes, descriptionEditingIds, descriptionDirtyIds, postUrls, imageEdit, reminderEdit, items, lastSeenItems]);
   const liveIds = new Set(items.map((item) => item.id));
   const removedItems = lastSeenItems.filter((item) => !liveIds.has(item.id) && openEditIds.has(item.id));
   const renderedItems = [...items, ...removedItems];
@@ -255,6 +256,10 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     if (!active || !pendingStatusFocus || !visibleItems.some((item) => item.id === pendingStatusFocus.id && item.status === pendingStatusFocus.status)) return;
     const element = document.getElementById(`assisted-item-${pendingStatusFocus.id}`);
     if (!element) return;
+    if (removedItems.some((item) => item.id === pendingStatusFocus.id)) {
+      const details = document.getElementById(`assisted-post-details-${pendingStatusFocus.id}`);
+      if (details instanceof HTMLDetailsElement) details.open = true;
+    }
     if (pendingStatusFocus.status === "posted") {
       const record = document.getElementById(`assisted-posted-record-${pendingStatusFocus.id}`);
       if (record instanceof HTMLDetailsElement) record.open = true;
@@ -262,7 +267,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
     element.scrollIntoView({ behavior: "smooth", block: "center" });
     element.focus({ preventScroll: true });
     setPendingStatusFocus(null);
-  }, [active, pendingStatusFocus, visibleItems]);
+  }, [active, pendingStatusFocus, visibleItems, removedItems]);
 
   function closeLinkEditor(id: string) {
     setEditingLinks((current) => { const next = { ...current }; delete next[id]; return next; });
@@ -536,7 +541,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
                 {!removed && item.status !== "queued" && <p role="alert" className="mt-2 text-[11px] text-[var(--danger)]">This handoff was marked posted elsewhere. Copy your reminder time if needed, then cancel this edit.</p>}
                 <div className="mt-3 flex flex-wrap items-center gap-3"><button type="submit" disabled={removed || item.status !== "queued" || busy || reminderSavingId !== null || !isValidLocalDateTime(editingReminder.value, now + 10_000)} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-50">{reminderSavingId === item.id ? "Saving…" : "Save reminder"}</button>{reminder && <button type="button" onClick={() => void saveReminder(item, null)} disabled={removed || item.status !== "queued" || busy || reminderSavingId !== null} className="text-[12px] font-semibold text-[var(--text-secondary)] disabled:opacity-50">Remove reminder</button>}<button type="button" onClick={() => setReminderEdit(null)} disabled={reminderSavingId !== null} className="text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50">Cancel</button></div>
               </form>}
-              <details className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
+              <details id={`assisted-post-details-${item.id}`} className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] text-[var(--text-muted)]">
                 <summary className="cursor-pointer font-semibold text-[var(--accent-text)]">Post details{item.mediaIds?.length ? ` · ${item.mediaIds.length} ${item.mediaIds.length === 1 ? "image" : "images"}` : ""}{item.videoId ? " · video" : ""}</summary>
                 <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-[var(--surface)] p-3 leading-5 text-[var(--text-secondary)]">{item.text}</p>
               {!removed && item.status === "queued" && !textEdit && <button type="button" onClick={() => setTextEdits((current) => ({ ...current, [item.id]: { expectedText: item.text, value: item.text } }))} disabled={busy} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">Edit saved text</button>}
@@ -602,10 +607,11 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
                 <label htmlFor={`assisted-post-url-${item.id}`} className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">{removed || item.status === "posted" ? "Unsaved link from this window" : "Public post link · optional"}</label>
                 <input id={`assisted-post-url-${item.id}`} type="url" inputMode="url" maxLength={2048} value={enteredUrl} readOnly={removed || item.status !== "queued"} placeholder="https://social.example/your-post" aria-invalid={invalidUrl} aria-describedby={`assisted-post-url-hint-${item.id}`} onChange={(event) => setPostUrls((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-soft)] outline-none focus:border-[var(--accent-border)]" />
                 <p id={`assisted-post-url-hint-${item.id}`} className={`mt-1 text-[11px] leading-4 ${invalidUrl || strandedPostUrl ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{removed ? "This handoff was removed elsewhere. Copy your unsaved link before closing this recovery copy." : strandedPostUrl ? "This handoff was marked posted elsewhere. Open the recorded link editor below to review and save this link." : invalidUrl ? "Use a public HTTPS post link with no embedded username or password." : "After posting, paste its link here if you have one. Plypost checks the link format, not the post or account."}</p>
+                {removed && <button type="button" onClick={() => setPostUrls((current) => { const next = { ...current }; delete next[item.id]; return next; })} className="mt-2 text-[11px] font-semibold text-[var(--text-muted)] underline underline-offset-2">Discard unsaved link</button>}
               </div>}
               </details>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => onCopy(item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> Copy text</button>
+                <button type="button" onClick={() => onCopy(removed && textEdit ? textEdit.value : item.text, item.destination)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-border)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]"><Copy size={13} /> {removed && textEdit ? "Copy unsaved text" : "Copy text"}</button>
                 <a href={item.destination === "mastodon" && mastodonOrigin ? mastodonOrigin : target.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-[12px] font-bold text-[var(--text-secondary)]"><ExternalLink size={13} /> Open {item.destination === "mastodon" && mastodonOrigin ? "your Mastodon server" : target.name}</a>
               {!removed && (item.status === "queued" ? <button type="button" onClick={() => { void markPosted(item, normalizedUrl ?? undefined); }} disabled={busy || videoBusy || imageBusy || hasOpenHandoffEdit || invalidUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] font-bold text-[var(--positive)] disabled:opacity-50"><Check size={13} /> I posted it</button> : <button type="button" onClick={() => setUndoConfirmation({ id: item.id, receipt: assistedReceiptSnapshot(item) })} disabled={busy || editingOutcome || editingLink || outcomeSavingId !== null || linkSavingId !== null || confirmingUndo} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-muted)] disabled:opacity-50"><RotateCcw size={13} /> Undo mark</button>)}
               </div>

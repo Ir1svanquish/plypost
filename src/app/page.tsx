@@ -1613,7 +1613,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       await navigator.clipboard.writeText(text);
       setNotice({ kind: "success", text: `${assistedDestinations[destination].name} text copied. Open the platform and paste it there.` });
     } catch {
-      setNotice({ kind: "error", text: "Clipboard access is unavailable. Expand Review saved text to select it manually." });
+      setNotice({ kind: "error", text: "Clipboard access is unavailable. Open Post details to select the text manually." });
     }
   }
 
