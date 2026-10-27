@@ -90,7 +90,7 @@ npm test
 npm run build
 ```
 
-公开演示站的首页和 `/api/health` 已从外部网络返回 200；新密码登录及会话接口已在该实例返回 200。虚构文案的单平台改写、双平台改写和合成图片的看图起稿也已在该实例返回可用结果。另用虚构文字草稿验证了 Render 服务重启后的保存与读取，并在验证后删除测试草稿。虚构图片和短视频也已通过重启后的逐字节读取检查，测试素材随后删除。线上还验收了单个 32 MiB 视频、接近 5 MiB 的图片，以及两条 32 MiB 视频同时上传；测试文件已清理。长期负载和更多并发仍待验证。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-25，`npm audit --omit=dev --audit-level=high` 报出 15 条高危依赖路径，均关联 Bluesky OAuth 依赖所用的 Zod 3 与[这项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开启用 Bluesky 登录前须重新评估或等待兼容修复。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
+公开演示站的首页和 `/api/health` 已从外部网络返回 200；新密码登录及会话接口已在该实例返回 200。虚构文案的单平台改写、双平台改写和合成图片的看图起稿也已在该实例返回可用结果。另用虚构文字草稿验证了 Render 服务重启后的保存与读取，并在验证后删除测试草稿。虚构图片和短视频也已通过重启后的逐字节读取检查，测试素材随后删除。线上还验收了单个 32 MiB 视频、接近 5 MiB 的图片，以及两条 32 MiB 视频同时上传；测试文件已清理。长期负载和更多并发仍待验证。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-27，`npm audit --omit=dev --audit-level=high` 报出 15 条高危依赖路径，均源于 Bluesky OAuth 依赖所用的 Zod 3 与[同一项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开启用 Bluesky 登录前须重新评估或等待兼容修复。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
 
 草稿保存中断后的核对流程已在隔离演示中用丢失响应和一次读取失败验证；Render 当前部署的版本也已检查健康接口、界面资源和登录会话。此检查没有在公开站故意制造服务故障。
 
