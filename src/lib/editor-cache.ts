@@ -1,7 +1,13 @@
 const legacyKey = "socialflow-mvp";
-const ownerKeyPrefix = "plypost-editor-v2:";
+const legacyOwnerKeyPrefix = "plypost-editor-v2:";
+const ownerKeyPrefix = "plypost-editor-v3:";
+const tabIdKey = "plypost-editor-tab-id";
+const documentKey = "plypost-editor-document";
 
 type EditorStorage = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
+type TabStorage = Pick<Storage, "getItem" | "setItem">;
+
+export type OtherEditorCopy = { tabId: string; value: string; updatedAt: number; preview: string };
 
 /** Drop only an untouched starter template; a changed title, channel or attachment is user work. */
 export function isUntouchedStarterCache(value: unknown, examples: readonly string[], platforms: readonly string[]): boolean {
@@ -20,21 +26,68 @@ export function isUntouchedStarterCache(value: unknown, examples: readonly strin
     Array.isArray(selected) && selected.length === platforms.length && platforms.every((id) => selected.includes(id));
 }
 
-function ownerKey(email: string): string {
+function legacyOwnerKey(email: string): string {
+  return `${legacyOwnerKeyPrefix}${encodeURIComponent(email.trim().toLowerCase())}`;
+}
+
+function ownerPrefix(email: string): string {
   return `${ownerKeyPrefix}${encodeURIComponent(email.trim().toLowerCase())}`;
 }
 
+function ownerTabKey(email: string, tabId: string): string {
+  return `${ownerPrefix(email)}:${tabId}`;
+}
+
+/** A reload keeps its editor; a new document copied from another tab gets a separate identity. */
+export function ensureEditorTabId(session: TabStorage, documentToken: string, navigationType: string, createId: () => string): string {
+  const existing = session.getItem(tabIdKey);
+  const sameDocument = session.getItem(documentKey) === documentToken;
+  if (existing && (sameDocument || navigationType === "reload" || navigationType === "back_forward")) {
+    session.setItem(documentKey, documentToken);
+    return existing;
+  }
+  const next = createId();
+  session.setItem(tabIdKey, next);
+  session.setItem(documentKey, documentToken);
+  return next;
+}
+
 /** The pre-account cache can be claimed once; later owners only read their own editor. */
-export function readOwnerEditorCache(storage: EditorStorage, email: string): string | null {
-  const saved = storage.getItem(ownerKey(email));
+export function readOwnerEditorCache(storage: EditorStorage, email: string, tabId: string): string | null {
+  const saved = storage.getItem(ownerTabKey(email, tabId));
   if (saved !== null) return saved;
+  const previous = storage.getItem(legacyOwnerKey(email));
+  if (previous !== null) return previous;
   for (let index = 0; index < storage.length; index++) {
-    if (storage.key(index)?.startsWith(ownerKeyPrefix)) return null;
+    const key = storage.key(index);
+    if (key?.startsWith(legacyOwnerKeyPrefix) || key?.startsWith(ownerKeyPrefix)) return null;
   }
   return storage.getItem(legacyKey);
 }
 
-export function writeOwnerEditorCache(storage: EditorStorage, email: string, value: string): void {
-  storage.setItem(ownerKey(email), value);
+export function writeOwnerEditorCache(storage: EditorStorage, email: string, tabId: string, value: string): void {
+  storage.setItem(ownerTabKey(email, tabId), value);
+  storage.removeItem(legacyOwnerKey(email));
   storage.removeItem(legacyKey);
+}
+
+/** Show recoverable edits without replacing the editor in another open tab. */
+export function otherOwnerEditorCopies(storage: EditorStorage, email: string, tabId: string): OtherEditorCopy[] {
+  const prefix = `${ownerPrefix(email)}:`;
+  const copies: OtherEditorCopy[] = [];
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    if (!key?.startsWith(prefix) || key === ownerTabKey(email, tabId)) continue;
+    const value = storage.getItem(key);
+    if (!value || value.length > 100_000) continue;
+    try {
+      const data = JSON.parse(value) as Record<string, unknown>;
+      if (data.hasUnsavedWork !== true || typeof data.cachedAt !== "number" || !Number.isFinite(data.cachedAt)) continue;
+      const preview = [data.title, data.source, ...Object.values(data.variants && typeof data.variants === "object" ? data.variants : {})]
+        .find((item) => typeof item === "string" && item.trim()) as string | undefined;
+      copies.push({ tabId: key.slice(prefix.length), value, updatedAt: data.cachedAt,
+        preview: preview?.trim().replace(/\s+/g, " ").slice(0, 80) || "Untitled draft" });
+    } catch { /* Ignore an unreadable browser copy; keep the original storage entry intact. */ }
+  }
+  return copies.sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 10);
 }

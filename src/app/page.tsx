@@ -43,7 +43,7 @@ import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
-import { isUntouchedStarterCache, readOwnerEditorCache, writeOwnerEditorCache } from "@/lib/editor-cache";
+import { ensureEditorTabId, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, writeOwnerEditorCache, type OtherEditorCopy } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
 import { WorkspaceSnapshotGate } from "@/lib/workspace-snapshot-gate";
 import { ShownReminderReceipts } from "@/lib/reminder-receipts";
@@ -268,6 +268,9 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   const [scheduleTime, setScheduleTime] = useState("");
   const [runningId, setRunningId] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState(false);
+  const editorTabIdRef = useRef<string | null>(null);
+  const editorTabIdPersistentRef = useRef(true);
+  const [otherEditorCopies, setOtherEditorCopies] = useState<OtherEditorCopy[]>([]);
   const [now, setNow] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [legacyWorkspace, setLegacyWorkspace] = useState<ReturnType<typeof emptyWorkspace> | null>(null);
@@ -534,7 +537,15 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 
   useEffect(() => {
     try {
-      const saved = readOwnerEditorCache(localStorage, email);
+      const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+      editorTabIdRef.current = ensureEditorTabId(sessionStorage, String(performance.timeOrigin), navigation?.type ?? "navigate", () => crypto.randomUUID());
+    } catch {
+      editorTabIdRef.current = crypto.randomUUID();
+      editorTabIdPersistentRef.current = false;
+      setStorageWarning(true);
+    }
+    try {
+      const saved = readOwnerEditorCache(localStorage, email, editorTabIdRef.current);
       if (saved) {
         const data = JSON.parse(saved) as {
           source?: unknown;
@@ -625,20 +636,51 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     })();
   }, []);
 
+  useEffect(() => {
+    const refreshCopies = () => {
+      const tabId = editorTabIdRef.current;
+      if (!tabId) return;
+      try { setOtherEditorCopies(otherOwnerEditorCopies(localStorage, email, tabId)); }
+      catch { setOtherEditorCopies([]); }
+    };
+    refreshCopies();
+    window.addEventListener("storage", refreshCopies);
+    return () => window.removeEventListener("storage", refreshCopies);
+  }, [email, hydrated]);
+
+  function recoverEditorCopy(copy: OtherEditorCopy) {
+    if (editorDirty || needsDraftRecovery || pendingDraftSave || strategyDirty || assistedDirty || draftSaveBusyRef.current ||
+        mediaBusyRef.current || videoBusyRef.current || generating || restoringBackupRef.current) {
+      setNotice({ kind: "error", text: "Save or discard the current changes before opening another browser copy." });
+      return;
+    }
+    try {
+      const tabId = editorTabIdRef.current;
+      if (!tabId) throw new Error("Editor storage is not ready.");
+      writeOwnerEditorCache(localStorage, email, tabId, copy.value);
+      window.location.reload();
+    } catch {
+      setNotice({ kind: "error", text: "Could not open that browser copy. Its original copy was kept." });
+    }
+  }
+
   function persistEditorCache(pending: PendingDraftSave | null) {
-    writeOwnerEditorCache(localStorage, email, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId,
-      plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave: pending }));
+    const tabId = editorTabIdRef.current;
+    if (!tabId) throw new Error("Editor storage is not ready.");
+    writeOwnerEditorCache(localStorage, email, tabId, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId,
+      plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave: pending,
+      hasUnsavedWork: editorDirty || needsDraftRecovery || Boolean(pending), cachedAt: Date.now() }));
   }
 
   useEffect(() => {
     if (!hydrated) return;
     try {
       persistEditorCache(pendingDraftSave);
-      setStorageWarning(false);
+      setStorageWarning(!editorTabIdPersistentRef.current);
     } catch {
       setStorageWarning(true);
     }
-  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave, hydrated, email]);
+  }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave, editorDirty, needsDraftRecovery, hydrated, email]);
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace(false).then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -901,7 +943,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
         return null;
       }
       attempt = { snapshot: saved, expectedUpdatedAt, asCopy: copyMode };
-      try { persistEditorCache(attempt); setStorageWarning(false); }
+      try { persistEditorCache(attempt); setStorageWarning(!editorTabIdPersistentRef.current); }
       catch { setStorageWarning(true); }
       setPendingDraftSave(attempt);
       const data = await changeWorkspace("save-draft", { item: saved,
@@ -1787,6 +1829,14 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           <div className="mb-5">
             <h1 className="text-[27px] font-bold tracking-[-0.045em] text-[var(--text)] sm:text-[30px]">Create</h1>
           </div>
+          {otherEditorCopies.length > 0 && <details className="mb-5 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] text-[var(--text-secondary)]">
+            <summary className="cursor-pointer font-semibold text-[var(--text)]">{otherEditorCopies.length} unsaved browser {otherEditorCopies.length === 1 ? "copy" : "copies"} from other tabs</summary>
+            <p className="mt-2 text-[12px] text-[var(--text-muted)]">Save or discard this tab&apos;s changes before opening a copy. The other tab is kept.</p>
+            <ul className="mt-2 divide-y divide-[var(--line)]">{otherEditorCopies.map((copy) => <li key={copy.tabId} className="flex items-center justify-between gap-3 py-2">
+              <span className="min-w-0 truncate" title={copy.preview}>{copy.preview}</span>
+              <button type="button" onClick={() => recoverEditorCopy(copy)} className="shrink-0 font-semibold text-[var(--accent-text)]">Open copy</button>
+            </li>)}</ul>
+          </details>}
           <div className="space-y-5">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
                 <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-4 sm:px-7">
