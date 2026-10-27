@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { closeDatabase, database } from "../src/lib/server/db.ts";
 import { addAssisted, addSchedule, deleteAssisted, importLegacyLibrary, importLibrary, listWorkspace, markAssistedNotified, migrateAssisted, migrateLegacyBrowserWorkspace, rescheduleAssisted, saveDraft, setAssistedStatus, updateAssistedText } from "../src/lib/server/workspace.ts";
 import { assistedContentSnapshot, assistedDeletionSnapshot, assistedReceiptSnapshot, assistedState, parseWorkspace } from "../src/lib/workspace.ts";
+import { parseWorkspaceResponse } from "../src/lib/workspace-response.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-assisted-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "assisted.sqlite");
@@ -27,6 +28,15 @@ function changePostedStatus(id, status, postUrl) {
   const current = listWorkspace(owner).assisted.find((entry) => entry.id === id);
   return setAssistedStatus(owner, id, status, postUrl, undefined, assistedReceiptSnapshot(current), true);
 }
+
+test("workspace responses must be complete before replacing the browser view", () => {
+  const actual = listWorkspace(owner);
+  assert.deepEqual(parseWorkspaceResponse(actual), actual);
+  assert.equal(parseWorkspaceResponse({ ...actual, schedule: undefined }), null);
+  assert.equal(parseWorkspaceResponse({ ...actual, drafts: [{}] }), null);
+  assert.equal(parseWorkspaceResponse({ ...actual, workspaceRevision: "bad" }), null);
+  assert.equal(parseWorkspaceResponse({ ...actual, savedDraft: {} }), null);
+});
 
 test("assisted items persist and status, notification, and deletion are scoped to the owner", () => {
   const post = item();

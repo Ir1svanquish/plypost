@@ -17,6 +17,7 @@ import { getSlotSettings, saveSlotSettings } from "../src/lib/server/slots.ts";
 import { assistedContentSnapshot } from "../src/lib/workspace.ts";
 import { GET, POST } from "../src/app/api/backup/route.ts";
 import { currentWorkspaceRevision } from "../src/lib/server/workspace-revision.ts";
+import { parseRestoreReceipt, parseWorkspaceResponse } from "../src/lib/workspace-response.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-portable-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "primary.sqlite");
@@ -89,6 +90,7 @@ test("portable backup restores image pixels and saved records in a fresh databas
   const result = await importPortableBackup(owner, archive);
   assert.deepEqual(result, { drafts: 1, jobs: 1, assisted: 1, media: 1, videos: 0 });
   const restored = listWorkspace(owner);
+  assert.deepEqual(parseWorkspaceResponse(restored), restored);
   assert.notEqual(restored.drafts[0].id, saved.id);
   assert.equal(restored.drafts[0].plannedDate, "2026-11-02");
   assert.notEqual(restored.drafts[0].mediaIds[0], image.id);
@@ -225,7 +227,9 @@ test("portable backup route enforces owner session, origin, type, and private re
   assert.equal((await POST(tooLarge)).status, 413);
   const imported = await POST(backupRequest(archive, { cookie }));
   assert.equal(imported.status, 200);
-  assert.deepEqual((await imported.json()).restored, { drafts: 1, jobs: 1, assisted: 1, media: 1, videos: 0 });
+  assert.deepEqual(parseRestoreReceipt(await imported.json()), { drafts: 1, jobs: 1, assisted: 1, media: 1, videos: 0 });
+  assert.equal(parseRestoreReceipt({ restored: { drafts: 1 } }), null);
+  assert.equal(parseRestoreReceipt({ restored: { drafts: 1, jobs: 1, assisted: 1, media: 1, videos: -1 } }), null);
 });
 
 test("an unfinished restore keeps another backup request from doubling memory use", async () => {

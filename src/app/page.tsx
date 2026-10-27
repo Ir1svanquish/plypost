@@ -46,6 +46,7 @@ import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisp
 import { ensureEditorTabId, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, writeOwnerEditorCache, type OtherEditorCopy } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
 import { WorkspaceSnapshotGate } from "@/lib/workspace-snapshot-gate";
+import { parseRestoreReceipt, parseWorkspaceResponse } from "@/lib/workspace-response";
 import { ShownReminderReceipts } from "@/lib/reminder-receipts";
 import { WORKSPACE_KEY, assistedContentSnapshot, assistedDeletionSnapshot, draftTitle, emptyWorkspace, followAutoTitle, hasDraftContent, hasManualReminder, parseWorkspace, validCalendarDate, type AssistedOutcomeInput, type AssistedPost, type AssistedReceiptSnapshot, type SavedDraft, type ScheduledPost } from "@/lib/workspace";
 import { MAX_POST_IMAGES, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
@@ -472,13 +473,16 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     const data = await workspaceSnapshotGate.current.read(async () => {
       const response = await fetch("/api/workspace", { cache: "no-store" });
       if (!response.ok) throw new Error("Could not load your server workspace.");
-      return response.json().catch(() => {
+      const body: unknown = await response.json().catch(() => {
         const failure = new Error(response.status >= 500
           ? "The server is temporarily unavailable. Your editor is unchanged; retry when it recovers."
           : "The server returned an unreadable response. Your editor is unchanged.") as Error & { status?: number };
         failure.status = response.status;
         throw failure;
       });
+      const data = parseWorkspaceResponse(body);
+      if (!data) throw new Error("The server returned an incomplete workspace. Your editor is unchanged; reload and check your saved work.");
+      return data;
     }, retryStale ? 3 : 1);
     setDrafts(data.drafts);
     setSchedule(data.schedule);
@@ -498,7 +502,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ...extra }),
       });
-      const data = await response.json().catch(() => {
+      const body: unknown = await response.json().catch(() => {
         const failure = new Error(response.status >= 500
           ? "The server is temporarily unavailable. Your editor is unchanged; retry when it recovers."
           : "The server returned an unreadable response. Your editor is unchanged.") as Error & { status?: number };
@@ -506,9 +510,16 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
         throw failure;
       });
       if (!response.ok) {
-        const failure = new Error(data.error || "Could not update workspace.") as Error & { code?: string; status?: number };
+        const errorBody = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : null;
+        const failure = new Error(typeof errorBody?.error === "string" ? errorBody.error : "Could not update workspace.") as Error & { code?: string; status?: number };
         failure.status = response.status;
-        if (typeof data.code === "string") failure.code = data.code;
+        if (typeof errorBody?.code === "string") failure.code = errorBody.code;
+        throw failure;
+      }
+      const data = parseWorkspaceResponse(body);
+      if (!data) {
+        const failure = new Error("The server returned an incomplete workspace response. Your editor is unchanged; check saved work before retrying.") as Error & { status?: number };
+        failure.status = response.status;
         throw failure;
       }
       applySnapshot = () => {
@@ -1425,6 +1436,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     backupMutation.current = true;
     setBackupBusy(true);
     let restored = false;
+    let restoreRequested = false;
+    let confirmedRejection = false;
     try {
       const latest = await refreshWorkspace();
       if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
@@ -1432,14 +1445,18 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedWarning} This cannot be undone.`)) return;
       restoringBackupRef.current = true;
       setRestoringBackup(true);
+      restoreRequested = true;
       const response = await fetch("/api/backup", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Plypost-Workspace-Revision": latest.workspaceRevision }, body: file,
         cache: "no-store", credentials: "same-origin",
       });
+      const body: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error || "Could not restore the full backup.");
+        confirmedRejection = response.status >= 400 && response.status < 500;
+        const errorBody = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : null;
+        throw new Error(typeof errorBody?.error === "string" ? errorBody.error : "Could not restore the full backup.");
       }
+      if (!parseRestoreReceipt(body)) throw new Error("Restore response was incomplete.");
       restored = true;
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
@@ -1467,7 +1484,9 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     } catch (error) {
       setNotice({ kind: "error", text: restored
         ? "Full backup was restored, but the view could not refresh. Reload to see the saved work."
-        : error instanceof Error ? error.message : "Could not restore the full backup." });
+        : restoreRequested && !confirmedRejection
+          ? "Restore result not confirmed. Reload and inspect your saved work before trying again."
+          : error instanceof Error ? error.message : "Could not restore the full backup." });
     } finally {
       restoringBackupRef.current = false;
       setRestoringBackup(false);
@@ -1484,6 +1503,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     }
     backupMutation.current = true;
     setBackupBusy(true);
+    let importRequested = false;
     try {
       if (file.size > 2_000_000) throw new Error("Backup file is too large (2 MB maximum).");
       const raw = JSON.parse(await file.text());
@@ -1496,6 +1516,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       const latest = await refreshWorkspace();
       if (typeof latest.workspaceRevision !== "string") throw new Error("Could not verify the current workspace. Reload and try again.");
       if (!window.confirm(`Replace your account's drafts, publishing plan, and assisted posts with this text-only JSON backup? Your saved brand profile remains, but AI weekly plans are cleared. Images are not in this file, so image references must already exist in this account.${editorDirty ? " Your unsaved editor changes will be discarded." : ""}${batchReviewState.dirty ? " Your unconfirmed handoff review will be lost." : ""}${strategyDirty ? " Unsaved brand profile or AI idea edits will be lost." : ""}${assistedDirty ? " Unsaved manual posting edits will be lost." : ""}`)) return;
+      importRequested = true;
       await changeWorkspace("import", { backup: raw, expectedRevision: latest.workspaceRevision });
       try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(emptyWorkspace())); } catch { setStorageWarning(true); }
       setLegacyWorkspace(null);
@@ -1519,7 +1540,11 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       setStrategyRefreshEpoch((epoch) => epoch + 1);
       setNotice({ kind: "success", text: `Imported ${workspace.drafts.length} drafts, ${workspace.schedule.length} planned items, and ${workspace.assisted.length} assisted posts. AI weekly plans were cleared; your saved brand profile remains.` });
     } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Could not import backup." });
+      const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+      const uncertain = status === undefined || typeof status === "number" && (status >= 500 || status >= 200 && status < 300);
+      setNotice({ kind: "error", text: importRequested && uncertain
+        ? "Import result not confirmed. Reload and inspect your saved work before trying again."
+        : error instanceof Error ? error.message : "Could not import backup." });
     } finally {
       backupMutation.current = false;
       setBackupBusy(false);
