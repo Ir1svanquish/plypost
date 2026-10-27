@@ -7,6 +7,7 @@ export const imageLimits = {
   linkedin: 20,
   threads: 20,
   x: 4,
+  pinterest: 1,
 } as const;
 
 export function imageLimitForDestination(destination: string): number {

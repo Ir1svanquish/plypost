@@ -116,6 +116,18 @@ test("each platform receives only its reviewed image subset, order and matching 
   const [textOnly] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...skyTime, mediaIds: [] }]);
   assert.deepEqual(textOnly.mediaIds, []);
   assert.deepEqual(textOnly.mediaAlt, []);
+
+  const pinterest = { destination: "pinterest", scheduledFor: new Date(Date.now() + 60_000).toISOString(), text: "One image Pin" };
+  const [pin] = prepareAssistedBatch(owner, saved.id, randomUUID(), [pinterest]);
+  assert.deepEqual(pin.mediaIds, [ids[0]]);
+  assert.deepEqual(pin.mediaAlt, ["Photo 1"]);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...pinterest, mediaIds: ids.slice(0, 2) }]), /valid text and UTC timestamps/);
+  assert.throws(() => updateAssistedImages(owner, pin.id, pin.mediaIds, pin.mediaAlt, ids.slice(0, 2), ["", ""]), /fewer images/);
+  assert.throws(() => addAssisted(owner, {
+    id: randomUUID(), title: "Two images in one Pin", destination: "pinterest", text: "One image Pin",
+    mediaIds: ids.slice(0, 2), mediaAlt: ["", ""],
+    scheduledFor: pinterest.scheduledFor, createdAt: new Date().toISOString(), status: "queued",
+  }), /fewer images/);
 });
 
 test("unmodified platform text uses the same adaptation shown in Create", () => {

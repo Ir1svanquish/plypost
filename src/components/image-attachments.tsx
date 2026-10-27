@@ -190,6 +190,13 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
     if (index < 0 || other < 0 || other >= next.length) return;
     [next[index], next[other]] = [next[other], next[index]];
     setSelection(next);
+    requestAnimationFrame(() => document.getElementById(`${inputId}-${id}-selected`)?.focus());
+  }
+
+  function moveImageToFront(id: string) {
+    if (disabled || loading || uploading || deletingId || selectedRef.current[0] === id) return;
+    setSelection([id, ...selectedRef.current.filter((item) => item !== id)]);
+    requestAnimationFrame(() => document.getElementById(`${inputId}-${id}-selected`)?.focus());
   }
 
   async function deleteAsset(item: MediaAsset) {
@@ -236,7 +243,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
       {loadFailed && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><span>{loadError} Your saved image list may be incomplete.</span><button type="button" onClick={retryLoad} disabled={controlsBusy} className="font-semibold underline underline-offset-2 disabled:opacity-50">Retry library</button></div>}
       {error && <div role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</div>}
       {missingCount > 0 && libraryLoaded && !loading && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><p role="status">{missingCount} saved {missingCount === 1 ? "image is" : "images are"} unavailable.</p><button type="button" onClick={() => setSelection(selected.map((item) => item.id))} disabled={controlsBusy} className="font-semibold underline underline-offset-2 disabled:opacity-50">Remove unavailable</button></div>}
-      {selected.length > 0 && <ul className="mt-4 grid max-h-[430px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+      {selected.length > 0 && <ul className="mt-4 grid max-h-[430px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} id={`${inputId}-${item.id}-selected`} tabIndex={-1} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">
         <div className="flex min-w-0 gap-3">
           <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={descriptions[item.id] || item.name} fill sizes="80px" className="object-cover" /></div>
           <div className="flex min-w-0 flex-1 flex-col justify-between">
@@ -244,6 +251,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
             <div className="flex items-center gap-1">
               <button type="button" onClick={() => moveImage(item.id, -1)} disabled={controlsBusy || index === 0} aria-label={`Move image ${index + 1} earlier`} title="Move earlier" className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-40"><ArrowUp size={15} aria-hidden="true" /></button>
               <button type="button" onClick={() => moveImage(item.id, 1)} disabled={controlsBusy || index === selectedIds.length - 1} aria-label={`Move image ${index + 1} later`} title="Move later" className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-40"><ArrowDown size={15} aria-hidden="true" /></button>
+              <button type="button" onClick={() => moveImageToFront(item.id)} disabled={controlsBusy || index === 0} aria-label={`Make image ${index + 1} the cover`} title={index === 0 ? "Current cover" : "Set as cover"} className="rounded px-1.5 py-1 text-[10px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:text-[var(--text-soft)] disabled:opacity-70">Cover</button>
               <button type="button" onClick={() => toggleImage(item.id)} disabled={controlsBusy} aria-label={`Remove ${item.name} from ${subject}`} title={`Remove from ${subject}`} className="ml-auto rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><X size={15} aria-hidden="true" /></button>
             </div>
           </div>
