@@ -241,6 +241,9 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   const backupMutation = useRef(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
   const restoringBackupRef = useRef(false);
+  const restoreAbortRef = useRef<AbortController | null>(null);
+  const [restoreCancelRequested, setRestoreCancelRequested] = useState(false);
+  const [restoreReceiptConfirmed, setRestoreReceiptConfirmed] = useState(false);
   const restoreOverlayRef = useRef<HTMLDivElement>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const workspaceSnapshotGate = useRef(new WorkspaceSnapshotGate());
@@ -1449,10 +1452,13 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       if (!window.confirm(`Replace this account's saved drafts, brand profile, AI weekly plans, publishing plan, assisted posts (including results), images, and videos with this full backup?${unsavedWarning} This cannot be undone.`)) return;
       restoringBackupRef.current = true;
       setRestoringBackup(true);
+      setRestoreReceiptConfirmed(false);
+      const restoreController = new AbortController();
+      restoreAbortRef.current = restoreController;
       restoreRequested = true;
       const response = await fetch("/api/backup", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Plypost-Workspace-Revision": latest.workspaceRevision }, body: file,
-        cache: "no-store", credentials: "same-origin",
+        cache: "no-store", credentials: "same-origin", signal: restoreController.signal,
       });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) {
@@ -1462,6 +1468,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       }
       if (!parseRestoreReceipt(body)) throw new Error("Restore response was incomplete.");
       restored = true;
+      restoreAbortRef.current = null;
+      setRestoreReceiptConfirmed(true);
       setCurrentDraftId(null);
       setCurrentDraftVersion(null);
       setBatchLaunch(null);
@@ -1492,6 +1500,9 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           ? "Restore result not confirmed. Reload and inspect your saved work before trying again."
           : error instanceof Error ? error.message : "Could not restore the full backup." });
     } finally {
+      restoreAbortRef.current = null;
+      setRestoreCancelRequested(false);
+      setRestoreReceiptConfirmed(false);
       restoringBackupRef.current = false;
       setRestoringBackup(false);
       backupMutation.current = false;
@@ -2056,8 +2067,10 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     </div>
     {restoringBackup && <div ref={restoreOverlayRef} tabIndex={-1} role="alertdialog" aria-modal="true" aria-label="Restoring full backup" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-5 outline-none">
       <div className="w-full max-w-sm rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-center shadow-2xl">
-        <p className="text-[17px] font-bold text-[var(--text)]">Restoring your workspace…</p>
-        <p className="mt-2 text-[13px] leading-6 text-[var(--text-muted)]">Please wait while drafts, plans and images are checked and restored.</p>
+        <p className="text-[17px] font-bold text-[var(--text)]">{restoreReceiptConfirmed ? "Updating your workspace…" : restoreCancelRequested ? "Stopping restore…" : "Restoring your workspace…"}</p>
+        <p className="mt-2 text-[13px] leading-6 text-[var(--text-muted)]">{restoreReceiptConfirmed ? "The backup was restored. Loading your saved work now." : "Large backups can take a few minutes. Keep this tab open while the file is checked and restored."}</p>
+        {!restoreReceiptConfirmed && <><button type="button" disabled={restoreCancelRequested} onClick={() => { const controller = restoreAbortRef.current; if (controller) { setRestoreCancelRequested(true); controller.abort(); } }} className="mt-5 rounded-xl border border-[var(--line)] px-4 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Stop and check result</button>
+        <p className="mt-2 text-[11px] leading-5 text-[var(--text-soft)]">If you stop, reload and check your saved work before trying again.</p></>}
       </div>
     </div>}
     {legacyWorkspace && <dialog ref={legacyReviewRef} onCancel={(event) => { event.preventDefault(); if (!legacyImportBusy) setLegacyReviewOpen(false); }} aria-labelledby="legacy-review-title" aria-describedby="legacy-review-description" className="fixed inset-0 m-auto max-h-[85vh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-2xl backdrop:bg-black/65 sm:p-7">

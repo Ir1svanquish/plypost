@@ -235,9 +235,11 @@ export async function parsePortableBackupRequest(request: Request): Promise<unkn
   } });
   try {
     await pipeline(Readable.fromWeb(request.body as never), limit,
-      parser.asStream({ packKeys: false, packStrings: false, packNumbers: false }), sink);
+      parser.asStream({ packKeys: false, packStrings: false, packNumbers: false }), sink,
+      { signal: request.signal });
   } catch (error) {
     if (error instanceof BackupError) throw error;
+    if (request.signal.aborted) throw new BackupError("Backup restore was cancelled.");
     throw new BackupError("Backup is not valid UTF-8 JSON.");
   }
   if (!total) invalid("Backup file is empty.");

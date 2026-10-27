@@ -250,6 +250,27 @@ test("an unfinished restore keeps another backup request from doubling memory us
   await available.body.cancel();
 });
 
+test("aborting an unfinished backup upload releases the backup operation", { timeout: 5000 }, async () => {
+  const cookie = `${SESSION_COOKIE}=${createSession(owner)}`;
+  const before = listWorkspace(owner);
+  const controller = new globalThis.AbortController();
+  const body = new globalThis.ReadableStream({ start(stream) {
+    stream.enqueue(Buffer.from('{"format":'));
+  } });
+  const pending = POST(new globalThis.Request(base, { method: "POST", duplex: "half", signal: controller.signal,
+    headers: { origin: "http://localhost", "content-type": "application/json", cookie,
+      "x-plypost-workspace-revision": currentWorkspaceRevision(owner) }, body }));
+  assert.equal((await GET(new globalThis.Request(base, { headers: { cookie } }))).status, 409);
+  controller.abort();
+  const stopped = await pending;
+  assert.equal(stopped.status, 400);
+  assert.match((await stopped.json()).error, /cancelled/);
+  const available = await GET(new globalThis.Request(base, { headers: { cookie } }));
+  assert.equal(available.status, 200);
+  await available.body.cancel();
+  assert.deepEqual(listWorkspace(owner), before);
+});
+
 test("backup upload accepts fragmented UTF-8 and rejects malformed streams without replacing work", async () => {
   const cookie = `${SESSION_COOKIE}=${createSession(owner)}`;
   const archive = JSON.parse(exportPortableBackup(owner));
