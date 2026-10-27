@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ensureEditorTabId, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, writeOwnerEditorCache } from "../src/lib/editor-cache.ts";
+import { ensureEditorTabId, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, removeOwnerEditorCopy, writeOwnerEditorCache } from "../src/lib/editor-cache.ts";
 
 function storage(entries = []) {
   const values = new Map(entries);
@@ -79,6 +79,21 @@ test("clean browser copies are omitted from recovery without deleting stored dat
   writeOwnerEditorCache(local, "first@example.test", "tab-a", JSON.stringify({ source: "Saved draft", hasUnsavedWork: false, cachedAt: 10 }));
   assert.deepEqual(otherOwnerEditorCopies(local, "first@example.test", "tab-b"), []);
   assert.ok(readOwnerEditorCache(local, "first@example.test", "tab-a"));
+});
+
+test("removing an old browser copy keeps the active editor and other owners", () => {
+  const local = storage();
+  for (const [owner, tab, source] of [
+    ["first@example.test", "active", "Current unsaved text"],
+    ["first@example.test", "old", "Recovered and saved text"],
+    ["second@example.test", "old", "Other account text"],
+  ]) writeOwnerEditorCache(local, owner, tab, JSON.stringify({ source, hasUnsavedWork: true, cachedAt: 10 }));
+  assert.equal(removeOwnerEditorCopy(local, "first@example.test", "active", "active"), false);
+  assert.equal(removeOwnerEditorCopy(local, "first@example.test", "active", "old"), true);
+  assert.equal(removeOwnerEditorCopy(local, "first@example.test", "active", "old"), false);
+  assert.match(readOwnerEditorCache(local, "first@example.test", "active") ?? "", /Current unsaved text/);
+  assert.equal(otherOwnerEditorCopies(local, "first@example.test", "active").length, 0);
+  assert.match(readOwnerEditorCache(local, "second@example.test", "old") ?? "", /Other account text/);
 });
 
 test("only an untouched starter template is cleared from the editor cache", () => {

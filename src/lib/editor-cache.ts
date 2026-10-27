@@ -91,3 +91,12 @@ export function otherOwnerEditorCopies(storage: EditorStorage, email: string, ta
   }
   return copies.sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 10);
 }
+
+/** Remove only a selected, older copy for this owner; never erase the active editor. */
+export function removeOwnerEditorCopy(storage: EditorStorage, email: string, currentTabId: string, copyTabId: string): boolean {
+  if (!copyTabId || copyTabId === currentTabId) return false;
+  const key = ownerTabKey(email, copyTabId);
+  if (storage.getItem(key) === null) return false;
+  storage.removeItem(key);
+  return true;
+}
