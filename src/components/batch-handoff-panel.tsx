@@ -96,6 +96,8 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   });
   const expiredSlotPlatforms = selectedSlotPlatforms.filter((id) => slotApplied &&
     !suggestedSlotIsReady(slotTimes[id], currentTime));
+  const slotPreviewExpired = Boolean(slotPreview?.suggestions.some((item) =>
+    !suggestedSlotIsReady(item.scheduledFor, currentTime)));
   const invalidReminders = destinations.filter((id) => slotApplied && isPlatformId(id)
     ? expiredSlotPlatforms.includes(id)
     : reminders[id] && !isValidLocalDateTime(reminders[id]!, currentTime));
@@ -222,11 +224,15 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
           body.suggestions.some((item) => !selectedSlotPlatforms.includes(item.platform) || !Number.isFinite(Date.parse(item.scheduledFor)))) {
         throw new Error(body.error || "Could not preview free slots.");
       }
-      if (requestVersion === slotRequestVersion.current)
+      if (requestVersion === slotRequestVersion.current) {
         setSlotPreview({ timeZone: body.timeZone, suggestions: body.suggestions });
+        requestAnimationFrame(() => document.getElementById("batch-use-slots")?.focus());
+      }
     } catch (cause) {
-      if (requestVersion === slotRequestVersion.current)
+      if (requestVersion === slotRequestVersion.current) {
         setSlotError(cause instanceof Error ? cause.message : "Could not preview free slots.");
+        requestAnimationFrame(() => document.getElementById("batch-preview-slots")?.focus());
+      }
     }
     finally {
       if (slotAbortRef.current === controller) slotAbortRef.current = null;
@@ -349,7 +355,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
       </details>
       {!attempted && <details id="batch-weekly-slots" className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3"><summary className="cursor-pointer text-[12px] font-bold text-[var(--text-secondary)]">Weekly posting slots · optional{slotApplied ? " · applied" : ""}</summary><div className="mt-3 border-t border-[var(--line)] pt-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] font-semibold text-[var(--text-secondary)]">Use weekly posting slots</p><button id="batch-preview-slots" type="button" disabled={slotBusy || !selectedSlotPlatforms.length} onClick={() => void previewSlots()} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] font-semibold text-[var(--accent-text)] disabled:opacity-45">{slotBusy ? "Finding slots…" : "Preview next free slots"}</button></div><p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Suggestions start at least 10 minutes from now. Slots apply to the four draft platforms; other platforms can use custom reminder times.</p>
         {slotError && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{slotError}</p>}
-        {slotPreview && !slotApplied && <div className="mt-3 space-y-2"><p className="text-[11px] font-bold text-[var(--text-secondary)]">Suggested in {slotPreview.timeZone}</p>{slotPreview.suggestions.map((item) => <p key={item.platform} className="text-[12px] text-[var(--text-secondary)]">{platforms[item.platform].name}: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(item.scheduledFor))}{item.skippedConflicts ? ` · ${item.skippedConflicts} occupied ${item.skippedConflicts === 1 ? "slot" : "slots"} skipped` : ""}</p>)}<button type="button" onClick={applySuggestedSlots} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)]">Use these reminder times</button></div>}
+        {slotPreview && !slotApplied && <div className="mt-3 space-y-2"><p className="text-[11px] font-bold text-[var(--text-secondary)]">Suggested in {slotPreview.timeZone}</p>{slotPreview.suggestions.map((item) => <p key={item.platform} className="text-[12px] text-[var(--text-secondary)]">{platforms[item.platform].name}: {new Intl.DateTimeFormat("en-US", { timeZone: slotPreview.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(item.scheduledFor))}{item.skippedConflicts ? ` · ${item.skippedConflicts} occupied ${item.skippedConflicts === 1 ? "slot" : "slots"} skipped` : ""}</p>)}{slotPreviewExpired && <p role="alert" className="text-[11px] text-[var(--danger)]">These suggested times have passed. Find new times before using them.</p>}<button id="batch-use-slots" type="button" disabled={slotBusy} onClick={slotPreviewExpired ? () => void previewSlots() : applySuggestedSlots} className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-[12px] font-bold text-[var(--accent-text)] disabled:opacity-45">{slotPreviewExpired ? "Find new times" : "Use these reminder times"}</button></div>}
         {slotApplied && <div className="mt-3 flex flex-wrap items-center gap-3"><p id="batch-slot-applied-status" tabIndex={-1} role="status" className={`rounded text-[12px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${expiredSlotPlatforms.length ? "text-[var(--danger)]" : "text-[var(--positive)]"}`}>{expiredSlotPlatforms.length ? "A suggested time has passed. Find new times before confirming." : "Suggested times added for review below."}</p>{expiredSlotPlatforms.length > 0 && <button id="batch-refresh-slots" type="button" disabled={slotBusy} onClick={() => void previewSlots()} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-45">Find new times</button>}<button id="batch-custom-reminders" type="button" onClick={useCustomReminderTimes} className="text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use custom reminder times</button></div>}
       </div></details>}
       {destinations.length > 0 ? <div>
