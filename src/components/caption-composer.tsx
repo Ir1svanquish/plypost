@@ -26,6 +26,8 @@ type Suggestion = {
   voiceUpdatedAt: string | null; observations: string | null; draft: string;
 };
 
+const captionReadyNotice = "Check the facts and edit the suggestion before using it.";
+
 function examplesFromText(text: string): string[] {
   return text.split(/\r?\n\s*---\s*\r?\n/).map((item) => item.trim()).filter(Boolean);
 }
@@ -158,6 +160,7 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
   const suggestionCurrent = Boolean(suggestion && suggestion.source === source && suggestion.revision === revision &&
     suggestion.imageId === imageId && suggestion.style === style &&
     suggestion.voiceUpdatedAt === (style === "personal" ? profile?.updatedAt ?? null : null));
+  const shownNotice = suggestion && !suggestionCurrent && notice === captionReadyNotice ? "" : notice;
 
   async function generateCaption() {
     if (!canGenerate || working) return;
@@ -184,7 +187,7 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
       if (!draft?.trim()) throw new Error("No usable caption was returned.");
       setSuggestion({ source: sourceAtStart, revision: revisionAtStart, imageId, style,
         voiceUpdatedAt, observations: imageId ? data.observations ?? null : null, draft });
-      setNotice("Check the facts and edit the suggestion before using it.");
+      setNotice(captionReadyNotice);
     } catch (cause) {
       if (!controller.signal.aborted && captionRequestId.current === requestId && currentEditorEpoch.current === editorEpochAtStart)
         setError(cause instanceof Error ? cause.message : "Could not generate a caption.");
@@ -232,7 +235,7 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
         <button type="button" onClick={() => void generateCaption()} disabled={working || !canGenerate} className="gradient-button min-h-10 rounded-lg px-4 text-[12px] font-bold text-white disabled:opacity-50">{busy === "caption" ? "Generating…" : "Generate suggestion"}</button>
         {!canGenerate && <p className="text-[11px] text-[var(--text-muted)]">Add notes or a photo to start.{style === "personal" && !profile ? " Analyze past posts to use My style." : ""}</p>}
         {error && <p role="alert" className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</p>}
-        {notice && <p role="status" className="rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] text-[var(--positive)]">{notice}</p>}
+        {shownNotice && <p role="status" className="rounded-lg bg-[var(--positive-soft)] px-3 py-2 text-[12px] text-[var(--positive)]">{shownNotice}</p>}
         {suggestion && <div className="rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3">
           <div className="flex items-center justify-between gap-2"><p className="text-[12px] font-bold text-[var(--text)]">Review suggested caption</p><button type="button" onClick={() => { setSuggestion(null); setNotice(""); }} className="text-[11px] font-semibold text-[var(--text-muted)]">Discard</button></div>
           {suggestion.observations && <div className="mt-2 rounded-lg bg-[var(--surface-muted)] p-2.5"><p className="text-[11px] font-bold text-[var(--text-secondary)]">What AI noticed · verify this</p><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">{suggestion.observations}</p></div>}
