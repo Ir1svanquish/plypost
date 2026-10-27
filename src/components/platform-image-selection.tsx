@@ -61,8 +61,8 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
       <div className="mt-2 flex flex-wrap gap-2">
         {selectedIds.map((id, index) => <div key={id} className="flex items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] px-1.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">
           <span>{index + 1}. Draft {sourceIds.indexOf(id) + 1}</span>
-          <button type="button" aria-label={`Move image ${index + 1} earlier`} title="Move earlier" disabled={disabled || index === 0} onClick={() => move(index, -1)} className="rounded p-1 text-[var(--accent-text)] hover:bg-[var(--surface)] disabled:opacity-30"><ChevronLeft size={13} aria-hidden="true" /></button>
-          <button type="button" aria-label={`Move image ${index + 1} later`} title="Move later" disabled={disabled || index === selectedIds.length - 1} onClick={() => move(index, 1)} className="rounded p-1 text-[var(--accent-text)] hover:bg-[var(--surface)] disabled:opacity-30"><ChevronRight size={13} aria-hidden="true" /></button>
+          <button type="button" aria-label={`Move draft image ${sourceIds.indexOf(id) + 1} earlier`} title="Move earlier" disabled={disabled || index === 0} onClick={() => move(index, -1)} className="rounded p-1 text-[var(--accent-text)] hover:bg-[var(--surface)] disabled:opacity-30"><ChevronLeft size={13} aria-hidden="true" /></button>
+          <button type="button" aria-label={`Move draft image ${sourceIds.indexOf(id) + 1} later`} title="Move later" disabled={disabled || index === selectedIds.length - 1} onClick={() => move(index, 1)} className="rounded p-1 text-[var(--accent-text)] hover:bg-[var(--surface)] disabled:opacity-30"><ChevronRight size={13} aria-hidden="true" /></button>
         </div>)}
       </div>
     </div>}
