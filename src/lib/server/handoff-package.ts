@@ -1,5 +1,5 @@
 import { strToU8, Zip, ZipPassThrough, zipSync } from "fflate";
-import { assistedDestinations } from "../assisted";
+import { assistedDestinations, missingHandoffMedia } from "../assisted";
 import { hasManualReminder, parseWorkspace } from "../workspace";
 import { database } from "./db";
 import { getMedia, listMedia, MAX_IMAGE_BYTES } from "./media";
@@ -67,9 +67,10 @@ function prepareHandoffPackage(userId: string, id: string): { files: PackageFile
       return found.bytes;
     } });
     notes.push("", `Video: ${path}`, `Original name: ${video.original_name}`);
-  } else if (item.destination === "youtube" || item.destination === "tiktok") {
-    notes.push("", "No video is attached to this handoff. Bring your video separately.");
   }
+  const missingMedia = missingHandoffMedia(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId));
+  if (missingMedia === "video") notes.push("", "No video is attached to this handoff. Bring your video separately.");
+  else if (missingMedia) notes.push("", "No photo or video is attached to this handoff. Bring one separately.");
   files.push({ name: "handoff.txt", load: () => strToU8(`${notes.join("\n")}\n`) });
   const filename = `plypost-${item.destination}-${item.id.slice(0, 8)}.zip`;
   return { files, filename };

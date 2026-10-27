@@ -82,6 +82,22 @@ test("video-first handoff keeps text export honest when no video is stored", asy
   assert.match(strFromU8(files["handoff.txt"]), /No video is attached to this handoff/);
 });
 
+test("handoff ZIP media notes match each platform's image or video requirement", async () => {
+  const imageBytes = await sharp({ create: { width: 3, height: 2, channels: 3, background: "#77aa55" } }).png().toBuffer();
+  const image = (await createMedia(owner, { name: "photo.png", type: "image/png", bytes: imageBytes })).media;
+  const notesFor = (destination, mediaIds = []) => {
+    const saved = handoff(destination, mediaIds, mediaIds.map(() => ""));
+    const files = unzipSync(buildHandoffPackage(owner, saved.id).bytes);
+    return strFromU8(files["handoff.txt"]);
+  };
+
+  assert.doesNotMatch(notesFor("tiktok", [image.id]), /No video is attached|No photo or video is attached/);
+  assert.match(notesFor("tiktok"), /No photo or video is attached/);
+  assert.match(notesFor("youtube", [image.id]), /No video is attached/);
+  assert.match(notesFor("instagram"), /No photo or video is attached/);
+  assert.doesNotMatch(notesFor("facebook"), /No photo or video is attached/);
+});
+
 test("checklist package says no reminder instead of exporting its storage timestamp", () => {
   const stamp = new Date().toISOString();
   const saved = addAssisted(owner, { id: randomUUID(), title: "No date", destination: "facebook", text: "Post when ready",
