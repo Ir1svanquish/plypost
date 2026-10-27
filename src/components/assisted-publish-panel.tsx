@@ -513,13 +513,13 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               </div>}
               {item.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {item.placeLabel} <span className="text-[var(--text-soft)]">(add on the platform yourself)</span></p>}
               {imageLimitWarning(item.destination, item.mediaIds?.length ?? 0) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(item.destination, item.mediaIds?.length ?? 0)}</p>}
-              {!editingImages && <MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} onDirtyChange={(dirty) => setDescriptionDirtyIds((current) => {
+              <div hidden={Boolean(editingImages)}><MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} onDirtyChange={(dirty) => setDescriptionDirtyIds((current) => {
                 if (Boolean(current[item.id]) === dirty) return current;
                 const next = { ...current };
                 if (dirty) next[item.id] = true;
                 else delete next[item.id];
                 return next;
-              })} />}
+              })} /></div>
               {item.status === "queued" && !editingImages && <button type="button" onClick={() => startImageEdit(item)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedImageIds.length ? "Change images for this handoff" : "Attach images to this handoff"}</button>}
               {item.status === "queued" && editingImages && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
                 <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Images for {target.name}</p>
