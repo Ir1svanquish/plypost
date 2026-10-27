@@ -244,7 +244,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
       {error && <div role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</div>}
       {missingCount > 0 && libraryLoaded && !loading && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><p role="status">{missingCount} saved {missingCount === 1 ? "image is" : "images are"} unavailable.</p><button type="button" onClick={() => setSelection(selected.map((item) => item.id))} disabled={controlsBusy} className="font-semibold underline underline-offset-2 disabled:opacity-50">Remove unavailable</button></div>}
       {selected.length > 0 && <ul className="mt-4 grid max-h-[430px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} id={`${inputId}-${item.id}-selected`} tabIndex={-1} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">
-        <div className="flex min-w-0 gap-3">
+        <div className="flex min-w-0 flex-col gap-3 xl:flex-row">
           <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={descriptions[item.id] || item.name} fill sizes="80px" className="object-cover" /></div>
           <div className="flex min-w-0 flex-1 flex-col justify-between">
             <span className="truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{index + 1}. {item.name}</span>

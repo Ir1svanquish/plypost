@@ -59,8 +59,8 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
         </button>;
       })}
     </div>
-    {selectedIds.length > 1 && <div className="mt-3 border-t border-[var(--line)] pt-2">
-      <p className="text-[11px] font-semibold text-[var(--text-secondary)]">Upload order</p>
+    {selectedIds.length > 1 && <details className="mt-3 border-t border-[var(--line)] pt-2">
+      <summary className="cursor-pointer text-[11px] font-semibold text-[var(--accent-text)]">Upload order · {selectedIds.length} images</summary>
       <div className="mt-2 flex flex-wrap gap-2">
         {selectedIds.map((id, index) => <div key={id} className="flex items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] px-1.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">
           <span>{index + 1}. Draft {sourceIds.indexOf(id) + 1}</span>
@@ -68,7 +68,7 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
           <button type="button" aria-label={`Move draft image ${sourceIds.indexOf(id) + 1} later`} title="Move later" disabled={disabled || index === selectedIds.length - 1} onClick={() => move(index, 1)} className="rounded p-1 text-[var(--accent-text)] hover:bg-[var(--surface)] disabled:opacity-30"><ChevronRight size={13} aria-hidden="true" /></button>
         </div>)}
       </div>
-    </div>}
+    </details>}
     {selectedIds.length === 0 && <p role="status" className="mt-2 text-[11px] text-[var(--warning)]">No images will be included in this handoff.</p>}
   </section>;
 }
