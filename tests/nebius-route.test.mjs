@@ -65,7 +65,9 @@ test("Nebius routes use Nemotron through Token Factory and keep planning input l
       assert.equal(call.body.model, "nvidia/nemotron-3-super-120b-a12b");
       assert.deepEqual(call.body.chat_template_kwargs, { enable_thinking: false });
     }
-    assert.equal(calls[0].body.messages[1].content, "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.");
+    assert.deepEqual(JSON.parse(calls[0].body.messages[1].content), {
+      draft: "Our Saturday workshop starts at 2 p.m. Doors open at 1:30. Please bring a laptop.",
+    });
     assert.deepEqual(JSON.parse(calls[1].body.messages[1].content), brief);
     assert.equal(JSON.stringify(calls[1].body).includes("weekStart"), false);
     assert.equal(database().prepare("SELECT COUNT(*) AS count FROM jobs WHERE user_id=?").get(owner).count, 0);

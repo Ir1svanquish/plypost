@@ -35,7 +35,7 @@ export function AIReviewPanel({ source, original, suggestions, available, select
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div>
         <h3 ref={headingRef} tabIndex={-1} className="text-[13px] font-bold text-[var(--text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">Review before replacing</h3>
-        <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Compare and edit each suggestion before using it. Changed numbers, weekdays or links start unchecked. Applying a version also selects its platform.</p>
+        <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Suggestions start unchecked. Compare and edit each one, then select only the versions you want to apply. Applying a version also selects its platform.</p>
       </div>
       <button type="button" onClick={onDiscard} disabled={busy} className="text-[12px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text)] disabled:opacity-45">Discard suggestions</button>
     </div>

@@ -852,12 +852,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
         return;
       }
       setAiReview({ generation: ++aiReviewGeneration.current, source, original: previousVariants, suggestions: data.variants, platforms: requested, revision: revisionAtStart });
-      const preselected = selected.length ? requested.filter((id) => {
-        const details = compareAiLiterals(source, data.variants?.[id] ?? "");
-        return details.missing.length === 0 && details.added.length === 0;
-      }) : [];
-      setAiApplyIds(preselected);
-      setNotice({ kind: "success", text: `${requested.length} ${requested.length === 1 ? "suggestion is" : "suggestions are"} ready. ${selected.length && preselected.length < requested.length ? "Versions with changed details start unchecked. " : ""}Compare below and choose what to apply.` });
+      setAiApplyIds([]);
+      setNotice({ kind: "success", text: `${requested.length} ${requested.length === 1 ? "suggestion is" : "suggestions are"} ready. Compare below, then select each version you want to apply.` });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "AI adaptation failed." });
     } finally {
