@@ -148,19 +148,35 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      for (const file of picked) {
-        const body = new FormData();
-        body.append("file", file);
-        const response = await fetch("/api/media", {
-          method: "POST", body, cache: "no-store", credentials: "same-origin", signal: controller.signal,
-        });
-        if (!response.ok) throw new Error(await responseError(response, `Could not upload ${file.name}.`));
-        const payload: unknown = await response.json();
-        const asset = payload && typeof payload === "object" && "media" in payload ? payload.media : null;
-        if (!isMediaAsset(asset)) throw new Error(`Could not read the uploaded image ${file.name}.`);
-        setMedia((current) => [asset, ...current.filter((item) => item.id !== asset.id)]);
-        const next = [...selectedRef.current.filter((id) => id !== asset.id), asset.id].slice(0, maxSelected);
-        setSelection(next);
+      for (let offset = 0; offset < picked.length; offset += 2) {
+        const batch = picked.slice(offset, offset + 2);
+        const results = await Promise.allSettled(batch.map(async (file) => {
+          const body = new FormData();
+          body.append("file", file);
+          const response = await fetch("/api/media", {
+            method: "POST", body, cache: "no-store", credentials: "same-origin", signal: controller.signal,
+          });
+          if (!response.ok) throw new Error(await responseError(response, `Could not upload ${file.name}.`));
+          const payload: unknown = await response.json();
+          const asset = payload && typeof payload === "object" && "media" in payload ? payload.media : null;
+          if (!isMediaAsset(asset)) throw new Error(`Could not read the uploaded image ${file.name}.`);
+          return asset;
+        }));
+        if (controller.signal.aborted) return;
+        const uploaded = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+        if (uploaded.length) {
+          const uploadedIds = new Set(uploaded.map((asset) => asset.id));
+          setMedia((current) => [...uploaded, ...current.filter((item) => !uploadedIds.has(item.id))]);
+          const next = [...selectedRef.current];
+          for (const asset of uploaded) {
+            const existing = next.indexOf(asset.id);
+            if (existing >= 0) next.splice(existing, 1);
+            next.push(asset.id);
+          }
+          setSelection(next.slice(0, maxSelected));
+        }
+        const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+        if (failure) throw failure.reason;
       }
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Image upload failed.");
