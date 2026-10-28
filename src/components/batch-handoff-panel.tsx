@@ -39,9 +39,13 @@ function sameIds(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index]);
 }
 
+function unpreparedDraftDestinations(draft: SavedDraft, existing: AssistedPost[]): AssistedDestinationId[] {
+  return platformDisplayIds.filter((id) => draft.selected.includes(id) &&
+    !existing.some((item) => item.sourceDraftId === draft.id && item.destination === id));
+}
+
 export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, mediaBusy, stale, startExpanded = false, onPrepare, onOpenAssisted, onOpenLatest, onStateChange }: Props) {
-  const [initialDestinations] = useState<AssistedDestinationId[]>(() => platformDisplayIds.filter((id) =>
-    draft.selected.includes(id) && !existing.some((item) => item.sourceDraftId === draft.id && item.destination === id)));
+  const [initialDestinations, setInitialDestinations] = useState<AssistedDestinationId[]>(() => unpreparedDraftDestinations(draft, existing));
   const [open, setOpen] = useState(startExpanded);
   const [destinations, setDestinations] = useState<AssistedDestinationId[]>(() => initialDestinations);
   const [focusedDestination, setFocusedDestination] = useState<AssistedDestinationId | null>(null);
@@ -152,7 +156,9 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     attemptedItemsRef.current = null;
     attemptedSlotModeRef.current = false;
     setAttempted(false);
-    setDestinations(initialDestinations);
+    const resetDestinations = unpreparedDraftDestinations(draft, existing);
+    setInitialDestinations(resetDestinations);
+    setDestinations(resetDestinations);
     setFocusedDestination(null);
     setReminders({}); setTexts({}); setImageSelections({});
     setVideoId(draft.videoId ?? null); setVideoSelections({});
@@ -180,7 +186,9 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     attemptedSlotModeRef.current = false;
     setAttempted(false);
     setPrepared(false);
-    setDestinations(initialDestinations);
+    const resetDestinations = unpreparedDraftDestinations(draft, existing);
+    setInitialDestinations(resetDestinations);
+    setDestinations(resetDestinations);
     setFocusedDestination(null);
     setReminders({});
     setTexts({});
