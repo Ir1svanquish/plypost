@@ -30,5 +30,6 @@ export function imageLimitWarning(destination: string, count: number, hasVideo =
 /** Images in a YouTube video handoff are optional thumbnail references, never video frames. */
 export function defaultHandoffImageIds(destination: string, draftImageIds: readonly string[], hasVideo = false): string[] {
   if (destination === "youtube") return [];
+  if (hasVideo && (destination === "mastodon" || destination === "linkedin")) return [];
   return draftImageIds.slice(0, imageLimitForDestination(destination, hasVideo));
 }

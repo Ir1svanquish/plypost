@@ -206,6 +206,37 @@ test("Threads counts a video within its twenty carousel media items", async () =
   assert.throws(() => updateAssistedVideo(owner, photos.id, null, clip.id), /fewer images/);
 });
 
+test("Mastodon and LinkedIn video handoffs start without draft photos", async () => {
+  const ids = [];
+  for (let index = 0; index < 2; index++) {
+    ids.push((await createMedia(owner, {
+      name: `video-first-${index}.png`, type: "image/png",
+      bytes: await sharp({ create: { width: 4, height: 4, channels: 3,
+        background: { r: 80 + index * 40, g: 100, b: 140 } } }).png().toBuffer(),
+    })).media.id);
+  }
+  const clip = createVideo(owner, { name: "video-first.mp4", type: "video/mp4",
+    bytes: readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4")) }).video;
+  const saved = saveDraft(owner, { ...draft("Separate video flow", ["linkedin", "mastodon"], {}, ids),
+    mediaAlt: ["First photo", "Second photo"], videoId: clip.id });
+  const scheduledFor = new Date(Date.now() + 60_000).toISOString();
+  const requested = ["linkedin", "mastodon"].map((destination) => ({ destination, scheduledFor, videoId: clip.id }));
+
+  for (const destination of ["linkedin", "mastodon"]) {
+    assert.deepEqual(defaultHandoffImageIds(destination, ids, true), []);
+    assert.deepEqual(defaultHandoffImageIds(destination, ids, false), ids);
+  }
+  const items = prepareAssistedBatch(owner, saved.id, randomUUID(), requested);
+  assert.ok(items.every((item) => item.videoId === clip.id && item.mediaIds.length === 0));
+  const [photosOnly] = prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ destination: "linkedin", scheduledFor }]);
+  assert.deepEqual(photosOnly.mediaIds, ids);
+  const [chosenMixed] = prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ destination: "mastodon", scheduledFor, videoId: clip.id, mediaIds: [ids[1]] }]);
+  assert.deepEqual(chosenMixed.mediaIds, [ids[1]]);
+  assert.deepEqual(chosenMixed.mediaAlt, ["Second photo"]);
+});
+
 test("Bluesky handoffs use either video or images without losing older mixed items", async () => {
   const ids = [];
   for (let index = 0; index < 2; index++) {
