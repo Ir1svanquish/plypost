@@ -161,6 +161,10 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
     suggestion.imageId === imageId && suggestion.style === style &&
     suggestion.voiceUpdatedAt === (style === "personal" ? profile?.updatedAt ?? null : null));
   const shownNotice = suggestion && !suggestionCurrent && notice === captionReadyNotice ? "" : notice;
+  const styleOptions = (ids: readonly CaptionStyleId[]) => <div className="mt-2 grid gap-2 sm:grid-cols-2">{ids.map((id) => <label key={id} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 ${style === id ? "border-[var(--accent-border)] bg-[var(--surface)]" : "border-[var(--line)] bg-[var(--surface-muted)]"}`}>
+    <input type="radio" name="caption-style" value={id} checked={style === id} onChange={() => setStyle(id)} disabled={working || (id === "personal" && (profileStatus !== "ready" || !profile))} className="mt-0.5 accent-[var(--accent)] disabled:opacity-40" />
+    <span><span className="block text-[12px] font-bold text-[var(--text)]">{captionStyles[id].label}{id === "personal" && !profile ? " · set up first" : ""}</span><span className="block text-[11px] leading-4 text-[var(--text-muted)]">{captionStyles[id].description}</span></span>
+  </label>)}</div>;
 
   async function generateCaption() {
     if (!canGenerate || working) return;
@@ -202,13 +206,11 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
       <div className="mt-4 space-y-4">
         <p className="text-[12px] leading-5 text-[var(--text-muted)]">Uses the notes above and one selected photo. A video can stay attached, but AI does not read its frames. Nothing is sent until you click Generate suggestion.</p>
         <fieldset><legend className="text-[12px] font-bold text-[var(--text)]">Writing style</legend>
-          {([[["default", "personal"], "Start here"], [["direct", "practical", "conversation", "behindScenes", "story"], "Other styles"]] as const).map(([ids, heading]) => <div key={heading} className="mt-3">
-            <p className="text-[11px] font-semibold text-[var(--text-muted)]">{heading}</p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">{ids.map((id) => <label key={id} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 ${style === id ? "border-[var(--accent-border)] bg-[var(--surface)]" : "border-[var(--line)] bg-[var(--surface-muted)]"}`}>
-              <input type="radio" name="caption-style" value={id} checked={style === id} onChange={() => setStyle(id)} disabled={working || (id === "personal" && (profileStatus !== "ready" || !profile))} className="mt-0.5 accent-[var(--accent)] disabled:opacity-40" />
-              <span><span className="block text-[12px] font-bold text-[var(--text)]">{captionStyles[id].label}{id === "personal" && !profile ? " · set up first" : ""}</span><span className="block text-[11px] leading-4 text-[var(--text-muted)]">{captionStyles[id].description}</span></span>
-            </label>)}</div>
-          </div>)}
+          <div className="mt-3"><p className="text-[11px] font-semibold text-[var(--text-muted)]">Start here</p>{styleOptions(["default", "personal"])}</div>
+          <details className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5">
+            <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Other styles{style !== "default" && style !== "personal" ? ` · ${captionStyles[style].label}` : ""}</summary>
+            {styleOptions(["direct", "practical", "conversation", "behindScenes", "story"])}
+          </details>
         </fieldset>
         <details className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
           <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Set up my style {profile ? "· saved" : "· from 3–6 past posts"}</summary>
