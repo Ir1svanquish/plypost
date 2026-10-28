@@ -30,11 +30,11 @@ The Next.js server calls Nebius Token Factory's chat completions API when the us
 
 ### Feedback draft — review before submitting
 
-Token Factory let us use text and vision models through one server-side inference API. The model list and local smoke checks made it possible to validate both flows before wiring them into the editor. A practical improvement would be clearer, model-specific examples for vision input and output limits. This is suggested wording; the entrant should edit it to reflect their own experience.
+Token Factory gave us access to Nemotron text and vision models through the same chat completions API. Both returned usable results in our tests, which made it straightforward to put writing and image captioning in one editor. We also saw a text rewrite change “is testing” to “tested.” That small tense shift could make a public post misleading, so Plypost now asks the model to preserve the status of work and leaves every suggestion unchecked for review. A model-specific example for preserving planned, ongoing, and unverified claims in short rewrites would help. Clearer guidance on vision input size and output limits would also help developers build reliable image workflows. The entrant should edit this draft to match their own experience before submitting it.
 
 ## Private judging instructions
 
-Put the dedicated demo email and password in Devpost's testing instructions, not in this file or the public repository. First confirm the hosted account contains only fictional data. A shared login lets judges see and edit the same workspace; back up or reset sample content before judging, and do not reuse a personal password. Keep the service available through the judging period stated in the rules.
+Put the dedicated demo email and password in Devpost's testing instructions, not in this file or the public repository. First confirm the hosted account contains only fictional data. A shared login lets judges see and edit the same workspace; back up or reset sample content before judging, and do not reuse a personal password. Keep the service available free of charge through the judging period, which ends December 15, 2026 at noon Pacific Time (December 16 at 04:00 in Hong Kong).
 
 1. Open https://plypost.onrender.com/ and sign in with the dedicated credentials supplied privately in Devpost.
 2. Open **Create**. Enter a fictional post or open a saved example from **Drafts**. Add an image if testing the vision flow.
@@ -53,7 +53,7 @@ Record the working application on a desktop browser. Use only fictional text and
 | 0:00–0:15 | Login complete; Create page | One idea usually turns into several slightly different posts. |
 | 0:15–0:40 | Type a short fictional draft and attach a sample image | The source and media stay together in one workspace. |
 | 0:40–1:10 | Open Generate caption; select the image and generate; edit the suggestion | Nemotron 3.5 Super VL proposes a caption; the user keeps control of the text. |
-| 1:10–1:40 | Select LinkedIn and Threads; request platform versions and inspect both | Nemotron 3 Super drafts separate versions through Nebius Token Factory. |
+| 1:10–1:40 | Select LinkedIn and Threads; request platform versions, edit one suggestion and apply only that version | Nemotron 3 Super drafts versions through Nebius Token Factory; suggestions begin unchecked. |
 | 1:40–2:05 | Review posts; correct a detail and choose images per platform | The review step catches differences before a handoff is prepared. |
 | 2:05–2:25 | Open Assisted and Plan | Posting stays manual; dates and handoff status remain visible. |
 | 2:25–2:30 | End card with demo and source URLs | Invite judges to test the hosted demo. |
@@ -65,6 +65,7 @@ Do a test recording first. If a live model call is slow, trim waiting time in th
 - [x] Hosted site and health endpoint respond; the deployed application code matches the reviewed application commit. Documentation updates may be pushed separately.
 - [x] MIT license and local setup instructions are in the repository.
 - [x] Known-format credential prefixes and sensitive filenames were checked in the current reachable Git history; no match was found. This is not a guarantee against every secret format.
+- [x] On 2026-10-28, unauthenticated requests to the hosted drafts, media, videos, backup, AI style, brand brief and account-connection endpoints returned HTTP 401.
 - [ ] Project owner reviews logo and sample-media provenance, and the public repository contents.
 - [x] GitHub repository is public; an unauthenticated request returned HTTP 200 for the repository and its MIT license on 2026-10-26.
 - [ ] A dedicated judge login and fictional workspace are verified; credentials are supplied privately in Devpost.

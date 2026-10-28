@@ -1,6 +1,6 @@
 # Nebius × NVIDIA 大赛准备
 
-拟参加 [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/rules) 的 **Best Apps and Agents** 赛道。截止时间为 2026 年 10 月 30 日 10:00 PDT。官方规则要求应用运行时调用 Nebius Token Factory 或部署在 Nebius AI Cloud，并使用至少一个 NVIDIA 开源模型。
+拟参加 [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/rules) 的 **Best Apps and Agents** 赛道。截止时间为 2026 年 10 月 30 日 10:00 PDT，即香港时间 10 月 31 日 01:00。官方规则要求应用运行时调用 Nebius Token Factory 或部署在 Nebius AI Cloud，并使用至少一个 NVIDIA 开源模型。
 
 Plypost 在服务端请求 Nebius Token Factory 的 `/v1/chat/completions`。文字改写、旧帖风格提炼和一周选题使用 NVIDIA Nemotron 3 Super（`nvidia/nemotron-3-super-120b-a12b`）；看图起稿使用 NVIDIA Nemotron 3.5 Super VL（`nvidia/Nemotron-3.5-Super-VL`）。旧帖、指定图片、当前草稿、人工发布文案或品牌资料分别只在用户点击对应生成操作时发送。人工发布文案改写不发送附带素材或发帖结果。旧帖原文不保存；提炼出的个人风格指南保存在用户工作区及完整备份中。图片起稿先展示视觉观察与可编辑文案；AI 不自动向社交平台发帖。
 
