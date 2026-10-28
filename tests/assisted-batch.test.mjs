@@ -175,6 +175,47 @@ test("X counts a saved video toward its four media items in every handoff path",
     createdAt: new Date().toISOString(), status: "queued" }).mediaIds.length, 4);
 });
 
+test("Bluesky handoffs use either video or images without losing older mixed items", async () => {
+  const ids = [];
+  for (let index = 0; index < 2; index++) {
+    ids.push((await createMedia(owner, {
+      name: `bluesky-media-${index}.png`, type: "image/png",
+      bytes: await sharp({ create: { width: 4, height: 4, channels: 3,
+        background: { r: 70, g: 90 + index * 40, b: 150 } } }).png().toBuffer(),
+    })).media.id);
+  }
+  const clip = createVideo(owner, { name: "bluesky-clip.mp4", type: "video/mp4",
+    bytes: readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4")) }).video;
+  const saved = saveDraft(owner, { ...draft("Bluesky media", ["bluesky"], {}, ids),
+    mediaAlt: ["First image", "Second image"], videoId: clip.id });
+  const request = { destination: "bluesky", scheduledFor: new Date(Date.now() + 60_000).toISOString() };
+
+  assert.equal(imageLimitForDestination("bluesky", true), 0);
+  assert.deepEqual(defaultHandoffImageIds("bluesky", ids, true), []);
+  assert.match(imageLimitWarning("bluesky", 1, true), /video or images/);
+  const [videoOnly] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...request, videoId: clip.id }]);
+  assert.deepEqual(videoOnly.mediaIds, []);
+  assert.deepEqual(videoOnly.mediaAlt, []);
+  assert.equal(videoOnly.videoId, clip.id);
+  const [imagesOnly] = prepareAssistedBatch(owner, saved.id, randomUUID(), [request]);
+  assert.deepEqual(imagesOnly.mediaIds, ids);
+  assert.equal(imagesOnly.videoId, undefined);
+
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...request, mediaIds: [ids[0]], videoId: clip.id }]), /valid text and UTC timestamps/);
+  assert.throws(() => updateAssistedImages(owner, videoOnly.id, [], [], [ids[0]], ["First image"]), /fewer images/);
+  assert.throws(() => updateAssistedVideo(owner, imagesOnly.id, null, clip.id), /fewer images/);
+  assert.throws(() => addAssisted(owner, {
+    id: randomUUID(), title: "Mixed", destination: "bluesky", text: "Mixed media",
+    mediaIds: [ids[0]], mediaAlt: ["First image"], videoId: clip.id,
+    scheduledFor: request.scheduledFor, createdAt: new Date().toISOString(), status: "queued",
+  }), /fewer images/);
+
+  // Previously saved handoffs are still readable so the owner can correct them.
+  const legacy = { ...videoOnly, mediaIds: [ids[0]], mediaAlt: ["First image"] };
+  assert.deepEqual(parseWorkspace({ version: 3, drafts: [], schedule: [], assisted: [legacy] })?.assisted, [legacy]);
+});
+
 test("YouTube video handoffs do not silently carry draft photos as video media", async () => {
   const ids = [];
   for (let index = 0; index < 2; index++) {

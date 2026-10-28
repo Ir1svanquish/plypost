@@ -1,11 +1,13 @@
 # 平台接入笔记
 
 草稿图片上限为 20 张，作为跨平台素材集合。单篇可发布的数量取决于平台：
-[Bluesky 最多 4 张](https://docs.bsky.app/docs/tutorials/creating-a-post)、
+[Bluesky 单帖可发一段视频或最多 4 张图片](https://bsky.social/about/blog/01-29-2026-transparency-report-2025)、
 [Mastodon 通常 4 张且实例可配置](https://docs.joinmastodon.org/methods/instance/)、
 [LinkedIn 多图帖 2–20 张](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/multiimage-post-api)、
 [Threads 轮播最多 20 个媒体项目](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api)。
 X 的[普通帖最多 4 个媒体项目](https://help.x.com/en/using-x/how-to-post)。人工发布包保留全部素材，超出已知上限时显示提醒；Plypost 不自动裁剪或发送图片。地点备注同样只随手动发布包保存，不是平台位置标签。
+
+Bluesky 人工交接若附视频，默认不带草稿图片；交接编辑和服务端均阻止把图片与视频保存为同一条新待办。草稿仍可同时存放两类素材，已保存的旧混合待办也会保留以便手动修正。
 
 核对于 2026-10-24。这里只记录下一步开发需要的门槛；平台政策和接口会变，动手接入前要重新核对官方文档和开发者后台。**文档允许发帖，不代表 Plypost 已拿到权限。**
 

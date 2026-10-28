@@ -19,6 +19,12 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
   const limit = imageLimitForDestination(destination, hasVideo);
   const name = assistedDestinations[destination].name;
 
+  if (destination === "bluesky" && hasVideo && selectedIds.length === 0) {
+    return <p className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] leading-5 text-[var(--text-muted)]">
+      Bluesky video posts do not include photos. Your draft images stay saved; remove the video from this handoff to choose them.
+    </p>;
+  }
+
   function toggle(id: string) {
     if (selectedIds.includes(id)) onChange(selectedIds.filter((current) => current !== id));
     else if (selectedIds.length < limit) onChange([...selectedIds, id]);
@@ -38,6 +44,8 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
     <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">
       {destination === "youtube"
         ? "Choose at most one image as a thumbnail reference. YouTube Studio uploads the video separately, and custom thumbnails require a verified account."
+        : destination === "bluesky" && hasVideo
+        ? "Bluesky takes a video or images in one post. Deselect all photos or remove the video before confirming."
         : selectedIds.length > limit
         ? `Remove ${selectedIds.length - limit} ${selectedIds.length - limit === 1 ? "image" : "images"}${destination === "x" && hasVideo ? " or detach the video" : ""} before confirming.`
         : sourceIds.length > limit
