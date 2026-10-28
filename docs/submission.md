@@ -63,7 +63,7 @@ Do a test recording first. If a live model call is slow, trim waiting time in th
 ## Release gate
 
 - [x] Hosted site and health endpoint respond; `/api/health` returned 200 on October 28.
-- [x] Render shows reviewed application commit `18e7768c0c4fc1bb1a6a17d48a26cf9082352ab3` as Live. The hosted page and `/api/health` both returned HTTP 200 on October 28; later documentation-only commits do not change the deployed application.
+- [x] Render shows reviewed application commit `5c3938daf835cabe117acabb5ccc823e06a04d48` as Live. The hosted page and `/api/health` both returned HTTP 200 on October 28; later documentation-only commits do not change the deployed application.
 - [x] MIT license and local setup instructions are in the repository.
 - [x] Known-format credential prefixes and sensitive filenames were checked in the current reachable Git history; no match was found. This is not a guarantee against every secret format.
 - [x] On 2026-10-28, unauthenticated requests to the hosted drafts, media, videos, backup, AI style, brand brief and account-connection endpoints returned HTTP 401.
