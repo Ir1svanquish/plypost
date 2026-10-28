@@ -131,6 +131,38 @@ test("each platform receives only its reviewed image subset, order and matching 
   }), /fewer images/);
 });
 
+test("Pinterest web handoffs keep video and images in separate Pins", async () => {
+  const image = (await createMedia(owner, { name: "pinterest-cover.png", type: "image/png",
+    bytes: await sharp({ create: { width: 4, height: 4, channels: 3, background: "#e46d52" } }).png().toBuffer(),
+  })).media;
+  const clip = createVideo(owner, { name: "pinterest-clip.mp4", type: "video/mp4",
+    bytes: readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4")) }).video;
+  const saved = saveDraft(owner, { ...draft("Pinterest media", ["bluesky"], {}, [image.id]),
+    mediaAlt: ["Cover image"], videoId: clip.id });
+  const request = { destination: "pinterest", text: "One Pin", scheduledFor: new Date(Date.now() + 60_000).toISOString() };
+
+  assert.equal(imageLimitForDestination("pinterest", true), 0);
+  assert.deepEqual(defaultHandoffImageIds("pinterest", [image.id], true), []);
+  assert.match(imageLimitWarning("pinterest", 1, true), /image Pin or a video Pin/);
+  const [videoOnly] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...request, videoId: clip.id }]);
+  assert.deepEqual(videoOnly.mediaIds, []);
+  assert.equal(videoOnly.videoId, clip.id);
+  const [imageOnly] = prepareAssistedBatch(owner, saved.id, randomUUID(), [request]);
+  assert.deepEqual(imageOnly.mediaIds, [image.id]);
+  assert.equal(imageOnly.videoId, undefined);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...request, mediaIds: [image.id], videoId: clip.id }]), /valid text and UTC timestamps/);
+  assert.throws(() => updateAssistedImages(owner, videoOnly.id, [], [], [image.id], ["Cover image"]), /fewer images/);
+  assert.throws(() => updateAssistedVideo(owner, imageOnly.id, null, clip.id), /fewer images/);
+  assert.throws(() => addAssisted(owner, {
+    id: randomUUID(), title: "Mixed Pin", destination: "pinterest", text: "One Pin",
+    mediaIds: [image.id], mediaAlt: ["Cover image"], videoId: clip.id,
+    scheduledFor: request.scheduledFor, createdAt: new Date().toISOString(), status: "queued",
+  }), /fewer images/);
+  const legacy = { ...videoOnly, mediaIds: [image.id], mediaAlt: ["Cover image"] };
+  assert.deepEqual(parseWorkspace({ version: 3, drafts: [], schedule: [], assisted: [legacy] })?.assisted, [legacy]);
+});
+
 test("X counts a saved video toward its four media items in every handoff path", async () => {
   const ids = [];
   for (let index = 0; index < 4; index++) {

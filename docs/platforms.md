@@ -10,8 +10,9 @@ X 的[普通帖最多 4 个媒体项目](https://help.x.com/en/using-x/how-to-po
 
 Bluesky 人工交接若附视频，默认不带草稿图片；交接编辑和服务端均阻止把图片与视频保存为同一条新待办。草稿仍可同时存放两类素材，已保存的旧混合待办也会保留以便手动修正。
 Mastodon 的[混合素材问题](https://github.com/mastodon/mastodon/issues/23605)仍在上游跟踪，标准网页端可能只显示视频；[LinkedIn 官方发帖说明](https://www.linkedin.com/help/linkedin/answer/a518996/posting-and-sharing-content-overview?lang=en)也分别列出照片和视频流程。因此，两者带视频的人工交接默认不选草稿图片；若所用客户端确实支持混用，用户仍可手动选择并按提示核对。
+[Pinterest 官方说明](https://help.pinterest.com/en/article/create-a-pin-from-an-image-or-video)：网页端选多张图片或多个视频会创建各自的 Pin，手机端可先把多张图片或视频拼成一段视频。本项目的 Pinterest 入口打开网页端，因此单条交接只含一张图片或一段视频；带视频的草稿默认不带图片，原草稿素材仍保留。
 
-核对于 2026-10-24。这里只记录下一步开发需要的门槛；平台政策和接口会变，动手接入前要重新核对官方文档和开发者后台。**文档允许发帖，不代表 Plypost 已拿到权限。**
+平台门槛最初核对于 2026-10-24；Pinterest 网页与手机流程在 2026-10-28 复核。这里只记录下一步开发需要的门槛；平台政策和接口会变，动手接入前要重新核对官方文档和开发者后台。**文档允许发帖，不代表 Plypost 已拿到权限。**
 
 辅助发布按常见发帖流程分为“Photo & text-first”和“Video-first”，方便找平台，不限制平台支持的格式。[TikTok](https://support.tiktok.com/en/using-tiktok/creating-videos/tiktok-studio) 也能发图片，[Instagram](https://www.facebook.com/help/instagram/439971288310029) 同时有图片帖和 Reels；这一分类不代表 Plypost 能自动发布。
 

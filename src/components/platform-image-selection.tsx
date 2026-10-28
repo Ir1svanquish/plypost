@@ -19,9 +19,11 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
   const limit = imageLimitForDestination(destination, hasVideo);
   const name = assistedDestinations[destination].name;
 
-  if (destination === "bluesky" && hasVideo && selectedIds.length === 0) {
+  if ((destination === "bluesky" || destination === "pinterest") && hasVideo && selectedIds.length === 0) {
     return <p className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-[12px] leading-5 text-[var(--text-muted)]">
-      Bluesky video posts do not include photos. Your draft images stay saved; remove the video from this handoff to choose them.
+      {destination === "bluesky"
+        ? "Bluesky video posts do not include photos. Your draft images stay saved; remove the video from this handoff to choose them."
+        : "This Pinterest web handoff starts with a video Pin, so draft photos stay out of this handoff. Remove the video to choose an image Pin."}
     </p>;
   }
 
@@ -46,6 +48,8 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
         ? "Choose at most one image as a thumbnail reference. YouTube Studio uploads the video separately, and custom thumbnails require a verified account."
         : destination === "bluesky" && hasVideo
         ? "Bluesky takes a video or images in one post. Deselect all photos or remove the video before confirming."
+        : destination === "pinterest" && hasVideo
+        ? "Pinterest's web editor makes separate image and video Pins. Deselect the photo or remove the video before confirming."
         : destination === "mastodon" && hasVideo && selectedIds.length === 0
         ? "Mastodon's web composer may not show photos alongside a video. This handoff starts with video only; remove it to select photos, or check your client before mixing formats."
         : destination === "linkedin" && hasVideo && selectedIds.length === 0

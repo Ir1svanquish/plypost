@@ -13,7 +13,7 @@ export const imageLimits = {
 
 export function imageLimitForDestination(destination: string, hasVideo = false): number {
   const limit = imageLimits[destination as keyof typeof imageLimits] ?? MAX_POST_IMAGES;
-  if (destination === "bluesky" && hasVideo) return 0;
+  if ((destination === "bluesky" || destination === "pinterest") && hasVideo) return 0;
   return (destination === "x" || destination === "threads") && hasVideo ? limit - 1 : limit;
 }
 
@@ -21,6 +21,7 @@ export function imageLimitWarning(destination: string, count: number, hasVideo =
   const limit = imageLimits[destination as keyof typeof imageLimits];
   if (!limit || count <= imageLimitForDestination(destination, hasVideo)) return null;
   if (destination === "bluesky" && hasVideo) return "Bluesky takes a video or images in one post. Choose one format for the handoff; your draft keeps both.";
+  if (destination === "pinterest" && hasVideo) return "Pinterest's web editor creates an image Pin or a video Pin. Remove the images or the video from this handoff; your draft keeps both.";
   if (destination === "x" && hasVideo) return "X allows up to 4 media items per post, including the video. Choose 3 or fewer images, or remove the video.";
   if (destination === "threads" && hasVideo) return "Threads allows up to 20 media items per carousel, including the video. Choose 19 or fewer images, or remove the video.";
   if (destination === "youtube") return "YouTube Studio uploads a video with at most one optional custom thumbnail image. Choose one image or none; your draft keeps all images.";

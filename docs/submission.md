@@ -34,7 +34,7 @@ Token Factory gave us access to Nemotron text and vision models through the same
 
 ## Private judging instructions
 
-Put the dedicated demo email and password in Devpost's testing instructions, not in this file or the public repository. First confirm the hosted account contains only fictional data. A shared login lets judges see and edit the same workspace; back up or reset sample content before judging, and do not reuse a personal password. Keep the service available free of charge through the judging period, which ends December 15, 2026 at noon Pacific Time (December 16 at 04:00 in Hong Kong).
+Put the dedicated demo email and password in Devpost's testing instructions, not in this file or the public repository. The owner confirmed on October 28 that the hosted account contains only fictional data and is intended for judges to share. A shared login lets judges see and edit the same workspace; back up or reset sample content before judging, and do not reuse a personal password. Keep the service available free of charge through the judging period, which ends December 15, 2026 at noon Pacific Time (December 16 at 04:00 in Hong Kong).
 
 1. Open https://plypost.onrender.com/ and sign in with the dedicated credentials supplied privately in Devpost.
 2. Open **Create**. Enter a fictional post or open a saved example from **Drafts**. Add an image if testing the vision flow.
@@ -62,13 +62,15 @@ Do a test recording first. If a live model call is slow, trim waiting time in th
 
 ## Release gate
 
-- [x] Hosted site and health endpoint respond; the deployed application code matches the reviewed application commit. Documentation updates may be pushed separately.
+- [x] Hosted site and health endpoint respond; `/api/health` returned 200 on October 28.
+- [ ] The deployed application code matches the latest reviewed commit; recent interface and Pinterest handoff fixes still need a consolidated Render deployment.
 - [x] MIT license and local setup instructions are in the repository.
 - [x] Known-format credential prefixes and sensitive filenames were checked in the current reachable Git history; no match was found. This is not a guarantee against every secret format.
 - [x] On 2026-10-28, unauthenticated requests to the hosted drafts, media, videos, backup, AI style, brand brief and account-connection endpoints returned HTTP 401.
 - [ ] Project owner reviews logo and sample-media provenance, and the public repository contents.
 - [x] GitHub repository is public; an unauthenticated request returned HTTP 200 for the repository and its MIT license on 2026-10-26.
-- [ ] A dedicated judge login and fictional workspace are verified; credentials are supplied privately in Devpost.
+- [x] The owner confirmed that the hosted judge workspace contains only fictional data and may be shared with judges.
+- [ ] Dedicated judge credentials are supplied privately in Devpost and the final login flow is checked.
 - [ ] Actual-use video is recorded, checked, and made publicly visible on YouTube.
 - [ ] English submission fields and feedback are reviewed and entered in Devpost before the deadline.
 
