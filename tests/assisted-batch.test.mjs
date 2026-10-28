@@ -175,6 +175,37 @@ test("X counts a saved video toward its four media items in every handoff path",
     createdAt: new Date().toISOString(), status: "queued" }).mediaIds.length, 4);
 });
 
+test("Threads counts a video within its twenty carousel media items", async () => {
+  const ids = [];
+  for (let index = 0; index < 20; index++) {
+    ids.push((await createMedia(owner, {
+      name: `threads-media-${index}.png`, type: "image/png",
+      bytes: await sharp({ create: { width: 4, height: 4, channels: 3,
+        background: { r: 30 + index * 5, g: 90, b: 150 } } }).png().toBuffer(),
+    })).media.id);
+  }
+  const clip = createVideo(owner, { name: "threads-clip.mp4", type: "video/mp4",
+    bytes: readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4")) }).video;
+  const saved = saveDraft(owner, { ...draft("Threads carousel", ["threads"], { threads: "Reviewed copy" }, ids),
+    mediaAlt: ids.map((_, index) => `Photo ${index + 1}`), videoId: clip.id });
+  const request = { destination: "threads", scheduledFor: new Date(Date.now() + 60_000).toISOString() };
+
+  assert.equal(imageLimitForDestination("threads"), 20);
+  assert.equal(imageLimitForDestination("threads", true), 19);
+  assert.deepEqual(defaultHandoffImageIds("threads", ids, true), ids.slice(0, 19));
+  assert.match(imageLimitWarning("threads", 20, true), /20 media items/);
+  const [mixed] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...request, videoId: clip.id }]);
+  assert.deepEqual(mixed.mediaIds, ids.slice(0, 19));
+  assert.equal(mixed.videoId, clip.id);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...request, mediaIds: ids, videoId: clip.id }]), /valid text and UTC timestamps/);
+  assert.throws(() => updateAssistedImages(owner, mixed.id, mixed.mediaIds, mixed.mediaAlt,
+    ids, ids.map(() => "")), /fewer images/);
+  const [photos] = prepareAssistedBatch(owner, saved.id, randomUUID(), [request]);
+  assert.deepEqual(photos.mediaIds, ids);
+  assert.throws(() => updateAssistedVideo(owner, photos.id, null, clip.id), /fewer images/);
+});
+
 test("Bluesky handoffs use either video or images without losing older mixed items", async () => {
   const ids = [];
   for (let index = 0; index < 2; index++) {

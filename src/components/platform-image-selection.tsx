@@ -46,6 +46,8 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
         ? "Choose at most one image as a thumbnail reference. YouTube Studio uploads the video separately, and custom thumbnails require a verified account."
         : destination === "bluesky" && hasVideo
         ? "Bluesky takes a video or images in one post. Deselect all photos or remove the video before confirming."
+        : destination === "threads" && hasVideo && selectedIds.length <= limit
+        ? `The video uses one of Threads' 20 carousel slots. Choose up to 19 of ${sourceIds.length} draft images.`
         : selectedIds.length > limit
         ? `Remove ${selectedIds.length - limit} ${selectedIds.length - limit === 1 ? "image" : "images"}${destination === "x" && hasVideo ? " or detach the video" : ""} before confirming.`
         : sourceIds.length > limit
