@@ -9,6 +9,20 @@ const weekdays: Record<string, string> = {
   sat: "saturday", saturday: "saturday", sun: "sunday", sunday: "sunday",
 };
 
+const relativeTimes = [
+  ["today", /\btoday\b|今天/giu], ["tomorrow", /\btomorrow\b|明天/giu],
+  ["yesterday", /\byesterday\b|昨天/giu],
+  ["this week", /\bthis week\b|本周|这周|这个星期|本星期/giu],
+  ["last week", /\blast week\b|上周|上星期|上个星期/giu],
+  ["next week", /\bnext week\b|下周|下星期|下个星期/giu],
+  ["this month", /\bthis month\b|本月|这月|这个月/giu],
+  ["last month", /\blast month\b|上月|上个月/giu],
+  ["next month", /\bnext month\b|下月|下个月/giu],
+  ["this year", /\bthis year\b|今年/giu],
+  ["last year", /\blast year\b|去年/giu],
+  ["next year", /\bnext year\b|明年/giu],
+] as const;
+
 function literals(text: string): Literal[] {
   const found = new Map<string, string>();
   const add = (kind: string, label: string, normalized = label) => {
@@ -30,6 +44,9 @@ function literals(text: string): Literal[] {
     if (tag.length > 1) add("tag", tag, tag.toLocaleLowerCase());
     return `${prefix} `;
   });
+  for (const [normalized, pattern] of relativeTimes) {
+    for (const match of rest.matchAll(pattern)) add("relative-time", match[0], normalized);
+  }
   for (const match of rest.matchAll(/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thurs?|fri|sat|sun)\b/giu)) {
     add("weekday", match[0], weekdays[match[0].toLocaleLowerCase()]);
   }
@@ -63,8 +80,17 @@ export function compareAiLiterals(source: string, suggestion: string): LiteralCh
   const after = literals(suggestion);
   const beforeKeys = new Set(before.map((item) => item.key));
   const afterKeys = new Set(after.map((item) => item.key));
+  const addedPerspective = /[?？]\s*$/u.test(source.trim()) &&
+    (/(?:^|[^\p{L}])(?:you|your|yours)(?!\p{L})/iu.test(source) || source.includes("你")) &&
+    !/(?:^|[^\p{L}])(?:i|me|my|mine|we|us|our|ours)(?!\p{L})/iu.test(source) && !source.includes("我")
+    ? suggestion.match(/(?:^|[^\p{L}])(i|me|my|mine|we|us|our|ours)(?!\p{L})/iu)?.[1] ??
+      (suggestion.includes("我") ? "我" : null)
+    : null;
   return {
     missing: before.filter((item) => !afterKeys.has(item.key)).map((item) => item.label),
-    added: after.filter((item) => !beforeKeys.has(item.key)).map((item) => item.label),
+    added: [
+      ...after.filter((item) => !beforeKeys.has(item.key)).map((item) => item.label),
+      ...(addedPerspective ? [`first-person wording (${addedPerspective})`] : []),
+    ],
   };
 }

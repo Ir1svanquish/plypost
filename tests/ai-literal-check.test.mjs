@@ -42,3 +42,21 @@ test("wording changes alone do not pretend to be a factual check", () => {
     missing: [], added: [],
   });
 });
+
+test("flags a changed relative period or a reader question rewritten in first person", () => {
+  assert.deepEqual(compareAiLiterals(
+    "What change made your writing workflow easier this month?",
+    "One change in my writing routine recently?",
+  ), { missing: ["this month"], added: ["first-person wording (my)"] });
+  assert.deepEqual(compareAiLiterals("What did your team learn last week?", "What did your team learn next week?"), {
+    missing: ["last week"], added: ["next week"],
+  });
+});
+
+test("accepts equivalent Chinese relative dates and existing first-person wording", () => {
+  assert.deepEqual(compareAiLiterals("我们下个月试用。", "我们下月试用。"), { missing: [], added: [] });
+  assert.deepEqual(compareAiLiterals("你这周改了什么？", "你本周改了什么？"), { missing: [], added: [] });
+  assert.deepEqual(compareAiLiterals("What did you and I learn last week?", "What did we learn last week?"), {
+    missing: [], added: [],
+  });
+});
