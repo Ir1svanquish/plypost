@@ -72,6 +72,8 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   const attemptedSlotModeRef = useRef(false);
   const slotRequestVersion = useRef(0);
   const slotAbortRef = useRef<AbortController | null>(null);
+  const preflightRequestVersion = useRef(0);
+  const preflightAbortRef = useRef<AbortController | null>(null);
   const submittingRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const reviewRef = useRef<HTMLDivElement>(null);
@@ -119,6 +121,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   useEffect(() => { onStateChange({ dirty: reviewDirty, busy: submitting || videoBusy }); }, [reviewDirty, submitting, videoBusy, onStateChange]);
   useEffect(() => () => onStateChange({ dirty: false, busy: false }), [onStateChange]);
   useEffect(() => () => slotAbortRef.current?.abort(), []);
+  useEffect(() => () => preflightAbortRef.current?.abort(), []);
   const canPrepare = !stale && !editorDirty && !busy && !mediaBusy && !videoBusy && !submitting && !prepared &&
     (attempted ? Boolean(attemptedItemsRef.current) :
       destinations.length > 0 && invalidText.length === 0 && invalidReminders.length === 0 && mediaLimitIssues.length === 0);
@@ -134,6 +137,13 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     else if (focusedDestination === id) setFocusedDestination(null);
     setDestinations((current) => current.includes(id) ? current.filter((item) => item !== id) :
       availableDestinations.filter((item) => current.includes(item) || item === id));
+  }
+
+  function cancelPreflight() {
+    preflightRequestVersion.current += 1;
+    preflightAbortRef.current?.abort();
+    preflightAbortRef.current = null;
+    setPreflightBusyId(null);
   }
 
   function openReview() {
@@ -152,6 +162,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
       : "Discard your unconfirmed handoff review edits? The saved draft will stay unchanged.")) return;
     slotRequestVersion.current += 1;
     slotAbortRef.current?.abort(); slotAbortRef.current = null; setSlotBusy(false);
+    cancelPreflight();
     batchIdRef.current = null;
     attemptedItemsRef.current = null;
     attemptedSlotModeRef.current = false;
@@ -181,6 +192,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   function prepareAnother() {
     slotRequestVersion.current += 1;
     slotAbortRef.current?.abort(); slotAbortRef.current = null; setSlotBusy(false);
+    cancelPreflight();
     batchIdRef.current = null;
     attemptedItemsRef.current = null;
     attemptedSlotModeRef.current = false;
@@ -202,21 +214,29 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
   async function checkWithAi(destination: AssistedDestinationId) {
     const text = textFor(destination);
     if (preflightBusyId || attempted || !text.trim() || characterCount(text) > 5000) return;
+    const requestVersion = ++preflightRequestVersion.current;
+    const controller = new AbortController();
+    preflightAbortRef.current = controller;
     setPreflightBusyId(destination);
     setPreflightErrors((current) => ({ ...current, [destination]: "" }));
     try {
       const response = await fetch("/api/ai-preflight", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", cache: "no-store",
-        body: JSON.stringify({ destination, source: draft.source, text }),
+        body: JSON.stringify({ destination, source: draft.source, text }), signal: controller.signal,
       });
       const body = await response.json() as { report?: PreflightReport; error?: string };
       if (!response.ok || !body.report || !Array.isArray(body.report.findings)) {
         throw new Error(body.error || "Could not check this post.");
       }
-      setPreflightReports((current) => ({ ...current, [destination]: { source: draft.source, text, report: body.report! } }));
+      if (requestVersion === preflightRequestVersion.current && !controller.signal.aborted)
+        setPreflightReports((current) => ({ ...current, [destination]: { source: draft.source, text, report: body.report! } }));
     } catch (cause) {
-      setPreflightErrors((current) => ({ ...current, [destination]: cause instanceof Error ? cause.message : "Could not check this post." }));
-    } finally { setPreflightBusyId(null); }
+      if (requestVersion === preflightRequestVersion.current && !controller.signal.aborted)
+        setPreflightErrors((current) => ({ ...current, [destination]: cause instanceof Error ? cause.message : "Could not check this post." }));
+    } finally {
+      if (preflightAbortRef.current === controller) preflightAbortRef.current = null;
+      if (requestVersion === preflightRequestVersion.current) setPreflightBusyId(null);
+    }
   }
 
   async function previewSlots() {
