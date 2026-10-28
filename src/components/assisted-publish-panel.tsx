@@ -14,7 +14,7 @@ import { PlatformImageSelection } from "@/components/platform-image-selection";
 import { PrivateVideoPreview, VideoAttachmentPicker } from "@/components/video-attachment-picker";
 import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
 import { isManualAiDestination } from "@/lib/ai-handoff";
-import { imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
+import { defaultHandoffImageIds, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 
 type Props = {
   active: boolean;
@@ -160,7 +160,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   }, [items, openEditIds]);
   const futureReminderCount = upcomingManualReminders(items, now).length;
   const selected = assistedDestinations[destination];
-  const selectedMediaIds = (imageSelections[destination] ?? sourceMediaIds.slice(0, imageLimitForDestination(destination, Boolean(videoId))))
+  const selectedMediaIds = (imageSelections[destination] ?? defaultHandoffImageIds(destination, sourceMediaIds, Boolean(videoId)))
     .filter((id) => sourceMediaIds.includes(id));
   const composerMediaWarning = imageLimitWarning(destination, selectedMediaIds.length, Boolean(videoId));
   const missingComposerMedia = missingHandoffMedia(destination, selectedMediaIds.length, Boolean(videoId));
@@ -185,7 +185,7 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
   const visibleItemIds = new Set(visibleItems.map((item) => item.id));
   const itemById = new Map(renderedItems.map((item) => [item.id, item]));
   const imageSelectionDirty = Object.entries(imageSelections).some(([id, selectedIds]) => {
-    const defaultIds = sourceMediaIds.slice(0, imageLimitForDestination(id as AssistedDestinationId, Boolean(videoId)));
+    const defaultIds = defaultHandoffImageIds(id, sourceMediaIds, Boolean(videoId));
     return selectedIds?.length !== defaultIds.length || selectedIds.some((imageId, index) => imageId !== defaultIds[index]);
   });
   const imageEditDirty = Boolean(imageEdit && itemById.has(imageEdit.itemId) &&
@@ -458,11 +458,11 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><label htmlFor="assisted-text" className="text-[12px] font-bold text-[var(--text-secondary)]">Text to copy · {customText ? `Custom for ${selected.name}` : "From current draft"}</label>{customText && <button type="button" onClick={onResetText} className="text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Use current draft text</button>}</div>
           <textarea id="assisted-text" value={text} onChange={(event) => { if (characterCount(event.target.value) <= 5000) onTextChange(event.target.value); }} className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--accent-soft)] px-4 py-3 text-[14px] leading-6 outline-none focus:border-[var(--accent-border)]" />
           {!isPlatformId(destination) && isManualAiDestination(destination) && <AIHandoffAssistant key={`ai-${destination}`} destination={destination} source={text} disabled={busy} onApply={onTextChange} />}
-          <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint}{sourceMediaIds.length > 0 ? " Saved images are available for manual download; upload them on the platform yourself." : ""}</p>
+          <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{selected.hint}{sourceMediaIds.length > 0 && destination !== "youtube" ? " Saved images are available for manual download; upload them on the platform yourself." : ""}</p>
           <PlatformImageSelection destination={destination} sourceIds={sourceMediaIds} sourceAlt={sourceMediaAlt} selectedIds={selectedMediaIds} hasVideo={Boolean(videoId)} onChange={(ids) => setImageSelections((current) => ({ ...current, [destination]: ids }))} disabled={busy || mediaBusy} />
           <button type="button" onClick={onEditImages} className="mt-2 text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2">{sourceMediaIds.length > 0 ? "Edit the image pool in Create" : "Add images in Create"}</button>
           <details key={`video-${destination}`} open={videoFirst || Boolean(videoId)} className="mt-3"><summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">{videoId ? "Video attached" : "Attach a video clip"}</summary><div className="mt-2"><VideoAttachmentPicker selectedId={videoId} onChange={(id) => { setVideoId(id); setVideoTouched(true); }} onBusyChange={setVideoBusy} disabled={busy || mediaBusy} /></div></details>
-          {destination !== "x" && selectedMediaIds.length > 0 && videoId && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">This handoff includes photos and a video. Check {selected.name}&apos;s current rules before posting. Deselect the photos above or remove the video if it accepts only one format per post.</p>}
+          {destination !== "x" && destination !== "youtube" && selectedMediaIds.length > 0 && videoId && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">This handoff includes photos and a video. Check {selected.name}&apos;s current rules before posting. Deselect the photos above or remove the video if it accepts only one format per post.</p>}
           {composerMediaWarning && <p role="alert" className="mt-2 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--danger)]">{composerMediaWarning}</p>}
           {selected.needsMedia && <p className={`mt-2 rounded-lg px-3 py-2 text-[12px] leading-5 ${missingComposerMedia ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{missingComposerMedia === "video" ? "No video attached here. Attach one or bring a video when you publish on YouTube." : missingComposerMedia ? "No photo or video attached here. Bring one when you publish." : "Check your media against this platform's current rules before posting. You upload it there yourself."}</p>}
           {validation && text.trim() && <div role="status" className="mt-2 space-y-1 text-[12px] leading-5">
@@ -577,8 +577,9 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               </div>}
               {item.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {item.placeLabel} <span className="text-[var(--text-soft)]">(add on the platform yourself)</span></p>}
               {imageLimitWarning(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId)) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">{imageLimitWarning(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId))}</p>}
-              {item.destination !== "x" && savedImageIds.length > 0 && item.videoId && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Photos and a video are saved for this {target.name} handoff. Check whether it accepts both in one post. You can change the images or video below before publishing.</p>}
-              <div hidden={Boolean(editingImages)}><MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} onUpdateDescriptions={!removed && item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} onEditingChange={(editing) => setDescriptionEditingIds((current) => {
+              {item.destination !== "x" && item.destination !== "youtube" && savedImageIds.length > 0 && item.videoId && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">Photos and a video are saved for this {target.name} handoff. Check whether it accepts both in one post. You can change the images or video below before publishing.</p>}
+              {item.destination === "youtube" && savedImageIds.length > 0 && <p role="status" className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">The image is an optional thumbnail reference for YouTube Studio. Upload the video separately; a verified YouTube account is required for a custom thumbnail.</p>}
+              <div hidden={Boolean(editingImages)}><MediaHandoff mediaIds={item.mediaIds} mediaAlt={item.mediaAlt} destination={item.destination} onUpdateDescriptions={!removed && item.status === "queued" ? (expectedIds, expectedAlt, next) => onUpdateDescriptions(item.id, expectedIds, expectedAlt, next) : undefined} onEditingChange={(editing) => setDescriptionEditingIds((current) => {
                 if (Boolean(current[item.id]) === editing) return current;
                 const next = { ...current };
                 if (editing) next[item.id] = true;
@@ -593,8 +594,8 @@ export function AssistedPublishPanel({ items, drafts, active, destination, text,
               })} /></div>
               {!removed && item.status === "queued" && !editingImages && <button type="button" onClick={() => startImageEdit(item)} disabled={busy || mediaBusy || imageBusy || imageSavingId !== null} className="mt-3 block text-[12px] font-semibold text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-50">{savedImageIds.length ? "Change images for this handoff" : "Attach images to this handoff"}</button>}
               {editingImages && <div className="mt-3 max-w-2xl rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
-                <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Images for {target.name}</p>
-                <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">Choose, reorder or upload images here. Save to change only this handoff; the source draft and other handoffs stay as they are.</p>
+                <p className="text-[12px] font-semibold text-[var(--text-secondary)]">{item.destination === "youtube" ? "Optional YouTube thumbnail" : `Images for ${target.name}`}</p>
+                <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">{item.destination === "youtube" ? "Choose one image as a possible thumbnail for this video. YouTube Studio requires a verified account for custom thumbnails." : "Choose, reorder or upload images here. Save to change only this handoff; the source draft and other handoffs stay as they are."}</p>
                 <ImageAttachmentPicker context="handoff" selectedIds={editingImages.ids} descriptions={editingImages.descriptions} maxSelected={imageLimitForDestination(item.destination, Boolean(item.videoId))}
                   onChange={(ids) => setImageEdit((current) => current?.itemId === item.id ? { ...current, ids } : current)}
                   onDescriptionChange={(id, description) => setImageEdit((current) => current?.itemId === item.id ? { ...current, descriptions: { ...current.descriptions, [id]: description } } : current)}

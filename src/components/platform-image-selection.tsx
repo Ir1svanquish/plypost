@@ -32,11 +32,13 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
 
   return <section className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3" aria-label={`${name} image selection`}>
     <div className="flex flex-wrap items-baseline justify-between gap-1">
-      <p className="text-[12px] font-bold text-[var(--text)]">Images for {name}</p>
+      <p className="text-[12px] font-bold text-[var(--text)]">{destination === "youtube" ? "Optional YouTube thumbnail" : `Images for ${name}`}</p>
       <span className="text-[11px] font-semibold text-[var(--text-muted)]">{selectedIds.length} / {limit} selected</span>
     </div>
     <p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">
-      {selectedIds.length > limit
+      {destination === "youtube"
+        ? "Choose at most one image as a thumbnail reference. YouTube Studio uploads the video separately, and custom thumbnails require a verified account."
+        : selectedIds.length > limit
         ? `Remove ${selectedIds.length - limit} ${selectedIds.length - limit === 1 ? "image" : "images"}${destination === "x" && hasVideo ? " or detach the video" : ""} before confirming.`
         : sourceIds.length > limit
         ? selectedIds.length >= limit
@@ -69,6 +71,6 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
         </div>)}
       </div>
     </details>}
-    {selectedIds.length === 0 && <p role="status" className="mt-2 text-[11px] text-[var(--warning)]">No images will be included in this handoff.</p>}
+    {selectedIds.length === 0 && <p role="status" className="mt-2 text-[11px] text-[var(--warning)]">{destination === "youtube" ? "No optional thumbnail will be included." : "No images will be included in this handoff."}</p>}
   </section>;
 }

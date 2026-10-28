@@ -11,7 +11,7 @@ import { createSession, SESSION_COOKIE } from "../src/lib/server/auth.ts";
 import { createMedia } from "../src/lib/server/media.ts";
 import { createVideo } from "../src/lib/server/video.ts";
 import { addAssisted, deleteAssisted, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedImages, updateAssistedMediaAlt, updateAssistedText, updateAssistedVideo } from "../src/lib/server/workspace.ts";
-import { imageLimitForDestination, imageLimitWarning } from "../src/lib/media-policy.ts";
+import { defaultHandoffImageIds, imageLimitForDestination, imageLimitWarning } from "../src/lib/media-policy.ts";
 import { assistedContentSnapshot, assistedDeletionSnapshot, assistedState, hasManualReminder, parseWorkspace } from "../src/lib/workspace.ts";
 import { buildPlanAgenda } from "../src/lib/plan-agenda.ts";
 import { POST as workspacePost } from "../src/app/api/workspace/route.ts";
@@ -173,6 +173,39 @@ test("X counts a saved video toward its four media items in every handoff path",
   assert.equal(addAssisted(owner, { id: randomUUID(), title: "Four photos",
     ...x, mediaIds: ids, mediaAlt: ids.map(() => ""),
     createdAt: new Date().toISOString(), status: "queued" }).mediaIds.length, 4);
+});
+
+test("YouTube video handoffs do not silently carry draft photos as video media", async () => {
+  const ids = [];
+  for (let index = 0; index < 2; index++) {
+    ids.push((await createMedia(owner, {
+      name: `youtube-image-${index}.png`, type: "image/png",
+      bytes: await sharp({ create: { width: 4, height: 4, channels: 3,
+        background: { r: 60, g: 80 + index * 40, b: 160 } } }).png().toBuffer(),
+    })).media.id);
+  }
+  const clip = createVideo(owner, { name: "youtube-clip.mp4", type: "video/mp4",
+    bytes: readFileSync(join(import.meta.dirname, "fixtures/short-blue.mp4")) }).video;
+  const saved = saveDraft(owner, { ...draft("Video post", ["bluesky"], {}, ids),
+    mediaAlt: ["First image", "Second image"], videoId: clip.id });
+  const time = new Date(Date.now() + 60_000).toISOString();
+  const request = { destination: "youtube", text: "Watch this clip", scheduledFor: time, videoId: clip.id };
+
+  assert.deepEqual(defaultHandoffImageIds("youtube", ids, true), []);
+  assert.equal(imageLimitForDestination("youtube", true), 1);
+  assert.match(imageLimitWarning("youtube", 2, true), /one optional custom thumbnail/);
+  const [videoOnly] = prepareAssistedBatch(owner, saved.id, randomUUID(), [request]);
+  assert.deepEqual(videoOnly.mediaIds, []);
+  assert.deepEqual(videoOnly.mediaAlt, []);
+  assert.equal(videoOnly.videoId, clip.id);
+
+  const [thumbnail] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...request, mediaIds: [ids[1]] }]);
+  assert.deepEqual(thumbnail.mediaIds, [ids[1]]);
+  assert.deepEqual(thumbnail.mediaAlt, ["Second image"]);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...request, mediaIds: ids }]), /valid text and UTC timestamps/);
+  assert.throws(() => updateAssistedImages(owner, thumbnail.id, thumbnail.mediaIds, thumbnail.mediaAlt,
+    ids, ["", ""]), /fewer images/);
 });
 
 test("unmodified platform text uses the same adaptation shown in Create", () => {

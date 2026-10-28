@@ -25,7 +25,7 @@ export const assistedDestinations: Record<AssistedDestinationId, AssistedDestina
   facebook: { name: "Facebook Page", url: "https://www.facebook.com/", hint: "Switch to the Page you manage before posting." },
   instagram: { name: "Instagram", url: "https://www.instagram.com/", hint: "Add your image or video on Instagram before posting.", needsMedia: true },
   tiktok: { name: "TikTok", url: "https://www.tiktok.com/upload", hint: "Upload your photo or video, then add this caption.", needsMedia: true },
-  youtube: { name: "YouTube", url: "https://studio.youtube.com/", hint: "Upload a video in YouTube Studio and use this text as a starting description.", needsMedia: true },
+  youtube: { name: "YouTube", url: "https://studio.youtube.com/", hint: "Upload a video in YouTube Studio and use this text as a starting description. An image in this handoff is only an optional thumbnail reference.", needsMedia: true },
   pinterest: { name: "Pinterest", url: "https://www.pinterest.com/", hint: "Choose a board and add one image or video to your Pin. Multiple image uploads create separate Pins on the web.", needsMedia: true },
   reddit: { name: "Reddit", url: "https://www.reddit.com/submit", hint: "Choose a community and check its posting rules." },
   bluesky: { name: "Bluesky", url: "https://bsky.app/", hint: "Create a post from your Bluesky account." },

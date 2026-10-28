@@ -8,6 +8,7 @@ export const imageLimits = {
   threads: 20,
   x: 4,
   pinterest: 1,
+  youtube: 1,
 } as const;
 
 export function imageLimitForDestination(destination: string, hasVideo = false): number {
@@ -19,5 +20,12 @@ export function imageLimitWarning(destination: string, count: number, hasVideo =
   const limit = imageLimits[destination as keyof typeof imageLimits];
   if (!limit || count <= imageLimitForDestination(destination, hasVideo)) return null;
   if (destination === "x" && hasVideo) return "X allows up to 4 media items per post, including the video. Choose 3 or fewer images, or remove the video.";
+  if (destination === "youtube") return "YouTube Studio uploads a video with at most one optional custom thumbnail image. Choose one image or none; your draft keeps all images.";
   return `${destination === "x" ? "X" : destination[0].toUpperCase() + destination.slice(1)} accepts up to ${limit} images per post. Choose ${limit} or fewer before publishing there; your draft keeps all ${count}.`;
+}
+
+/** Images in a YouTube video handoff are optional thumbnail references, never video frames. */
+export function defaultHandoffImageIds(destination: string, draftImageIds: readonly string[], hasVideo = false): string[] {
+  if (destination === "youtube") return [];
+  return draftImageIds.slice(0, imageLimitForDestination(destination, hasVideo));
 }

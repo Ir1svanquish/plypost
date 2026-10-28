@@ -412,7 +412,7 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
               {editError && <p role="alert" className="mt-2 text-[12px] text-[var(--danger)]">{editError}</p>}
               <div className="mt-3 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => setEditingId(null)} disabled={saving} className="rounded-lg px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">Cancel</button><button type="submit" disabled={saving || !isValidLocalDateTime(editValue, now + 10_000)} className="gradient-button rounded-lg px-3 py-2 text-[12px] font-bold text-white disabled:opacity-50">{saving ? "Moving..." : "Save new time"}</button></div>
             </form>}
-            <MediaHandoff mediaIds={manual.mediaIds} mediaAlt={manual.mediaAlt} />
+            <MediaHandoff mediaIds={manual.mediaIds} mediaAlt={manual.mediaAlt} destination={manual.destination} />
           </article>;
         }
         const post = item.post;

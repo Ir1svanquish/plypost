@@ -4,15 +4,17 @@ import Image from "next/image";
 import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, Copy, Download, Images } from "lucide-react";
 import { MAX_IMAGE_ALT_CHARS } from "@/lib/workspace";
+import type { AssistedDestinationId } from "@/lib/assisted";
 
 /** Review and retrieve the images attached to a saved plan or assisted item. */
-export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, onDirtyChange, onEditingChange, variant = "handoff" }: {
+export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, onDirtyChange, onEditingChange, variant = "handoff", destination }: {
   mediaIds?: readonly string[];
   mediaAlt?: readonly string[];
   onUpdateDescriptions?: (expectedIds: string[], expectedAlt: string[], next: string[]) => Promise<boolean>;
   onDirtyChange?: (dirty: boolean) => void;
   onEditingChange?: (editing: boolean) => void;
   variant?: "handoff" | "review";
+  destination?: AssistedDestinationId;
 }) {
   const inputPrefix = useId();
   const [open, setOpen] = useState(variant === "review");
@@ -86,7 +88,7 @@ export function MediaHandoff({ mediaIds, mediaAlt, onUpdateDescriptions, onDirty
       <ChevronDown size={14} className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
     </button>
     {open && <div className="mt-3 border-t border-[var(--line)] pt-3">
-      <p className="mb-3 text-[11px] leading-5 text-[var(--text-muted)]">{variant === "review" ? "These images and descriptions will be copied to each selected handoff. Edit the saved draft to change them before confirming." : "Download these images in order, then upload them and add their descriptions on the destination platform."}</p>
+      <p className="mb-3 text-[11px] leading-5 text-[var(--text-muted)]">{destination === "youtube" ? "This image is an optional thumbnail reference. Upload the video in YouTube Studio separately; custom thumbnails require a verified account." : variant === "review" ? "These images and descriptions will be copied to each selected handoff. Edit the saved draft to change them before confirming." : "Download these images in order, then upload them and add their descriptions on the destination platform."}</p>
       {onUpdateDescriptions && !editing && <button type="button" onClick={startEditing} className="mb-3 text-[11px] font-semibold text-[var(--accent-text)] underline underline-offset-2">Edit descriptions for this handoff</button>}
       {unavailable && <p role="alert" className="mb-3 text-[11px] text-[var(--danger)]">This handoff is no longer editable. Select and copy any unsaved descriptions below before closing the editor.</p>}
       {editing && stale && <p role="alert" className="mb-3 text-[11px] text-[var(--danger)]">Images or descriptions changed in another window. Select and copy any unsaved descriptions below, then reopen the latest version.</p>}

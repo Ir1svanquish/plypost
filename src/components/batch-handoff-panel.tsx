@@ -13,7 +13,7 @@ import { AIHandoffAssistant } from "@/components/ai-handoff-assistant";
 import { AiLiteralNotice } from "@/components/ai-literal-notice";
 import { isManualAiDestination } from "@/lib/ai-handoff";
 import type { PreflightReport } from "@/lib/ai-preflight";
-import { imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
+import { defaultHandoffImageIds, imageLimitForDestination, imageLimitWarning } from "@/lib/media-policy";
 import { suggestedSlotIsReady } from "@/lib/slot-settings";
 
 export type BatchHandoffItem = { destination: AssistedDestinationId; scheduledFor: string; text: string; mediaIds: string[]; reminderEnabled?: false; videoId?: string };
@@ -89,7 +89,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     (isPlatformId(id) ? draft.variants[id] ?? adaptDraft(draft.source, id) : draft.source);
   const videoFor = (id: AssistedDestinationId) => videoId && videoSelections[id] !== false ? videoId : null;
   const imagesFor = (id: AssistedDestinationId) => imageSelections[id] ??
-    (draft.mediaIds ?? []).slice(0, imageLimitForDestination(id, Boolean(videoFor(id))));
+    defaultHandoffImageIds(id, draft.mediaIds ?? [], Boolean(videoFor(id)));
   const invalidText = destinations.filter((id) => {
     const text = textFor(id);
     return isPlatformId(id) ? !validatePlatformText(id, text).valid : !text.trim() || characterCount(text) > 5000;
@@ -109,7 +109,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
     imagesFor(id).length > imageLimitForDestination(id, Boolean(videoFor(id))));
   const reviewDirty = !prepared && (attempted || !sameIds(destinations, initialDestinations) ||
     Object.entries(texts).some(([id, value]) => value !== (isPlatformId(id) ? draft.variants[id] ?? adaptDraft(draft.source, id) : draft.source)) ||
-    Object.entries(imageSelections).some(([id, ids]) => !sameIds(ids ?? [], (draft.mediaIds ?? []).slice(0, imageLimitForDestination(id, Boolean(videoFor(id as AssistedDestinationId)))))) ||
+    Object.entries(imageSelections).some(([id, ids]) => !sameIds(ids ?? [], defaultHandoffImageIds(id, draft.mediaIds ?? [], Boolean(videoFor(id as AssistedDestinationId))))) ||
     Object.values(reminders).some(Boolean) || slotApplied || videoId !== (draft.videoId ?? null) ||
     Boolean(videoId && Object.values(videoSelections).some((selected) => selected === false)));
   useEffect(() => { onStateChange({ dirty: reviewDirty, busy: submitting || videoBusy }); }, [reviewDirty, submitting, videoBusy, onStateChange]);
@@ -395,7 +395,7 @@ export function BatchHandoffPanel({ draft, existing, now, editorDirty, busy, med
             <input type="checkbox" checked={Boolean(videoFor(id))} onChange={(event) => setVideoSelections((current) => ({ ...current, [id]: event.target.checked }))} disabled={attempted || editorDirty || busy || mediaBusy} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]" />
             Include the saved video in this {assistedDestinations[id].name} handoff
           </label>}
-          {id !== "x" && imagesFor(id).length > 0 && videoFor(id) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">This handoff includes photos and a video. Check {assistedDestinations[id].name}&apos;s current rules before posting; deselect the photos above or turn off video here if it accepts only one format per post.</p>}
+          {id !== "x" && id !== "youtube" && imagesFor(id).length > 0 && videoFor(id) && <p role="status" className="mt-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--warning)]">This handoff includes photos and a video. Check {assistedDestinations[id].name}&apos;s current rules before posting; deselect the photos above or turn off video here if it accepts only one format per post.</p>}
           {imageLimitWarning(id, imagesFor(id).length, Boolean(videoFor(id))) && <p role="alert" className="mt-2 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--danger)]">{imageLimitWarning(id, imagesFor(id).length, Boolean(videoFor(id)))}</p>}
           {draft.placeLabel && <p className="mt-2 text-[12px] text-[var(--text-secondary)]">Place note: {draft.placeLabel} · add on the platform yourself</p>}
           <div className="mt-3 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3">

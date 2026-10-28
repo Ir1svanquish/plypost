@@ -137,4 +137,12 @@ test("mixed media handoff ZIP includes both files and a platform compatibility r
   assert.deepEqual(Buffer.from(files["images/01.png"]), getMedia(owner, image.id).bytes);
   assert.deepEqual(Buffer.from(files["video/clip.mp4"]), videoBytes);
   assert.match(strFromU8(files["handoff.txt"]), /Check whether this platform accepts both in one post/);
+
+  const youtube = addAssisted(owner, { id: randomUUID(), title: "Video with thumbnail", destination: "youtube", text: "Watch",
+    mediaIds: [image.id], mediaAlt: ["Optional cover"], videoId: video.id,
+    scheduledFor: now, createdAt: now, status: "queued" });
+  const youtubeFiles = unzipSync(buildHandoffPackage(owner, youtube.id).bytes);
+  const youtubeNotes = strFromU8(youtubeFiles["handoff.txt"]);
+  assert.match(youtubeNotes, /optional thumbnail references, not video frames/);
+  assert.doesNotMatch(youtubeNotes, /Check whether this platform accepts both in one post/);
 });

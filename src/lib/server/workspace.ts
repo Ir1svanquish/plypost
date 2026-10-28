@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { audit, transaction } from "./db";
 import { assistedContentSnapshot, assistedDeletionSnapshot, assistedReceiptSnapshot, draftTitle, hasDraftContent, hasManualReminder, normalizePublicPostUrl, parseAssistedOutcomeInput, parseWorkspace, validCalendarDate, validMediaAlt, validMediaIds, type AssistedPost, type SavedDraft, type ScheduledPost } from "../workspace";
-import { imageLimitForDestination } from "../media-policy";
+import { defaultHandoffImageIds, imageLimitForDestination } from "../media-policy";
 import { adaptDraft, characterCount, isPlatformId, platformIds } from "../platforms";
 import { assistedIds, isAssistedDestinationId, type AssistedDestinationId } from "../assisted";
 import { validatePlatformText } from "../platform-validation";
@@ -239,7 +239,7 @@ export function prepareAssistedBatch(userId: string, draftId: unknown, batchId: 
       }
       // Omitted selection supports older clients; current clients send an explicit list,
       // including [] when no images should travel with this handoff.
-      const selectedMediaIds = mediaIds ?? draftImageIds.slice(0, imageLimitForDestination(destination, Boolean(videoId)));
+      const selectedMediaIds = mediaIds ?? defaultHandoffImageIds(destination, draftImageIds, Boolean(videoId));
       const selectedMediaAlt = selectedMediaIds.map((id) => draft.mediaAlt?.[draftImageIds.indexOf(id)] ?? "");
       const item: AssistedPost = {
         id: randomUUID(), title: draftTitle(draft.title, draft.source), destination, text,

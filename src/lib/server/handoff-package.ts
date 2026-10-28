@@ -68,7 +68,9 @@ function prepareHandoffPackage(userId: string, id: string): { files: PackageFile
     } });
     notes.push("", `Video: ${path}`, `Original name: ${video.original_name}`);
   }
-  if (item.mediaIds?.length && item.videoId) {
+  if (item.destination === "youtube" && item.mediaIds?.length) {
+    notes.push("", "Images are optional thumbnail references, not video frames. Upload the video separately in YouTube Studio. Custom thumbnails require a verified account; choose one image there if supported.");
+  } else if (item.mediaIds?.length && item.videoId) {
     notes.push("", "This package contains photos and a video. Check whether this platform accepts both in one post; use only the supported media when publishing.");
   }
   const missingMedia = missingHandoffMedia(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId));
