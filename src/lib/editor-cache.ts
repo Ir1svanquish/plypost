@@ -7,7 +7,7 @@ const documentKey = "plypost-editor-document";
 type EditorStorage = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
 type TabStorage = Pick<Storage, "getItem" | "setItem">;
 
-export type OtherEditorCopy = { tabId: string; value: string; updatedAt: number; preview: string };
+export type OtherEditorCopy = { tabId: string; value: string; updatedAt: number; preview: string; unreadable?: boolean };
 
 /** Drop only an untouched starter template; a changed title, channel or attachment is user work. */
 export function isUntouchedStarterCache(value: unknown, examples: readonly string[], platforms: readonly string[]): boolean {
@@ -52,6 +52,23 @@ export function ensureEditorTabId(session: TabStorage, documentToken: string, na
   return next;
 }
 
+/** Start a new cache slot when the current one cannot be read, keeping the original bytes. */
+export function forkUnreadableEditorCache(storage: EditorStorage, session: TabStorage, email: string, currentTabId: string,
+  documentToken: string, unreadable: string, createId: () => string): { tabId: string; persistent: boolean } {
+  if (storage.getItem(ownerTabKey(email, currentTabId)) !== unreadable) {
+    // Older caches are removed by a normal write. Copy one into this owner's slots first.
+    storage.setItem(ownerTabKey(email, createId()), unreadable);
+  }
+  const tabId = createId();
+  try {
+    session.setItem(tabIdKey, tabId);
+    session.setItem(documentKey, documentToken);
+    return { tabId, persistent: true };
+  } catch {
+    return { tabId, persistent: false };
+  }
+}
+
 /** The pre-account cache can be claimed once; later owners only read their own editor. */
 export function readOwnerEditorCache(storage: EditorStorage, email: string, tabId: string): string | null {
   const saved = storage.getItem(ownerTabKey(email, tabId));
@@ -79,7 +96,12 @@ export function otherOwnerEditorCopies(storage: EditorStorage, email: string, ta
     const key = storage.key(index);
     if (!key?.startsWith(prefix) || key === ownerTabKey(email, tabId)) continue;
     const value = storage.getItem(key);
-    if (!value || value.length > 100_000) continue;
+    if (!value) continue;
+    if (value.length > 100_000) {
+      copies.push({ tabId: key.slice(prefix.length), value, updatedAt: 0,
+        preview: "Large browser copy", unreadable: true });
+      continue;
+    }
     try {
       const data = JSON.parse(value) as Record<string, unknown>;
       if (data.hasUnsavedWork !== true || typeof data.cachedAt !== "number" || !Number.isFinite(data.cachedAt)) continue;
@@ -87,9 +109,13 @@ export function otherOwnerEditorCopies(storage: EditorStorage, email: string, ta
         .find((item) => typeof item === "string" && item.trim()) as string | undefined;
       copies.push({ tabId: key.slice(prefix.length), value, updatedAt: data.cachedAt,
         preview: Array.from(preview?.trim().replace(/\s+/g, " ") || "Untitled draft").slice(0, 80).join("") });
-    } catch { /* Ignore an unreadable browser copy; keep the original storage entry intact. */ }
+    } catch {
+      copies.push({ tabId: key.slice(prefix.length), value, updatedAt: 0,
+        preview: "Unreadable browser copy", unreadable: true });
+    }
   }
-  return copies.sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 10);
+  return copies.sort((left, right) => Number(Boolean(right.unreadable)) - Number(Boolean(left.unreadable)) ||
+    right.updatedAt - left.updatedAt).slice(0, 10);
 }
 
 /** Remove only a selected, older copy for this owner; never erase the active editor. */

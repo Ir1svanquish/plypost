@@ -43,7 +43,7 @@ import { BlueskyLivePanel, isBlueskyConnection, type BlueskyConnection } from "@
 import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
-import { ensureEditorTabId, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, removeOwnerEditorCopy, writeOwnerEditorCache, type OtherEditorCopy } from "@/lib/editor-cache";
+import { ensureEditorTabId, forkUnreadableEditorCache, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, removeOwnerEditorCopy, writeOwnerEditorCache, type OtherEditorCopy } from "@/lib/editor-cache";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
 import { WorkspaceSnapshotGate } from "@/lib/workspace-snapshot-gate";
 import { parseRestoreReceipt, parseWorkspaceResponse } from "@/lib/workspace-response";
@@ -276,6 +276,9 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   const [scheduleTime, setScheduleTime] = useState("");
   const [runningId, setRunningId] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState(false);
+  const [unreadableEditorCopy, setUnreadableEditorCopy] = useState<string | null>(null);
+  const editorCacheWriteBlockedRef = useRef(false);
+  const editorCacheLoadedRef = useRef(false);
   const editorTabIdRef = useRef<string | null>(null);
   const editorTabIdPersistentRef = useRef(true);
   const [otherEditorCopies, setOtherEditorCopies] = useState<OtherEditorCopy[]>([]);
@@ -554,6 +557,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   }
 
   useEffect(() => {
+    if (editorCacheLoadedRef.current) return;
+    editorCacheLoadedRef.current = true;
     try {
       const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
       editorTabIdRef.current = ensureEditorTabId(sessionStorage, String(performance.timeOrigin), navigation?.type ?? "navigate", () => crypto.randomUUID());
@@ -562,8 +567,9 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       editorTabIdPersistentRef.current = false;
       setStorageWarning(true);
     }
+    let saved: string | null = null;
     try {
-      const saved = readOwnerEditorCache(localStorage, email, editorTabIdRef.current);
+      saved = readOwnerEditorCache(localStorage, email, editorTabIdRef.current);
       if (saved) {
         const data = JSON.parse(saved) as {
           source?: unknown;
@@ -622,7 +628,21 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
             pending.snapshot.id === data.currentDraftId || pending.asCopy)) setPendingDraftSave(pending);
       }
     } catch {
-      // A malformed local draft should never prevent the editor from opening.
+      if (saved !== null) {
+        setUnreadableEditorCopy(saved);
+        try {
+          const fork = forkUnreadableEditorCache(localStorage, sessionStorage, email, editorTabIdRef.current,
+            String(performance.timeOrigin), saved, () => crypto.randomUUID());
+          editorTabIdRef.current = fork.tabId;
+          editorTabIdPersistentRef.current = fork.persistent;
+        } catch {
+          editorCacheWriteBlockedRef.current = true;
+          setStorageWarning(true);
+        }
+      } else {
+        editorCacheWriteBlockedRef.current = true;
+        setStorageWarning(true);
+      }
     }
     try {
       const saved = localStorage.getItem(WORKSPACE_KEY);
@@ -694,6 +714,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   }
 
   function persistEditorCache(pending: PendingDraftSave | null) {
+    if (editorCacheWriteBlockedRef.current) throw new Error("Unreadable browser copy could not be preserved.");
     const tabId = editorTabIdRef.current;
     if (!tabId) throw new Error("Editor storage is not ready.");
     writeOwnerEditorCache(localStorage, email, tabId, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId,
@@ -710,6 +731,15 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       setStorageWarning(true);
     }
   }, [source, selected, variants, mediaIds, mediaAltById, videoId, plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave, editorDirty, needsDraftRecovery, hydrated, email]);
+
+  function downloadBrowserCopy(value: string) {
+    const url = URL.createObjectURL(new Blob([value], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "plypost-browser-copy.txt";
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
 
   useEffect(() => {
     const timer = window.setInterval(() => { if (!initialWorkspaceLoad.current) void refreshWorkspace(false).then(() => setWorkspaceReady(true)).catch(() => {}); }, 15_000);
@@ -1904,12 +1934,15 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           </div>
           {otherEditorCopies.length > 0 && <details className="mb-5 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] text-[var(--text-secondary)]">
             <summary className="cursor-pointer font-semibold text-[var(--text)]">{otherEditorCopies.length} recoverable browser {otherEditorCopies.length === 1 ? "copy" : "copies"}</summary>
-            <p className="mt-2 text-[12px] text-[var(--text-muted)]">Copies may come from another tab or a closed session. Save current edits first; opening a copy keeps its original.</p>
+            <p className="mt-2 text-[12px] text-[var(--text-muted)]">Copies may come from another tab or a closed session. Save current edits first; opening a copy keeps its original. Download unreadable copies to inspect their raw text.</p>
             <ul className="mt-2 divide-y divide-[var(--line)]">{otherEditorCopies.map((copy) => <li key={copy.tabId} className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="min-w-0 truncate" title={copy.preview}>{copy.preview}</span>
-              <span className="flex shrink-0 items-center gap-3"><button type="button" onClick={() => recoverEditorCopy(copy)} className="font-semibold text-[var(--accent-text)]">Open copy</button><button type="button" onClick={() => discardEditorCopy(copy)} className="font-semibold text-[var(--danger)]">Remove copy</button></span>
+              <span className="flex shrink-0 items-center gap-3">{copy.unreadable
+                ? <button type="button" onClick={() => downloadBrowserCopy(copy.value)} className="font-semibold text-[var(--accent-text)]">Download raw copy</button>
+                : <button type="button" onClick={() => recoverEditorCopy(copy)} className="font-semibold text-[var(--accent-text)]">Open copy</button>}<button type="button" onClick={() => discardEditorCopy(copy)} className="font-semibold text-[var(--danger)]">Remove copy</button></span>
             </li>)}</ul>
           </details>}
+          {unreadableEditorCopy !== null && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] leading-5 text-[var(--warning)]">A browser editor copy could not be read. Its original text was kept. <button type="button" onClick={() => downloadBrowserCopy(unreadableEditorCopy)} className="font-bold underline underline-offset-2">Download raw copy</button> and keep the file private.{editorCacheWriteBlockedRef.current && " Browser autosave is unavailable until storage works again; save new work to your account."}</div>}
           <div className="space-y-5">
               <section className="panel-border soft-shadow overflow-hidden rounded-[18px] bg-[var(--surface)]" aria-labelledby="draft-heading">
                 <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-4 sm:px-7">

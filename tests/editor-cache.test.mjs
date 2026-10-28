@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ensureEditorTabId, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, removeOwnerEditorCopy, writeOwnerEditorCache } from "../src/lib/editor-cache.ts";
+import { ensureEditorTabId, forkUnreadableEditorCache, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, removeOwnerEditorCopy, writeOwnerEditorCache } from "../src/lib/editor-cache.ts";
 
 function storage(entries = []) {
   const values = new Map(entries);
@@ -79,6 +79,64 @@ test("clean browser copies are omitted from recovery without deleting stored dat
   writeOwnerEditorCache(local, "first@example.test", "tab-a", JSON.stringify({ source: "Saved draft", hasUnsavedWork: false, cachedAt: 10 }));
   assert.deepEqual(otherOwnerEditorCopies(local, "first@example.test", "tab-b"), []);
   assert.ok(readOwnerEditorCache(local, "first@example.test", "tab-a"));
+});
+
+test("unreadable current editor survives a new cache write and remains downloadable", () => {
+  const local = storage([["plypost-editor-v3:first%40example.test:broken", '{"source":"unsaved text"']]);
+  const session = storage([["plypost-editor-tab-id", "broken"]]);
+  const raw = readOwnerEditorCache(local, "first@example.test", "broken");
+  assert.throws(() => JSON.parse(raw));
+  const fork = forkUnreadableEditorCache(local, session, "first@example.test", "broken", "document", raw,
+    () => "fresh");
+  assert.deepEqual(fork, { tabId: "fresh", persistent: true });
+  writeOwnerEditorCache(local, "first@example.test", fork.tabId, JSON.stringify({ source: "New work" }));
+  assert.equal(readOwnerEditorCache(local, "first@example.test", "broken"), raw);
+  assert.equal(readOwnerEditorCache(local, "first@example.test", "fresh"), '{"source":"New work"}');
+  assert.deepEqual(otherOwnerEditorCopies(local, "first@example.test", "fresh").map(({ value, unreadable }) =>
+    ({ value, unreadable })), [{ value: raw, unreadable: true }]);
+});
+
+test("unreadable legacy editor is copied before migration removes the old key", () => {
+  const raw = '{"source":"older unsaved text"';
+  const local = storage([["plypost-editor-v2:first%40example.test", raw]]);
+  const session = storage();
+  const ids = ["preserved", "fresh"];
+  const fork = forkUnreadableEditorCache(local, session, "first@example.test", "old-tab", "document", raw,
+    () => ids.shift());
+  writeOwnerEditorCache(local, "first@example.test", fork.tabId, '{"source":"New work"}');
+  assert.equal(local.getItem("plypost-editor-v2:first%40example.test"), null);
+  assert.equal(readOwnerEditorCache(local, "first@example.test", "preserved"), raw);
+  assert.equal(otherOwnerEditorCopies(local, "first@example.test", "fresh")[0].unreadable, true);
+  assert.equal(otherOwnerEditorCopies(local, "second@example.test", "fresh").length, 0);
+});
+
+test("a failed backup leaves the unreadable legacy entry untouched", () => {
+  const raw = '{"source":"unsaved"';
+  const local = storage([["socialflow-mvp", raw]]);
+  local.setItem = () => { throw new Error("quota exceeded"); };
+  assert.throws(() => forkUnreadableEditorCache(local, storage(), "first@example.test", "old", "document", raw,
+    () => "backup"), /quota exceeded/);
+  assert.equal(local.getItem("socialflow-mvp"), raw);
+});
+
+test("session storage failure still keeps the unreadable entry in an older slot", () => {
+  const raw = '{"source":"unsaved"';
+  const local = storage([["plypost-editor-v3:first%40example.test:old", raw]]);
+  const session = storage();
+  session.setItem = () => { throw new Error("session unavailable"); };
+  const fork = forkUnreadableEditorCache(local, session, "first@example.test", "old", "document", raw,
+    () => "fresh");
+  assert.deepEqual(fork, { tabId: "fresh", persistent: false });
+  assert.equal(local.getItem("plypost-editor-v3:first%40example.test:old"), raw);
+});
+
+test("a large browser copy remains available to download without parsing it", () => {
+  const raw = "x".repeat(100_001);
+  const local = storage([["plypost-editor-v3:first%40example.test:old", raw]]);
+  const [copy] = otherOwnerEditorCopies(local, "first@example.test", "fresh");
+  assert.equal(copy.preview, "Large browser copy");
+  assert.equal(copy.unreadable, true);
+  assert.equal(copy.value, raw);
 });
 
 test("removing an old browser copy keeps the active editor and other owners", () => {
