@@ -17,6 +17,12 @@ test("accepts harmless formatting of the same details", () => {
     "Saturday at 2pm. Tickets: 1000. See https://example.com/event!",
   ), { missing: [], added: [] });
   assert.deepEqual(compareAiLiterals("周一下午2点", "星期一2pm"), { missing: [], added: [] });
+  assert.deepEqual(compareAiLiterals("Starts at 2 p.m.; doors open at 1:30.", "Starts at 2:00 p.m.; doors open at 01:30."), {
+    missing: [], added: [],
+  });
+  assert.deepEqual(compareAiLiterals("Doors open at 1:30.", "Doors open at 1:45."), {
+    missing: ["1:30"], added: ["1:45"],
+  });
 });
 
 test("checks links, addresses and tags without treating digits inside them as separate facts", () => {

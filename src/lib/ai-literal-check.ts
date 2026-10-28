@@ -44,6 +44,12 @@ function literals(text: string): Literal[] {
       : match[0] === "下午" ? "pm" : match[0];
     add("time", match[0], period);
   }
+  rest = rest.replace(/\b(\d{1,2}):([0-5]\d)\b/gu, (_match, hour: string, minute: string) => {
+    const normalizedHour = String(Number(hour));
+    if (minute === "00") add("number", normalizedHour, normalizedHour);
+    else add("clock", `${hour}:${minute}`, `${normalizedHour}:${minute}`);
+    return " ";
+  });
   for (const match of rest.matchAll(/\p{N}+(?:[.,]\p{N}+)*/gu)) {
     const number = match[0];
     add("number", number, number.replace(/,(?=\d{3}(?:$|[.,]))/g, "").replace(/^0+(?=\d)/, ""));
