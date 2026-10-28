@@ -57,7 +57,7 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
         : destination === "threads" && hasVideo && selectedIds.length <= limit
         ? `The video uses one of Threads' 20 carousel slots. Choose up to 19 of ${sourceIds.length} draft images.`
         : destination === "instagram" && hasVideo && selectedIds.length <= limit
-        ? `The video uses one of Instagram's 20 carousel slots. Choose up to 19 of ${sourceIds.length} draft images.`
+        ? `The video uses one of Instagram's 20 carousel slots. Choose up to 19 of ${sourceIds.length} draft images; set the video position in Instagram before posting.`
         : selectedIds.length > limit
         ? `Remove ${selectedIds.length - limit} ${selectedIds.length - limit === 1 ? "image" : "images"}${destination === "x" && hasVideo ? " or detach the video" : ""} before confirming.`
         : sourceIds.length > limit

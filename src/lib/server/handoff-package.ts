@@ -71,7 +71,14 @@ function prepareHandoffPackage(userId: string, id: string): { files: PackageFile
   if (item.destination === "youtube" && item.mediaIds?.length) {
     notes.push("", "Images are optional thumbnail references, not video frames. Upload the video separately in YouTube Studio. Custom thumbnails require a verified account; choose one image there if supported.");
   } else if (item.mediaIds?.length && item.videoId) {
-    notes.push("", "This package contains photos and a video. Check whether this platform accepts both in one post; use only the supported media when publishing.");
+    if (item.destination === "bluesky" || item.destination === "pinterest") {
+      notes.push("", "This older handoff contains images and a video, which cannot be used together in one post on this platform. Remove one format from the handoff before publishing.");
+    } else if (item.destination === "x" || item.destination === "threads" || item.destination === "instagram") {
+      notes.push("", `Selected media: ${item.mediaIds.length} ${item.mediaIds.length === 1 ? "image" : "images"} + 1 video (${item.mediaIds.length + 1} items).`,
+        "The numbered files preserve image order. Plypost does not save where the video goes among those images; choose the final order and check the current media limit in the platform editor.");
+    } else {
+      notes.push("", "This package contains photos and a video. Check whether this platform accepts both in one post; use only the supported media when publishing.");
+    }
   }
   const missingMedia = missingHandoffMedia(item.destination, item.mediaIds?.length ?? 0, Boolean(item.videoId));
   if (missingMedia === "video") notes.push("", "No video is attached to this handoff. Bring your video separately.");

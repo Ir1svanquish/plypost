@@ -138,6 +138,25 @@ test("mixed media handoff ZIP includes both files and a platform compatibility r
   assert.deepEqual(Buffer.from(files["video/clip.mp4"]), videoBytes);
   assert.match(strFromU8(files["handoff.txt"]), /Check whether this platform accepts both in one post/);
 
+  for (const destination of ["x", "threads", "instagram"]) {
+    const mixed = addAssisted(owner, { id: randomUUID(), title: "Mixed carousel", destination, text: "Caption",
+      mediaIds: [image.id], mediaAlt: ["Cover"], videoId: video.id,
+      scheduledFor: now, createdAt: now, status: "queued" });
+    const mixedFiles = unzipSync(buildHandoffPackage(owner, mixed.id).bytes);
+    const mixedNotes = strFromU8(mixedFiles["handoff.txt"]);
+    assert.match(mixedNotes, /Selected media: 1 image \+ 1 video \(2 items\)/);
+    assert.match(mixedNotes, /does not save where the video goes/);
+    assert.doesNotMatch(mixedNotes, /Check whether this platform accepts both in one post/);
+  }
+
+  const oldPinterest = addAssisted(owner, { id: randomUUID(), title: "Old Pin", destination: "pinterest", text: "Caption",
+    mediaIds: [image.id], mediaAlt: ["Cover"], scheduledFor: now, createdAt: now, status: "queued" });
+  database().prepare("UPDATE assisted SET payload=? WHERE id=? AND user_id=?")
+    .run(JSON.stringify({ ...oldPinterest, videoId: video.id }), oldPinterest.id, owner);
+  const oldPinNotes = strFromU8(unzipSync(buildHandoffPackage(owner, oldPinterest.id).bytes)["handoff.txt"]);
+  assert.match(oldPinNotes, /cannot be used together in one post/);
+  assert.doesNotMatch(oldPinNotes, /Check whether this platform accepts both in one post/);
+
   const youtube = addAssisted(owner, { id: randomUUID(), title: "Video with thumbnail", destination: "youtube", text: "Watch",
     mediaIds: [image.id], mediaAlt: ["Optional cover"], videoId: video.id,
     scheduledFor: now, createdAt: now, status: "queued" });
