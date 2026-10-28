@@ -14,7 +14,7 @@ The optional AI tools make runtime calls to Nebius Token Factory. NVIDIA Nemotro
 
 Use Node.js 24.14 or newer within major version 24. Run `npm ci`, copy `.env.example` to `.env.local`, and run `npm run hash-password`. Put the chosen email and the generated password hash in `PLYPOST_OWNER_EMAIL` and `PLYPOST_OWNER_PASSWORD_HASH` in `.env.local`; add `NEBIUS_API_KEY` only if you want to call the AI models. Start with `npm run dev` and open `http://localhost:3000`. Keep `.env.local` and `data/` private. For a fictional, separate workspace without social account connections, run `npm run demo` and read the generated login details in the ignored `data/demo/login.txt`. Run `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build` to check the project.
 
-Plypost 是一个多平台发帖工作台。写一份草稿，再按平台改文案、存图片、设提醒。可在本机运行；[公开演示站](https://plypost.onrender.com/)由单实例 Render 服务托管，GitHub 更新需要手动部署。
+Plypost 是一个多平台发帖工作台。写一份草稿，再按平台改文案、存图片、设提醒。可在本机运行；[公开演示站](https://plypost.onrender.com/)由单实例 Render 服务托管，GitHub 更新需要手动部署。该服务使用持久磁盘保存 SQLite 数据，每次部署会短暂中断访问；详见[托管说明](docs/hosting.md)。
 
 新草稿从空白开始，不预选平台。写帖页在正文框内用 **＋** 添加图片或视频；选中的图片缩略图和视频标记会留在正文下方，可直接移除。正文下方的工具栏可插入表情、话题符号，填写地点备注，或打开目标日期。地点只是人工发布时的提示，不读取定位，也不会自动添加平台地理标签。图片缩略图仍只对登录账号可见，下载原图不受影响。正文下方展开 **Generate caption** 选写法；其它选项按需展开。可以只存标题或素材，稍后再补文案。
 
