@@ -56,6 +56,8 @@ export function PlatformImageSelection({ destination, sourceIds, sourceAlt, sele
         ? "LinkedIn has separate photo and video posting flows. This handoff starts with video only; remove it to use photos, or check your composer before mixing formats."
         : destination === "threads" && hasVideo && selectedIds.length <= limit
         ? `The video uses one of Threads' 20 carousel slots. Choose up to 19 of ${sourceIds.length} draft images.`
+        : destination === "instagram" && hasVideo && selectedIds.length <= limit
+        ? `The video uses one of Instagram's 20 carousel slots. Choose up to 19 of ${sourceIds.length} draft images.`
         : selectedIds.length > limit
         ? `Remove ${selectedIds.length - limit} ${selectedIds.length - limit === 1 ? "image" : "images"}${destination === "x" && hasVideo ? " or detach the video" : ""} before confirming.`
         : sourceIds.length > limit

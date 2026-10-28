@@ -207,7 +207,7 @@ test("X counts a saved video toward its four media items in every handoff path",
     createdAt: new Date().toISOString(), status: "queued" }).mediaIds.length, 4);
 });
 
-test("Threads counts a video within its twenty carousel media items", async () => {
+test("Threads and Instagram count a video within their twenty carousel media items", async () => {
   const ids = [];
   for (let index = 0; index < 20; index++) {
     ids.push((await createMedia(owner, {
@@ -236,6 +236,27 @@ test("Threads counts a video within its twenty carousel media items", async () =
   const [photos] = prepareAssistedBatch(owner, saved.id, randomUUID(), [request]);
   assert.deepEqual(photos.mediaIds, ids);
   assert.throws(() => updateAssistedVideo(owner, photos.id, null, clip.id), /fewer images/);
+
+  const instagram = { destination: "instagram", text: "Reviewed Instagram caption", scheduledFor: request.scheduledFor };
+  assert.equal(imageLimitForDestination("instagram"), 20);
+  assert.equal(imageLimitForDestination("instagram", true), 19);
+  assert.deepEqual(defaultHandoffImageIds("instagram", ids, true), ids.slice(0, 19));
+  assert.match(imageLimitWarning("instagram", 20, true), /photos and videos together/);
+  const [instagramMixed] = prepareAssistedBatch(owner, saved.id, randomUUID(), [{ ...instagram, videoId: clip.id }]);
+  assert.deepEqual(instagramMixed.mediaIds, ids.slice(0, 19));
+  assert.equal(instagramMixed.videoId, clip.id);
+  assert.throws(() => prepareAssistedBatch(owner, saved.id, randomUUID(),
+    [{ ...instagram, mediaIds: ids, videoId: clip.id }]), /valid text and UTC timestamps/);
+  assert.throws(() => updateAssistedImages(owner, instagramMixed.id, instagramMixed.mediaIds, instagramMixed.mediaAlt,
+    ids, ids.map(() => "")), /fewer images/);
+  const [instagramPhotos] = prepareAssistedBatch(owner, saved.id, randomUUID(), [instagram]);
+  assert.deepEqual(instagramPhotos.mediaIds, ids);
+  assert.throws(() => updateAssistedVideo(owner, instagramPhotos.id, null, clip.id), /fewer images/);
+  assert.throws(() => addAssisted(owner, {
+    id: randomUUID(), title: "Too many carousel items", ...instagram,
+    mediaIds: ids, mediaAlt: ids.map(() => ""), videoId: clip.id,
+    createdAt: new Date().toISOString(), status: "queued",
+  }), /fewer images/);
 });
 
 test("Mastodon and LinkedIn video handoffs start without draft photos", async () => {

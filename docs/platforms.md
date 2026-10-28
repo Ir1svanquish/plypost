@@ -6,6 +6,7 @@
 [LinkedIn 多图帖 2–20 张](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/multiimage-post-api)、
 [Threads 轮播最多 20 个媒体项目](https://developers.facebook.com/documentation/threads/posts.md)。
 Threads 的 20 项是图片和视频合计；交接若含一段视频，最多再选 19 张图片，草稿仍保留 20 张素材。
+Instagram 的多图帖也把图片与视频计入同一组媒体名额；Plypost 的 20 项交接上限包含视频，带一段视频时默认选择至多 19 张图片。此限制针对人工交接，最终仍须在 Instagram 编辑器内核对。Meta 的[多媒体帖说明](https://about.fb.com/ja/news/2017/02/instagram_sharemultiple/)确认一帖可以组合图片与视频；各入口的实际额度可能变化。
 X 的[普通帖最多 4 个媒体项目](https://help.x.com/en/using-x/how-to-post)。草稿保留全部素材，人工发布包只包含该平台交接时选定的素材；Plypost 不自动裁剪或发送图片。地点备注同样只随手动发布包保存，不是平台位置标签。
 
 Bluesky 人工交接若附视频，默认不带草稿图片；交接编辑和服务端均阻止把图片与视频保存为同一条新待办。草稿仍可同时存放两类素材，已保存的旧混合待办也会保留以便手动修正。
