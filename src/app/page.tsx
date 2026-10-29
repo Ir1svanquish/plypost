@@ -46,6 +46,7 @@ import { MastodonSchedulePanel } from "@/components/mastodon-schedule-panel";
 import type { RealMastodonSchedule } from "@/lib/plan-agenda";
 import { assistedDestinations, assistedOnlyDisplayIds, assistedTextImageOnlyDisplayIds, assistedVideoDisplayIds, type AssistedDestinationId } from "@/lib/assisted";
 import { ensureEditorTabId, forkUnreadableEditorCache, isUntouchedStarterCache, otherOwnerEditorCopies, readOwnerEditorCache, removeOwnerEditorCopy, writeOwnerEditorCache, type OtherEditorCopy } from "@/lib/editor-cache";
+import { openEditorRecovery, reopenedEditorValue, type EditorRecovery } from "@/lib/editor-recovery";
 import { inspectPendingDraftSave, parsePendingDraftSave, sameDraftPayload, type PendingDraftSave } from "@/lib/draft-save-recovery";
 import { WorkspaceSnapshotGate } from "@/lib/workspace-snapshot-gate";
 import { parseRestoreReceipt, parseWorkspaceResponse } from "@/lib/workspace-response";
@@ -276,6 +277,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   const [scheduleTime, setScheduleTime] = useState("");
   const [runningId, setRunningId] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState(false);
+  const [recovery, setRecovery] = useState<EditorRecovery | null>(null);
+  const [recoveryWarning, setRecoveryWarning] = useState(false);
   const [unreadableEditorCopy, setUnreadableEditorCopy] = useState<string | null>(null);
   const editorCacheWriteBlockedRef = useRef(false);
   const editorCacheLoadedRef = useRef(false);
@@ -557,7 +560,28 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   }
 
   useEffect(() => {
-    if (editorCacheLoadedRef.current) return;
+    let active = true;
+    let connection: EditorRecovery | undefined;
+    // Access storage lazily so a privacy-mode exception still reaches the existing warning path.
+    const storage = {
+      get length() { return localStorage.length; },
+      key: (index: number) => localStorage.key(index),
+      getItem: (key: string) => localStorage.getItem(key),
+      setItem: (key: string, value: string) => localStorage.setItem(key, value),
+      removeItem: (key: string) => localStorage.removeItem(key),
+    };
+    let factory: IDBFactory | undefined;
+    try { factory = window.indexedDB; } catch { setRecoveryWarning(true); }
+    void openEditorRecovery(storage, factory, email, () => { if (active) setRecoveryWarning(true); }).then((opened) => {
+      connection = opened;
+      if (active) setRecovery(opened);
+      else opened.close();
+    });
+    return () => { active = false; connection?.close(); };
+  }, [email]);
+
+  useEffect(() => {
+    if (!recovery || editorCacheLoadedRef.current) return;
     editorCacheLoadedRef.current = true;
     try {
       const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
@@ -569,7 +593,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     }
     let saved: string | null = null;
     try {
-      saved = readOwnerEditorCache(localStorage, email, editorTabIdRef.current);
+      saved = readOwnerEditorCache(recovery.storage, email, editorTabIdRef.current);
       if (saved) {
         const data = JSON.parse(saved) as {
           source?: unknown;
@@ -631,7 +655,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       if (saved !== null) {
         setUnreadableEditorCopy(saved);
         try {
-          const fork = forkUnreadableEditorCache(localStorage, sessionStorage, email, editorTabIdRef.current,
+          const fork = forkUnreadableEditorCache(recovery.storage, sessionStorage, email, editorTabIdRef.current,
             String(performance.timeOrigin), saved, () => crypto.randomUUID());
           editorTabIdRef.current = fork.tabId;
           editorTabIdPersistentRef.current = fork.persistent;
@@ -672,19 +696,19 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
         initialWorkspaceLoad.current = false;
       }
     })();
-  }, []);
+  }, [recovery]);
 
   useEffect(() => {
     const refreshCopies = () => {
       const tabId = editorTabIdRef.current;
-      if (!tabId) return;
-      try { setOtherEditorCopies(otherOwnerEditorCopies(localStorage, email, tabId)); }
+      if (!tabId || !recovery) return;
+      try { setOtherEditorCopies(otherOwnerEditorCopies(recovery.storage, email, tabId)); }
       catch { setOtherEditorCopies([]); }
     };
     refreshCopies();
     window.addEventListener("storage", refreshCopies);
     return () => window.removeEventListener("storage", refreshCopies);
-  }, [email, hydrated]);
+  }, [email, hydrated, recovery]);
 
   function recoverEditorCopy(copy: OtherEditorCopy) {
     if (editorDirty || needsDraftRecovery || pendingDraftSave || strategyDirty || assistedDirty || batchReviewState.dirty || batchReviewState.busy || draftSaveBusyRef.current ||
@@ -694,8 +718,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     }
     try {
       const tabId = editorTabIdRef.current;
-      if (!tabId) throw new Error("Editor storage is not ready.");
-      writeOwnerEditorCache(localStorage, email, tabId, copy.value);
+      if (!tabId || !recovery) throw new Error("Editor storage is not ready.");
+      writeOwnerEditorCache(recovery.storage, email, tabId, reopenedEditorValue(copy.value, Date.now()));
       window.location.reload();
     } catch {
       setNotice({ kind: "error", text: "Could not open that browser copy. Its original copy was kept." });
@@ -706,8 +730,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     if (!window.confirm("Remove this browser copy? It may contain edits not saved to your account. Open and check it first if you are unsure.")) return;
     try {
       const tabId = editorTabIdRef.current;
-      if (!tabId || !removeOwnerEditorCopy(localStorage, email, tabId, copy.tabId)) throw new Error("Browser copy is unavailable.");
-      setOtherEditorCopies(otherOwnerEditorCopies(localStorage, email, tabId));
+      if (!tabId || !recovery || !removeOwnerEditorCopy(recovery.storage, email, tabId, copy.tabId)) throw new Error("Browser copy is unavailable.");
+      setOtherEditorCopies(otherOwnerEditorCopies(recovery.storage, email, tabId));
     } catch {
       setNotice({ kind: "error", text: "Could not remove that browser copy. Refresh and check whether it is still listed." });
     }
@@ -716,8 +740,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   function persistEditorCache(pending: PendingDraftSave | null) {
     if (editorCacheWriteBlockedRef.current) throw new Error("Unreadable browser copy could not be preserved.");
     const tabId = editorTabIdRef.current;
-    if (!tabId) throw new Error("Editor storage is not ready.");
-    writeOwnerEditorCache(localStorage, email, tabId, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId,
+    if (!tabId || !recovery) throw new Error("Editor storage is not ready.");
+    writeOwnerEditorCache(recovery.storage, email, tabId, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId,
       plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave: pending,
       hasUnsavedWork: editorDirty || needsDraftRecovery || Boolean(pending), cachedAt: Date.now() }));
   }
@@ -1887,6 +1911,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     await onLogout();
   }
 
+  if (!hydrated) return <div role="status" className="app-shell flex min-h-screen items-center justify-center text-[14px] text-[var(--text-muted)]">Opening workspace…</div>;
+
   return (
     <>
     <div inert={restoringBackup} className="app-shell min-h-screen lg:flex">
@@ -2087,7 +2113,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 
           {notice && <div role={notice.persistent ? "alert" : "status"} className={`fixed bottom-4 left-4 right-4 z-50 flex items-start gap-2 rounded-xl border px-4 py-3 text-[13px] leading-5 shadow-xl sm:left-auto sm:max-w-md ${notice.kind === "success" ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]" : "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"}`}>{notice.kind === "success" ? <CheckCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}<span className="min-w-0 flex-1">{notice.text}</span>{notice.persistent && <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notice" className="shrink-0 rounded p-0.5 hover:bg-black/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"><X size={15} aria-hidden="true" /></button>}</div>}
 
-          {storageWarning && <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable. Unsaved editor text may not survive a reload. Items already saved to your account remain in the database.</div>}
+          {storageWarning ? <div role="alert" className="mt-6 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[13px] text-[var(--danger)]">Browser storage is unavailable. Unsaved editor text may not survive a reload. Items already saved to your account remain in the database.</div> : recoveryWarning && <p role="status" className="mt-5 text-[12px] text-[var(--text-muted)]">Browser recovery is limited. Save important changes to your account.</p>}
 
           {view === "drafts" && <div>
             <div className="mb-2"><h1 className="text-[26px] font-semibold tracking-[-0.035em] text-[var(--text)] sm:text-[30px]">Saved ideas</h1><p className="mt-1 text-[14px] text-[var(--text-muted)]">Pick up a post you started earlier.</p></div>
@@ -2204,7 +2230,7 @@ export default function Home() {
     }
   }
 
-  if (session?.email) return <WorkspaceApp email={session.email} onLogout={signOut} logoutBusy={logoutBusy} logoutError={logoutError} />;
+  if (session?.email) return <WorkspaceApp key={session.email} email={session.email} onLogout={signOut} logoutBusy={logoutBusy} logoutError={logoutError} />;
   return <div className="app-shell flex min-h-screen items-center justify-center px-5 py-10"><div className="panel-border soft-shadow w-full max-w-md rounded-[22px] bg-[var(--surface)] p-8">
     <div className="mb-7 flex items-center gap-3"><Image src="/plypost-mark.svg" alt="" width={44} height={44} className="h-11 w-11 shrink-0" /><span className="text-[25px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
     <h1 className="text-[22px] font-bold text-[var(--text)]">Sign in to Plypost</h1>

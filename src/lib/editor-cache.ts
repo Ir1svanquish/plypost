@@ -4,7 +4,7 @@ const ownerKeyPrefix = "plypost-editor-v3:";
 const tabIdKey = "plypost-editor-tab-id";
 const documentKey = "plypost-editor-document";
 
-type EditorStorage = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
+export type EditorStorage = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
 type TabStorage = Pick<Storage, "getItem" | "setItem">;
 
 export type OtherEditorCopy = { tabId: string; value: string; updatedAt: number; preview: string; unreadable?: boolean };
