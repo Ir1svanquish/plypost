@@ -240,7 +240,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
   const loadFailed = Boolean(loadError);
 
   return (
-    <section className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 sm:p-5" aria-labelledby={`${inputId}-heading`} aria-busy={loading || uploading || deletingId !== null}>
+    <section className="image-attachment-picker mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 sm:p-5" aria-labelledby={`${inputId}-heading`} aria-busy={loading || uploading || deletingId !== null}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 id={`${inputId}-heading`} className="text-[13px] font-bold text-[var(--text)]">Images <span className="font-medium text-[var(--text-soft)]">· {selectedIds.length}/{maxSelected}</span></h3>
@@ -259,19 +259,17 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
       {loadFailed && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><span>{loadError} Your saved image list may be incomplete.</span><button type="button" onClick={retryLoad} disabled={controlsBusy} className="font-semibold underline underline-offset-2 disabled:opacity-50">Retry library</button></div>}
       {error && <div role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">{error}</div>}
       {missingCount > 0 && libraryLoaded && !loading && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]"><p role="status">{missingCount} saved {missingCount === 1 ? "image is" : "images are"} unavailable.</p><button type="button" onClick={() => setSelection(selected.map((item) => item.id))} disabled={controlsBusy} className="font-semibold underline underline-offset-2 disabled:opacity-50">Remove unavailable</button></div>}
-      {selected.length > 0 && <ul className="mt-4 grid max-h-[430px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} id={`${inputId}-${item.id}-selected`} tabIndex={-1} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">
-        <div className="flex min-w-0 flex-col gap-3 xl:flex-row">
-          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={descriptions[item.id] || item.name} fill sizes="80px" className="object-cover" /></div>
-          <div className="flex min-w-0 flex-1 flex-col justify-between">
-            <span className="truncate text-[11px] font-medium text-[var(--text-secondary)]" title={item.name}>{index + 1}. {item.name}</span>
-            <div className="flex items-center gap-1">
+      {selected.length > 0 && <ul className="selected-image-grid mt-4 grid max-h-[430px] gap-3 overflow-y-auto pr-1" aria-label="Selected images">{selected.map((item, index) => <li key={item.id} id={`${inputId}-${item.id}-selected`} tabIndex={-1} className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={descriptions[item.id] || item.name} fill sizes="56px" className="object-cover" /></div>
+          <span className="min-w-0 truncate text-[13px] font-medium text-[var(--text-secondary)]" title={item.name}>{index + 1}. {item.name}</span>
+        </div>
+            <div className="selected-image-actions mt-2 flex flex-wrap items-center gap-1">
               <button type="button" onClick={() => moveImage(item.id, -1)} disabled={controlsBusy || index === 0} aria-label={`Move image ${index + 1} earlier`} title="Move earlier" className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-40"><ArrowUp size={15} aria-hidden="true" /></button>
               <button type="button" onClick={() => moveImage(item.id, 1)} disabled={controlsBusy || index === selectedIds.length - 1} aria-label={`Move image ${index + 1} later`} title="Move later" className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover)] disabled:opacity-40"><ArrowDown size={15} aria-hidden="true" /></button>
               <button type="button" onClick={() => moveImageToFront(item.id)} disabled={controlsBusy || index === 0} aria-label={`Make image ${index + 1} the cover`} title={index === 0 ? "Current cover" : "Set as cover"} className="rounded px-1.5 py-1 text-[13px] font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:text-[var(--text-soft)] disabled:opacity-70">Cover</button>
               <button type="button" onClick={() => toggleImage(item.id)} disabled={controlsBusy} aria-label={`Remove ${item.name} from ${subject}`} title={`Remove from ${subject}`} className="ml-auto rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:opacity-50"><X size={15} aria-hidden="true" /></button>
             </div>
-          </div>
-        </div>
         <label htmlFor={`${inputId}-${item.id}-alt`} className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">Image description <span className="sr-only">for {item.name}</span> <span className="font-normal text-[var(--text-soft)]">(optional)</span></label>
         <input id={`${inputId}-${item.id}-alt`} type="text" value={descriptions[item.id] ?? ""} onChange={(event) => onDescriptionChange(item.id, Array.from(event.target.value).filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127).join(""))} disabled={controlsBusy && !readOnly} readOnly={readOnly} maxLength={MAX_IMAGE_ALT_CHARS} placeholder="Describe what this image shows" className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-2.5 py-2 text-[16px] text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
       </li>)}</ul>}
@@ -280,7 +278,7 @@ export function ImageAttachmentPicker({ selectedIds, descriptions, onChange, onD
       <div id={`${inputId}-library`} hidden={!libraryOpen} className="mt-4 border-t border-[var(--line)] pt-4">
         {libraryOpen && <>
         <p className="mb-3 text-[12px] font-semibold text-[var(--text-secondary)]">Your image library</p>
-        {loading ? <p role="status" className="text-[12px] text-[var(--text-muted)]">Loading images…</p> : loadFailed && media.length === 0 ? <p className="text-[12px] text-[var(--text-muted)]">The library could not be checked. Retry above.</p> : media.length === 0 ? <p className="text-[12px] text-[var(--text-muted)]">No images uploaded yet.</p> : <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Image library">{media.map((item) => {
+        {loading ? <p role="status" className="text-[12px] text-[var(--text-muted)]">Loading images…</p> : loadFailed && media.length === 0 ? <p className="text-[12px] text-[var(--text-muted)]">The library could not be checked. Retry above.</p> : media.length === 0 ? <p className="text-[12px] text-[var(--text-muted)]">No images uploaded yet.</p> : <ul className="image-library-grid grid gap-3" aria-label="Image library">{media.map((item) => {
           const attached = selectedIds.includes(item.id);
           return <li key={item.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
             <div className="relative aspect-square overflow-hidden bg-[var(--field)]"><Image unoptimized src={imageUrl(item.id, true)} alt={item.name} fill sizes="(max-width: 640px) 50vw, 160px" className="object-cover" /></div>
