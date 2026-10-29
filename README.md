@@ -73,7 +73,7 @@ npm run hash-password
 | --- | --- |
 | AI 写作 | 统一使用 Nebius Token Factory 和 `NEBIUS_API_KEY`。文字任务用 `nvidia/nemotron-3-super-120b-a12b`；图片起稿用 `nvidia/Nemotron-3.5-Super-VL`。点击生成文案只发送当前正文；若选了图片，则另发送明确选中的一张图片；选个人风格时加上已保存的风格指南。视频文件不会发送给模型。手动分析旧帖会发送选中的文字；逐平台改写会发送当前草稿及选中的个人风格指南；人工发布文案旁的改写只发送该框文字与目标平台；逐平台 AI 检查会发送保存的草稿正文、当前平台文案和目标平台；生成周计划只发送品牌资料，不发送发帖结果。密钥只留在服务端。 |
 | AI 调用额度 | 每个账号每小时最多请求 10 次，所有 AI 功能共用额度，记录存在 SQLite 中。公开演示可额外设置 `PLYPOST_AI_DAILY_LIMIT`（1–240）限制滚动 24 小时内的总请求；留空则只用每小时限制。这不是 Nebius 账户的费用上限。 |
-| Bluesky 账号 | 填写 `PLYPOST_BLUESKY_ORIGIN` 和 `PLYPOST_BLUESKY_SECRET`，然后在 **Account** 中连接。浏览器地址须与配置一致。 |
+| Bluesky 账号（仅本机） | 当前 OAuth 实现只接受 `http://127.0.0.1:<端口>` 作为 `PLYPOST_BLUESKY_ORIGIN`。另需设置 `PLYPOST_BLUESKY_SECRET`，然后在 **Account** 中连接；浏览器地址须与配置一致。公开 Render 站不能启用此连接，且依赖告警尚未解决。 |
 | Mastodon 账号 | 有账号时再填写 `PLYPOST_MASTODON_INSTANCE`、`PLYPOST_PUBLIC_ORIGIN` 和 `PLYPOST_MASTODON_SECRET`。可用 `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` 暂停新的定时任务和后续派发，改动后须重启应用与 worker。 |
 
 两个 `*_SECRET` 应分别使用独立的 32 字节随机密钥。具体格式见 [.env.example](.env.example)。恢复备份不会取消本机已经排入真实发布队列的 Mastodon 帖子。
@@ -93,7 +93,7 @@ npm test
 npm run build
 ```
 
-公开演示站的首页和 `/api/health` 已从外部网络返回 200；新密码登录及会话接口已在该实例返回 200。虚构文案的单平台改写、双平台改写和合成图片的看图起稿也已在该实例返回可用结果。另用虚构文字草稿验证了 Render 服务重启后的保存与读取，并在验证后删除测试草稿。虚构图片和短视频也已通过重启后的逐字节读取检查，测试素材随后删除。线上还验收了单个 32 MiB 视频、接近 5 MiB 的图片，以及两条 32 MiB 视频同时上传；测试文件已清理。长期负载和更多并发仍待验证。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-27，`npm audit --omit=dev --audit-level=high` 报出 15 条高危依赖路径，均源于 Bluesky OAuth 依赖所用的 Zod 3 与[同一项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开启用 Bluesky 登录前须重新评估或等待兼容修复。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
+公开演示站的首页和 `/api/health` 已从外部网络返回 200；新密码登录及会话接口已在该实例返回 200。虚构文案的单平台改写、双平台改写和合成图片的看图起稿也已在该实例返回可用结果。另用虚构文字草稿验证了 Render 服务重启后的保存与读取，并在验证后删除测试草稿。虚构图片和短视频也已通过重启后的逐字节读取检查，测试素材随后删除。线上还验收了单个 32 MiB 视频、接近 5 MiB 的图片，以及两条 32 MiB 视频同时上传；测试文件已清理。长期负载和更多并发仍待验证。Nebius × NVIDIA 大赛的技术路径、验证记录和未完成的提交材料见[参赛准备](docs/hackathon.md)。截至 2026-10-29，`npm audit` 报出 15 条高危依赖路径，均源于 Bluesky OAuth 依赖所用的 Zod 3 与[同一项安全公告](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)；该依赖仍要求 Zod 3，不能靠强制覆盖为 Zod 4 来安全消除告警。公开站也没有本机回调地址，不能启用当前的 Bluesky OAuth 实现。下一步见[开发计划](DEVELOPMENT_PLAN.md)，各平台的接入门槛见[平台笔记](docs/platforms.md)。
 
 草稿保存中断后的核对流程已在隔离演示中用丢失响应和一次读取失败验证；Render 当前部署的版本也已检查健康接口、界面资源和登录会话。此检查没有在公开站故意制造服务故障。
 
