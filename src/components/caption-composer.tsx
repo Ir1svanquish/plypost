@@ -50,6 +50,8 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
   const [busy, setBusy] = useState<"voice" | "caption" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const latestStyleInput = useRef({ guideDraft, oldPosts });
+  latestStyleInput.current = { guideDraft, oldPosts };
   const captionRequest = useRef<AbortController | null>(null);
   const captionRequestId = useRef(0);
   const currentEditorEpoch = useRef(editorEpoch);
@@ -112,8 +114,12 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
       if (!response.ok) throw new Error(await profileWriteError(response, "Could not analyze examples."));
       const data = await response.json() as { voiceProfile?: VoiceProfile };
       if (!data.voiceProfile) throw new Error("No writing style was returned.");
-      setProfile(data.voiceProfile); setOldPosts(""); setGuideDraft(null); setGuideBaseVersion(null); setStyle("personal");
-      setNotice("Style guide saved. Your sample posts were not stored in Plypost.");
+      const hasNewerSamples = latestStyleInput.current.oldPosts !== oldPosts;
+      setProfile(data.voiceProfile); setOldPosts((current) => current === oldPosts ? "" : current);
+      setGuideDraft(null); setGuideBaseVersion(null); setStyle("personal");
+      setNotice(hasNewerSamples
+        ? "Style guide saved from the submitted posts. Your newer sample text is still here."
+        : "Style guide saved. Your sample posts were not stored in Plypost.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not analyze examples."); }
     finally { setBusy(null); }
   }
@@ -135,7 +141,13 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
       if (!response.ok) throw new Error(await profileWriteError(response, "Could not save the style guide."));
       const data = await response.json() as { voiceProfile?: VoiceProfile };
       if (!data.voiceProfile) throw new Error("No saved style guide was returned.");
-      setProfile(data.voiceProfile); setGuideDraft(null); setGuideBaseVersion(null); setNotice("Your edited style guide was saved without an AI request.");
+      const hasNewerEdits = latestStyleInput.current.guideDraft !== guideDraft;
+      setProfile(data.voiceProfile);
+      if (!hasNewerEdits) setGuideDraft(null);
+      setGuideBaseVersion(hasNewerEdits ? data.voiceProfile.updatedAt : null);
+      setNotice(hasNewerEdits
+        ? "Saved the submitted version. Your newer edits are still unsaved."
+        : "Your edited style guide was saved without an AI request.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save the style guide."); }
     finally { setBusy(null); }
   }
