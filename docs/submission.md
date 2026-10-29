@@ -38,7 +38,7 @@ Put the dedicated demo email and password in Devpost's testing instructions, not
 
 1. Open https://plypost.onrender.com/ and sign in with the dedicated credentials supplied privately in Devpost.
 2. Open **Create**. Enter a fictional post or open a saved example from **Drafts**. Add an image if testing the vision flow.
-3. Choose two platforms. Open **Generate caption** to try a writing style, or request platform versions. Review and edit suggestions before applying them. Model calls share a per-account hourly limit and the hosted service may also have a daily cap.
+3. Choose two platforms. Open **Write with AI** to try a writing style, or request platform versions. Review and edit suggestions before applying them. Model calls share a per-account hourly limit and the hosted service may also have a daily cap.
 4. Open **Review posts**. Inspect the separate platform text and image choices, then create an **Assisted** handoff. This prepares a checklist; it does not post to a social account.
 5. Open **Plan** to see target dates and reminders. Any simulation shown there is a simulation, not a real network post.
 
@@ -52,7 +52,7 @@ Record the working application on a desktop browser. Use only fictional text and
 | --- | --- | --- |
 | 0:00–0:15 | Login complete; Create page | One idea usually turns into several slightly different posts. |
 | 0:15–0:40 | Type a short fictional draft and attach a sample image | The source and media stay together in one workspace. |
-| 0:40–1:10 | Open Generate caption; select the image and generate; edit the suggestion | Nemotron 3.5 Super VL proposes a caption; the user keeps control of the text. |
+| 0:40–1:10 | Open Write with AI; select the image and generate; edit the suggestion | Nemotron 3.5 Super VL proposes a caption; the user keeps control of the text. |
 | 1:10–1:40 | Select LinkedIn and Threads; request platform versions, edit one suggestion and apply only that version | Nemotron 3 Super drafts versions through Nebius Token Factory; suggestions begin unchecked. |
 | 1:40–2:05 | Review posts; correct a detail and choose images per platform | The review step catches differences before a handoff is prepared. |
 | 2:05–2:25 | Open Assisted and Plan | Posting stays manual; dates and handoff status remain visible. |
@@ -63,7 +63,7 @@ Do a test recording first. If a live model call is slow, trim waiting time in th
 ## Release gate
 
 - [x] Hosted site and health endpoint respond; `/api/health` returned 200 on October 29.
-- [x] Render shows reviewed application commit `181151bf9e230151dd08cc541d584d6119e6ffc9` as Live. The hosted page and `/api/health` both returned HTTP 200 on October 29; later documentation-only commits do not change the deployed application.
+- [x] Render shows reviewed application commit `23e145d42871f3aa53216e4f2fdffbb1a8f17bd3` as Live. The hosted page and `/api/health` both returned HTTP 200 on October 29; later documentation-only commits do not change the deployed application.
 - [x] MIT license and local setup instructions are in the repository.
 - [x] Known-format credential prefixes and sensitive filenames were checked in the current reachable Git history; no match was found. This is not a guarantee against every secret format.
 - [x] On 2026-10-28, unauthenticated requests to the hosted drafts, media, videos, backup, AI style, brand brief and account-connection endpoints returned HTTP 401.
