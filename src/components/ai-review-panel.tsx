@@ -37,7 +37,7 @@ export function AIReviewPanel({ source, original, suggestions, available, select
         <h3 ref={headingRef} tabIndex={-1} className="text-[13px] font-bold text-[var(--text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">Review before replacing</h3>
         <p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Suggestions start unchecked. Compare and edit each one, then select only the versions you want to apply. Applying a version also selects its platform.</p>
       </div>
-      <button type="button" onClick={onDiscard} disabled={busy} className="text-[12px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text)] disabled:opacity-45">Discard suggestions</button>
+      <button type="button" onClick={onDiscard} disabled={busy} className="text-[13px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text)] disabled:opacity-45">Discard suggestions</button>
     </div>
     {stale && <p role="alert" className="mt-3 rounded-lg bg-[var(--warning-soft)] px-3 py-2 text-[12px] text-[var(--warning)]">The editor changed after these suggestions were generated. Generate again to review the latest draft.</p>}
     <div className="mt-3 space-y-2">
@@ -53,7 +53,7 @@ export function AIReviewPanel({ source, original, suggestions, available, select
             </label>
             <div className="flex flex-wrap items-center gap-2">
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${comparison.changed ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "bg-[var(--surface)] text-[var(--text-muted)]"}`}>{comparison.changed ? "Changed" : "No edits"}</span>
-              {!validation.valid && <button type="button" onClick={() => { const details = detailsRefs.current[id]; if (details) details.open = true; document.getElementById(`ai-suggestion-${id}`)?.focus(); }} disabled={stale || busy} className="text-[11px] font-semibold text-[var(--danger)] underline underline-offset-2 disabled:opacity-50">{suggestion.trim() ? "Too long · edit" : "Empty suggestion · edit"}</button>}
+              {!validation.valid && <button type="button" onClick={() => { const details = detailsRefs.current[id]; if (details) details.open = true; document.getElementById(`ai-suggestion-${id}`)?.focus(); }} disabled={stale || busy} className="text-[13px] font-semibold text-[var(--danger)] underline underline-offset-2 disabled:opacity-50">{suggestion.trim() ? "Too long · edit" : "Empty suggestion · edit"}</button>}
             </div>
           </div>
           <AiLiteralNotice source={source} suggestion={suggestion} />
@@ -64,7 +64,7 @@ export function AIReviewPanel({ source, original, suggestions, available, select
               <div className="min-w-0 rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] p-3"><p className="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--accent-text)]">Suggested · highlighted text new</p><p className="whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--text)]">{highlighted(comparison.after, "suggested")}</p></div>
             </div>
             <label htmlFor={`ai-suggestion-${id}`} className="mt-3 block text-[11px] font-bold text-[var(--text-secondary)]">Edit {platforms[id].name} suggestion</label>
-            <textarea id={`ai-suggestion-${id}`} aria-invalid={!validation.valid} aria-describedby={`ai-suggestion-count-${id}`} value={suggestion} onChange={(event) => { if (characterCount(event.target.value) <= 5000) onEdit(id, event.target.value); }} disabled={stale || busy} className="mt-1 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[13px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
+            <textarea id={`ai-suggestion-${id}`} aria-invalid={!validation.valid} aria-describedby={`ai-suggestion-count-${id}`} value={suggestion} onChange={(event) => { if (characterCount(event.target.value) <= 5000) onEdit(id, event.target.value); }} disabled={stale || busy} className="mt-1 min-h-28 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-[16px] leading-5 text-[var(--text)] outline-none focus:border-[var(--accent-border)] disabled:opacity-50" />
             <p id={`ai-suggestion-count-${id}`} className={`mt-1 text-right text-[11px] ${validation.valid ? "text-[var(--text-muted)]" : "text-[var(--danger)]"}`}>{validation.count}/{validation.limit} characters{validation.byteCount !== undefined && validation.byteLimit !== undefined ? ` · ${validation.byteCount}/${validation.byteLimit} bytes` : ""}</p>
           </details>
         </div>;
@@ -72,7 +72,7 @@ export function AIReviewPanel({ source, original, suggestions, available, select
     </div>
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
       <p className="text-[11px] leading-5 text-[var(--text-soft)]">AI can get facts wrong. Check each suggested version before sharing.</p>
-      <button type="button" onClick={onApply} disabled={busy || stale || selected.length === 0 || invalidSelected} className="gradient-button rounded-lg px-4 py-2.5 text-[12px] font-bold text-white disabled:opacity-45">Apply {selected.length} selected {selected.length === 1 ? "version" : "versions"}</button>
+      <button type="button" onClick={onApply} disabled={busy || stale || selected.length === 0 || invalidSelected} className="gradient-button rounded-lg px-4 py-2.5 text-[13px] font-bold text-white disabled:opacity-45">Apply {selected.length} selected {selected.length === 1 ? "version" : "versions"}</button>
     </div>
   </section>;
 }

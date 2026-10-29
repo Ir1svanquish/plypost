@@ -80,7 +80,7 @@ body {
   font-family: "Instrument Sans Variable", "Segoe UI", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-button, input, textarea, select { font: inherit; }
+button, input, textarea, select { font-family: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 input, textarea, select { color: var(--text); background-color: var(--field); }

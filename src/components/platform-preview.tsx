@@ -2,6 +2,7 @@ import Image from "next/image";
 import { BlueskyMark } from "./bluesky-mark";
 import {
   Bookmark,
+  Globe,
   Heart,
   MessageCircle,
   MoreHorizontal,
@@ -87,7 +88,7 @@ function LinkedInPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds:
         <div className="min-w-0 flex-1 text-[13px] leading-5">
           <strong className="block text-[var(--text)]">Your brand</strong>
           <span className="block text-[12px] text-[var(--text-muted)]">Company page · Public</span>
-          <span className="block text-[11px] text-[var(--text-soft)]">Just now · 🌐</span>
+          <span className="flex items-center gap-1 text-[11px] text-[var(--text-soft)]">Just now · <Globe size={11} aria-hidden="true" /></span>
         </div>
         <MoreHorizontal aria-hidden="true" size={18} className="shrink-0 text-[var(--text-soft)]" />
       </div>

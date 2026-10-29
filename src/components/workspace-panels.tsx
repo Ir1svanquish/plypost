@@ -44,9 +44,9 @@ function DraftCard({ draft, currentDraftId, handoffs, onLoad, onPrepare, onOpenA
     <p className="mt-2 text-[11px] font-semibold text-[var(--text-secondary)]">{handoffs.length === 0 ? "No manual posts prepared" : [queued.length && `${queued.length} to post`, postedCount && `${postedCount} marked posted`].filter(Boolean).join(" · ")}</p>
     <p className="mt-2 truncate text-[11px] text-[var(--text-soft)]">{[...platformDisplayIds.filter((id) => draft.selected.includes(id)).map((id) => platforms[id].name), ...(draft.videoId ? ["Video"] : [])].join(" · ") || (handoffs.length ? "Manual posts" : "Choose destinations later")}</p>
     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-      <button type="button" onClick={() => onLoad(draft)} className="text-[12px] font-bold text-[var(--accent-text)]">Open draft →</button>
-      {hasPostText && <button type="button" onClick={() => onPrepare(draft)} className="text-[12px] font-bold text-[var(--accent-text)]">Prepare posts →</button>}
-      {nextHandoff && <button type="button" onClick={() => onOpenAssisted(nextHandoff)} className="text-[12px] font-bold text-[var(--accent-text)]">View handoffs →</button>}
+      <button type="button" onClick={() => onLoad(draft)} className="text-[13px] font-bold text-[var(--accent-text)]">Open draft →</button>
+      {hasPostText && <button type="button" onClick={() => onPrepare(draft)} className="text-[13px] font-bold text-[var(--accent-text)]">Prepare posts →</button>}
+      {nextHandoff && <button type="button" onClick={() => onOpenAssisted(nextHandoff)} className="text-[13px] font-bold text-[var(--accent-text)]">View handoffs →</button>}
     </div>
   </article>;
 }
@@ -77,10 +77,10 @@ export function DraftLibraryPanel({ drafts, assisted, currentDraftId, onNew, onL
       {drafts.length > 0 && <div className="mx-6 mb-5 grid grid-cols-2 gap-3 sm:mx-7 sm:grid-cols-[minmax(0,1fr)_minmax(130px,160px)_minmax(130px,160px)]">
         <label className="relative col-span-2 block text-[12px] font-semibold text-[var(--text-secondary)] sm:col-span-1">Search drafts
           <Search size={15} aria-hidden="true" className="pointer-events-none absolute bottom-3 left-3 text-[var(--text-soft)]" />
-          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title or post text" className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] py-2.5 pl-9 pr-3 text-[13px] font-normal text-[var(--text)] outline-none placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)]" />
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title or post text" className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] py-2.5 pl-9 pr-3 text-[16px] font-normal text-[var(--text)] outline-none placeholder:text-[var(--text-soft)] focus:border-[var(--accent-border)]" />
         </label>
         <label className="min-w-0 text-[12px] font-semibold text-[var(--text-secondary)]">Show
-          <select value={show} onChange={(event) => setShow(event.target.value as PlatformId | "all" | "video" | "unassigned")} className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] font-normal text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
+          <select value={show} onChange={(event) => setShow(event.target.value as PlatformId | "all" | "video" | "unassigned")} className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[16px] font-normal text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
             <option value="all">All drafts</option>
             <option value="unassigned">No platform yet</option>
             {platformDisplayIds.map((id) => <option key={id} value={id}>{platforms[id].name}</option>)}
@@ -88,7 +88,7 @@ export function DraftLibraryPanel({ drafts, assisted, currentDraftId, onNew, onL
           </select>
         </label>
         <label className="min-w-0 text-[12px] font-semibold text-[var(--text-secondary)]">Sort
-          <select value={sort} onChange={(event) => setSort(event.target.value as "updated" | "target")} className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[13px] font-normal text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
+          <select value={sort} onChange={(event) => setSort(event.target.value as "updated" | "target")} className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2.5 text-[16px] font-normal text-[var(--text)] outline-none focus:border-[var(--accent-border)]">
             <option value="updated">Newest first</option>
             <option value="target">Target date</option>
           </select>

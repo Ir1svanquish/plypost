@@ -86,7 +86,7 @@ export function ThemeSwitcher() {
       <button
         ref={triggerRef}
         type="button"
-        className="theme-switcher-trigger inline-flex h-9 items-center gap-2 rounded-lg border px-2.5 text-[12px] font-semibold"
+        className="theme-switcher-trigger inline-flex h-9 items-center gap-2 rounded-lg border px-2.5 text-[13px] font-semibold"
         aria-label={`Theme: ${current.label}`}
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
