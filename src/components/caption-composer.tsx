@@ -161,9 +161,9 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
     suggestion.imageId === imageId && suggestion.style === style &&
     suggestion.voiceUpdatedAt === (style === "personal" ? profile?.updatedAt ?? null : null));
   const shownNotice = suggestion && !suggestionCurrent && notice === captionReadyNotice ? "" : notice;
-  const styleOptions = (ids: readonly CaptionStyleId[]) => <div className="mt-2 grid gap-2 sm:grid-cols-2">{ids.map((id) => <label key={id} className={`flex min-h-14 cursor-pointer items-start gap-2 rounded-lg border px-3 py-3 transition-colors ${style === id ? "border-[var(--accent-border)] bg-[var(--accent-soft)]" : "border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--surface-hover)]"}`}>
-    <input type="radio" name="caption-style" value={id} checked={style === id} onChange={() => setStyle(id)} disabled={working || (id === "personal" && (profileStatus !== "ready" || !profile))} className="mt-0.5 accent-[var(--accent)] disabled:opacity-40" />
-    <span><span className="block text-[13px] font-semibold text-[var(--text)]">{captionStyles[id].label}{id === "personal" && !profile ? " · set up first" : ""}</span><span className="block text-[12px] leading-5 text-[var(--text-muted)]">{captionStyles[id].description}</span></span>
+  const styleOptions = (ids: readonly CaptionStyleId[]) => <div className="ai-style-options">{ids.map((id) => <label key={id} title={captionStyles[id].description} className={`ai-style-choice ${style === id ? "ai-style-selected" : ""}`}>
+    <input type="radio" name="caption-style" value={id} checked={style === id} onChange={() => setStyle(id)} disabled={working || (id === "personal" && (profileStatus !== "ready" || !profile))} className="accent-[var(--accent)] disabled:opacity-40" />
+    <span>{captionStyles[id].label}{id === "personal" && !profile ? " · set up first" : ""}</span>
   </label>)}</div>;
 
   async function generateCaption() {
@@ -201,16 +201,17 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
   }
 
   return <section aria-label="AI writing tools">
-    <details className="ai-composer group rounded-lg px-4 py-2">
-      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 text-[var(--text)] [&::-webkit-details-marker]:hidden"><Sparkles size={20} className="shrink-0 text-[var(--accent-text)]" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold">Write with AI</span><span className="block text-[12px] leading-5 text-[var(--text-muted)]">Turn notes or a photo into a post</span></span><ChevronDown size={16} className="shrink-0 text-[var(--text-muted)] transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
-      <div className="mt-3 space-y-4 border-t border-[var(--line)] pb-2 pt-4">
+    <details className="ai-composer group">
+      <summary className="ai-composer-summary"><span className="ai-composer-trigger"><Sparkles size={17} aria-hidden="true" /><span>Write with AI</span><ChevronDown size={14} className="ai-composer-chevron" aria-hidden="true" /></span><span className="ai-composer-hint">From notes or a photo</span></summary>
+      <div className="ai-composer-options mt-4 space-y-4 border-t border-[var(--line)] pb-2 pt-4">
         <p className="text-[12px] leading-5 text-[var(--text-muted)]">Uses the notes above and one selected photo. A video can stay attached, but AI does not read its frames. Nothing is sent until you click Generate suggestion.</p>
-        <fieldset><legend className="text-[12px] font-bold text-[var(--text)]">Writing style</legend>
-          <div className="mt-3"><p className="text-[11px] font-semibold text-[var(--text-muted)]">Start here</p>{styleOptions(["default", "personal"])}</div>
-          <details className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5">
+        <fieldset aria-describedby="caption-style-description"><legend className="text-[13px] font-medium text-[var(--text)]">Writing style</legend>
+          {styleOptions(["default", "personal"])}
+          <details className="mt-3">
             <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Other styles{style !== "default" && style !== "personal" ? ` · ${captionStyles[style].label}` : ""}</summary>
             {styleOptions(["direct", "practical", "conversation", "behindScenes", "story"])}
           </details>
+          <p id="caption-style-description" className="mt-3 text-[12px] leading-5 text-[var(--text-muted)]">{captionStyles[style].description}</p>
         </fieldset>
         <details className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
           <summary className="cursor-pointer text-[12px] font-semibold text-[var(--accent-text)]">Set up my style {profile ? "· saved" : "· from 3–6 past posts"}</summary>
