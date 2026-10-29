@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { BlueskyMark } from "./bluesky-mark";
 import {
   Bookmark,
   Heart,
@@ -42,7 +43,7 @@ function PreviewMedia({ mediaIds, mediaAlt }: { mediaIds: readonly string[]; med
 function BlueskyPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds: readonly string[]; mediaAlt: readonly string[] }) {
   return (
     <div className="flex gap-3 px-4 py-5 sm:px-5">
-      <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1684e8] text-[20px] font-bold text-white">✦</span>
+      <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1684e8] text-[20px] font-bold text-white"><BlueskyMark size={23} /></span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-1.5 text-[13px] leading-5">
           <strong className="text-[var(--text)]">Your brand</strong>
@@ -92,7 +93,7 @@ function LinkedInPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds:
       </div>
       <div className="min-h-[110px] px-4 pb-5 sm:px-5"><PostText text={text} platform="linkedin" /><PreviewMedia mediaIds={mediaIds} mediaAlt={mediaAlt} /></div>
       <div className="mx-4 border-t border-[var(--line)] sm:mx-5" />
-      <div aria-hidden="true" className="grid grid-cols-4 gap-1 px-2 py-3 text-center text-[10px] font-semibold text-[var(--text-muted)] sm:text-[11px]">
+      <div aria-hidden="true" className="grid grid-cols-4 gap-1 px-2 py-3 text-center text-[11px] font-semibold text-[var(--text-muted)] sm:text-[11px]">
         <span className="flex flex-col items-center gap-1 sm:flex-row sm:justify-center"><ThumbsUp size={16} />Like</span>
         <span className="flex flex-col items-center gap-1 sm:flex-row sm:justify-center"><MessageCircle size={16} />Comment</span>
         <span className="flex flex-col items-center gap-1 sm:flex-row sm:justify-center"><Repeat2 size={17} />Repost</span>

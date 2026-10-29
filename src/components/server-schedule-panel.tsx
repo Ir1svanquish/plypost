@@ -334,7 +334,7 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
       </div>
       <div className="mt-3 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--line)]">
         <div className="grid grid-cols-7 gap-px text-center">
-          {weekdays.map((day) => <div key={day} className="bg-[var(--surface-muted)] py-2 text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] sm:text-[11px]">{day}</div>)}
+          {weekdays.map((day) => <div key={day} className="bg-[var(--surface-muted)] py-2 text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] sm:text-[11px]">{day}</div>)}
           {Array.from({ length: cells }, (_, index) => {
             const dayNumber = index - firstWeekday + 1;
             if (dayNumber < 1 || dayNumber > daysInMonth) return <div key={`blank-${index}`} aria-hidden="true" className="min-h-14 bg-[var(--surface-muted)] sm:min-h-20" />;
@@ -345,10 +345,10 @@ export function ServerSchedulePanel({ drafts, schedule, assisted, realMastodon, 
             return <button key={key} type="button" onClick={() => { setSelectedDay(key); setShowAllDates(false); }} aria-label={`${dateLabel}, ${summary?.draft ?? 0} draft targets, ${hasRealMastodon ? `${summary?.real ?? 0} real Mastodon, ` : ""}${summary?.simulation ?? 0} simulated, ${summary?.manual ?? 0} manual${summary?.realAttention ? ", real Mastodon needs attention" : ""}${summary?.simulationFailed ? ", simulation needs attention" : ""}${summary?.manualDue ? ", manual publishing due" : ""}`} aria-pressed={!showAllDates && selectedDay === key} className={`flex min-h-14 flex-col items-center gap-1 px-0.5 py-2 text-center sm:min-h-20 sm:items-start sm:px-2.5 ${!showAllDates && selectedDay === key ? "bg-[var(--accent-soft)] text-[var(--accent-text)] hover:bg-[var(--accent-soft)]" : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`}>
               <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${key === todayKey ? "bg-[var(--accent)] text-white" : ""}`}>{dayNumber}</span>
               {summary && <span aria-hidden="true" className="flex flex-wrap justify-center gap-0.5 sm:justify-start">
-                {summary.draft > 0 && <span className="rounded-md bg-[var(--field)] px-1 text-[9px] font-bold text-[var(--text-secondary)] sm:px-1.5 sm:py-0.5 sm:text-[10px]">D {summary.draft}</span>}
-                {summary.real > 0 && <span className={`rounded-md px-1 text-[9px] font-bold sm:px-1.5 sm:py-0.5 sm:text-[10px] ${summary.realAttention ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--positive-soft)] text-[var(--positive)]"}`}>R {summary.real}</span>}
-                {summary.simulation > 0 && <span className={`rounded-md px-1 text-[9px] font-bold sm:px-1.5 sm:py-0.5 sm:text-[10px] ${summary.simulationFailed ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>S {summary.simulation}</span>}
-                {summary.manual > 0 && <span className={`rounded-md px-1 text-[9px] font-bold sm:px-1.5 sm:py-0.5 sm:text-[10px] ${summary.manualDue ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-secondary)]"}`}>M {summary.manual}</span>}
+                {summary.draft > 0 && <span className="rounded-md bg-[var(--field)] px-1 text-[11px] font-bold text-[var(--text-secondary)] sm:px-1.5 sm:py-0.5 sm:text-[11px]">D {summary.draft}</span>}
+                {summary.real > 0 && <span className={`rounded-md px-1 text-[11px] font-bold sm:px-1.5 sm:py-0.5 sm:text-[11px] ${summary.realAttention ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--positive-soft)] text-[var(--positive)]"}`}>R {summary.real}</span>}
+                {summary.simulation > 0 && <span className={`rounded-md px-1 text-[11px] font-bold sm:px-1.5 sm:py-0.5 sm:text-[11px] ${summary.simulationFailed ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--accent-soft)] text-[var(--accent-text)]"}`}>S {summary.simulation}</span>}
+                {summary.manual > 0 && <span className={`rounded-md px-1 text-[11px] font-bold sm:px-1.5 sm:py-0.5 sm:text-[11px] ${summary.manualDue ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--field)] text-[var(--text-secondary)]"}`}>M {summary.manual}</span>}
               </span>}
             </button>;
           })}
