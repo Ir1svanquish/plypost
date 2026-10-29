@@ -82,6 +82,7 @@ test("selected posts and an owned image use Nebius only after explicit actions",
     assert.equal(caption.status, 200);
     assert.match((await caption.json()).caption, /blue visual/);
     assert.equal(calls[1].body.model, "nvidia/Nemotron-3.5-Super-VL");
+    assert.deepEqual(calls[1].body.chat_template_kwargs, { enable_thinking: false }, "Short caption requests must reserve the output budget for the answer, not reasoning.");
     assert.equal(calls[1].body.messages[1].content[1].type, "image_url");
     assert.match(calls[1].body.messages[1].content[1].image_url.url, /^data:image\/jpeg;base64,/);
     assert.equal(calls[1].body.messages[1].content[0].text.includes("direct sentences"), true);

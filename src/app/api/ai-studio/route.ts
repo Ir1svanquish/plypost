@@ -23,7 +23,7 @@ async function completion(key: string, model: string, messages: ReturnType<typeo
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: maxTokens, stream: false,
-      ...(model === VISION_MODEL ? {} : modelRequestOptions(model)) }),
+      ...modelRequestOptions(model) }),
     signal: AbortSignal.timeout(45_000), cache: "no-store",
   });
   if (!response.ok) throw new Error(`Nebius returned HTTP ${response.status}. Check the model and quota.`);
