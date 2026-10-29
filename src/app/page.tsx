@@ -1944,7 +1944,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           <div className="ml-auto flex items-center gap-3"><ThemeSwitcher /><button type="button" onClick={() => openView("account")} aria-label="Open account" className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] text-[var(--text-secondary)]"><UserRound size={17} /></button></div>
         </header>
 
-        <main className="app-main mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
+        <main data-view={view} className="app-main mx-auto px-5 pb-16 pt-6 sm:px-8 lg:px-10 lg:pt-8">
           {legacyStorageError && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] text-[var(--warning)]">Older browser data could not be validated. It was left unchanged; check it before clearing this browser's storage.</div>}
           {view !== "compose" && (batchReviewState.dirty || batchReviewState.busy) && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Your unconfirmed handoff review is still open in Create.</span><button type="button" onClick={() => openView("compose")} className="font-bold text-[var(--accent-text)]">Continue review →</button></div>}
           {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} drafts, {legacyWorkspace.schedule.length} planned items and {legacyWorkspace.assisted.length} assisted items in older browser storage. Review before moving them into this account.</span><button type="button" onClick={() => { setLegacyImportError(null); setLegacyReviewOpen(true); }} className="font-bold text-[var(--accent-text)]">Review migration →</button></div>}
@@ -1966,7 +1966,10 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           {unreadableEditorCopy !== null && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] leading-5 text-[var(--warning)]">A browser editor copy could not be read. Its original text was kept. <button type="button" onClick={() => downloadBrowserCopy(unreadableEditorCopy)} className="font-bold underline underline-offset-2">Download raw copy</button> and keep the file private.{editorCacheWriteBlockedRef.current && " Browser autosave is unavailable until storage works again; save new work to your account."}</div>}
           <div className="compose-workspace-grid">
               <section className="compose-editor min-w-0" aria-labelledby="draft-heading">
-                <h2 id="draft-heading" className="sr-only">{currentDraftId ? "Edit draft" : "New post"}</h2>
+                <div className="compose-editor-heading">
+                  <h2 id="draft-heading">{currentDraftId ? "Edit draft" : "New post"}</h2>
+                  <span role="status" data-unconfirmed={Boolean(pendingDraftSave)}>{pendingDraftSave ? "Save unconfirmed" : editorDirty ? "Unsaved changes" : currentDraftId ? "Saved" : "Draft"}</span>
+                </div>
                 <div className="compose-editor-body">
                   <div className="compose-channels">
                     <div className="compose-channel-heading"><h3 className="text-[13px] font-medium text-[var(--text-muted)]">Post to</h3></div>
@@ -2078,12 +2081,13 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
                     <button type="button" onClick={() => { void saveDraft(); }} disabled={!canSaveEditor || mediaBusy || videoBusy || draftSaveBusy || needsDraftRecovery} className="inline-flex min-h-10 items-center rounded-lg border border-[var(--line)] px-4 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">{mediaBusy ? "Working with images…" : videoBusy ? "Working with video…" : draftSaveBusy ? "Saving…" : pendingDraftSave ? "Check save" : currentDraftId ? "Update draft" : "Save draft"}</button>
                     <button type="button" onClick={() => void prepareEditorHandoffs()} disabled={!canSaveEditor || !(source.trim() || platformDisplayIds.some((id) => variants[id]?.trim())) || mediaBusy || videoBusy || draftSaveBusy || restoringBackup || needsDraftRecovery} className="compose-review-button inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-5 text-[13px] font-semibold disabled:opacity-45">{draftSaveBusy ? "Saving…" : "Review posts"}<ArrowRight size={14} /></button>
                   </div>
-                  <div className="compose-save-status mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12px] text-[var(--text-muted)]"><p>Only published after your review.</p>{(editorDirty || pendingDraftSave) && <span role="status" className={pendingDraftSave ? "text-[var(--warning)]" : ""}>{pendingDraftSave ? "Save unconfirmed" : "Unsaved changes"}</span>}</div>
+                  <div className="compose-save-status mt-3 text-[12px] text-[var(--text-muted)]"><p>Only published after your review.</p></div>
                   </div>
                 </div>
               </section>
-              <section className="compose-preview min-w-0" aria-labelledby="preview-heading"><div className="compose-preview-content">
+              <section className="compose-preview min-w-0" aria-labelledby="preview-heading">
                 <div className="compose-preview-heading flex items-center justify-between gap-3"><h2 id="preview-heading" className="text-[14px] font-semibold text-[var(--text)]">Post preview</h2><span className="text-[12px] text-[var(--text-muted)]">{selected.length ? `${selected.length} ${selected.length === 1 ? "version" : "versions"}` : "No channel selected"}</span></div>
+                <div className="compose-preview-stage">
                 {selected.length > 0 ? <>
                 <div className="preview-tabs mobile-x-scroll flex gap-1 border-b border-[var(--line)]" role="tablist" aria-label="Platform previews">{platformDisplayIds.filter((id) => selected.includes(id)).map((id) => <button key={id} type="button" role="tab" aria-selected={active === id} onClick={() => setActive(id)} className={`relative flex shrink-0 items-center gap-1.5 px-3 py-4 text-[13px] font-semibold transition sm:text-[13px] ${active === id ? "text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>{platforms[id].name}{active === id && <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--accent)]" />}</button>)}</div>
                 {currentValidation.issues.length > 0 && <div role="status" className="space-y-2 pt-5">
@@ -2092,7 +2096,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
                     <span>{issue.message}{issue.sourceUrl && <a href={issue.sourceUrl} target="_blank" rel="noopener noreferrer" className="ml-1 underline underline-offset-2">Platform guidance</a>}</span>
                   </p>)}
                 </div>}
-                <div className="pt-6">
+                <div className="preview-post">
                   <PlatformPreview platform={active} text={currentText} count={currentCount} limit={platforms[active].limit} mediaIds={mediaIds} mediaAlt={mediaAlt} />
                   <details className="platform-text-editor mt-5 border-t border-[var(--line)] pt-4">
                     <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)] [&::-webkit-details-marker]:hidden"><FilePenLine size={15} aria-hidden="true" /><span className="flex-1">Edit {platforms[active].name} version</span><ChevronDown size={15} aria-hidden="true" /></summary>
@@ -2104,7 +2108,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
                     </div>
                   </details>
                 </div>
-                </> : <div className="preview-empty"><p className="text-[20px] font-medium tracking-[-0.02em] text-[var(--text)]">See it before you share.</p><p className="max-w-[250px] text-[14px] leading-6 text-[var(--text-muted)]">Select a channel to see how your words and photos will appear.</p><div className="preview-channel-starts" aria-label="Start a channel preview">{platformDisplayIds.map((id) => <button key={id} type="button" onClick={() => togglePlatform(id)} aria-label={`Preview on ${platforms[id].name}`}><PlatformMark id={id} size="small" /><span>{platforms[id].name}</span><ArrowRight size={14} aria-hidden="true" /></button>)}</div></div>}
+                </> : <div className="preview-empty"><p className="text-[20px] font-medium tracking-[-0.025em] text-[var(--text)]">See it before you share.</p><p className="max-w-[260px] text-[14px] leading-6 text-[var(--text-muted)]">Choose a channel. Your draft takes its shape here.</p><div className="preview-channel-starts" aria-label="Start a channel preview">{platformDisplayIds.map((id) => <button key={id} type="button" onClick={() => togglePlatform(id)} title={platforms[id].name} aria-label={`Preview on ${platforms[id].name}`}><PlatformMark id={id} size="small" /></button>)}</div></div>}
               </div></section>
               {showBlueskyLive && selected.includes("bluesky") && active === "bluesky" && <BlueskyLivePanel connection={blueskyConnection} connectionLoading={blueskyLoading} connectionError={blueskyError} selected active text={textFor("bluesky")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
               {showMastodonLive && selected.includes("mastodon") && active === "mastodon" && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[13px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
