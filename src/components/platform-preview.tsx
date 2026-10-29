@@ -1,5 +1,4 @@
 import Image from "next/image";
-import { BlueskyMark } from "./bluesky-mark";
 import {
   Bookmark,
   Globe,
@@ -31,6 +30,12 @@ function PostText({ text, platform }: { text: string; platform: PlatformId }) {
   );
 }
 
+function PreviewAvatar({ square = false }: { square?: boolean }) {
+  return <span aria-hidden="true" className={`flex h-10 w-10 shrink-0 items-center justify-center border border-[var(--line)] bg-[var(--surface-muted)] ${square ? "rounded-lg" : "rounded-full"}`}>
+    <Image src="/plypost-mark.svg" alt="" width={30} height={30} />
+  </span>;
+}
+
 function PreviewMedia({ mediaIds, mediaAlt }: { mediaIds: readonly string[]; mediaAlt: readonly string[] }) {
   if (mediaIds.length === 0) return null;
 
@@ -44,7 +49,7 @@ function PreviewMedia({ mediaIds, mediaAlt }: { mediaIds: readonly string[]; med
 function BlueskyPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds: readonly string[]; mediaAlt: readonly string[] }) {
   return (
     <div className="flex gap-3 px-4 py-5 sm:px-5">
-      <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1684e8] text-[20px] font-bold text-white"><BlueskyMark size={23} /></span>
+      <PreviewAvatar />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-1.5 text-[13px] leading-5">
           <strong className="text-[var(--text)]">Your brand</strong>
@@ -63,9 +68,9 @@ function BlueskyPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds: 
 
 function MastodonPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds: readonly string[]; mediaAlt: readonly string[] }) {
   return (
-    <div className="border-l-[3px] border-[var(--accent)]">
+    <div>
       <div className="flex gap-3 px-4 pb-2 pt-5 sm:px-5">
-        <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] bg-[#6255bf] text-[24px] font-black leading-none text-white">m</span>
+        <PreviewAvatar square />
         <div className="min-w-0 flex-1 text-[13px] leading-5">
           <div className="flex flex-wrap items-baseline gap-x-1.5"><strong className="text-[var(--text)]">Your brand</strong><span className="text-[var(--text-muted)]">@yourbrand@mastodon.social</span></div>
           <span className="text-[12px] text-[var(--text-soft)]">Public post · now</span>
@@ -84,7 +89,7 @@ function LinkedInPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds:
   return (
     <div>
       <div className="flex gap-3 px-4 pb-3 pt-5 sm:px-5">
-        <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[7px] bg-[#0a66c2] text-[17px] font-bold text-white">in</span>
+        <PreviewAvatar square />
         <div className="min-w-0 flex-1 text-[13px] leading-5">
           <strong className="block text-[var(--text)]">Your brand</strong>
           <span className="block text-[12px] text-[var(--text-muted)]">Company page · Public</span>
@@ -108,14 +113,13 @@ function ThreadsPreview({ text, mediaIds, mediaAlt }: { text: string; mediaIds: 
   return (
     <div className="flex gap-3 px-4 py-5 sm:px-5">
       <div className="flex shrink-0 flex-col items-center">
-        <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--text)] text-[18px] font-bold text-[var(--surface)]">P</span>
+        <PreviewAvatar />
         <span aria-hidden="true" className="mt-2 w-px flex-1 bg-[var(--line)]" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-[13px]"><strong className="text-[var(--text)]">yourbrand</strong><span className="text-[var(--text-soft)]">· now</span><MoreHorizontal aria-hidden="true" size={18} className="ml-auto text-[var(--text-soft)]" /></div>
         <div className="mt-2 min-h-[112px]"><PostText text={text} platform="threads" /><PreviewMedia mediaIds={mediaIds} mediaAlt={mediaAlt} /></div>
         <div aria-hidden="true" className="mt-5 flex items-center gap-5 text-[var(--text)]"><Heart size={18} strokeWidth={1.9} /><MessageCircle size={18} strokeWidth={1.9} /><Repeat2 size={18} strokeWidth={1.9} /><Send size={18} strokeWidth={1.9} /></div>
-        <p className="mb-0 mt-3 text-[12px] text-[var(--text-soft)]">0 replies · 0 likes</p>
       </div>
     </div>
   );

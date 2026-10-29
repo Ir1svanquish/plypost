@@ -1916,7 +1916,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
   return (
     <>
     <div inert={restoringBackup} className="app-shell min-h-screen lg:flex">
-      <aside id="desktop-sidebar" className={`app-sidebar sticky top-0 hidden h-screen shrink-0 flex-col py-5 transition-[width,padding] duration-200 lg:flex ${sidebarCollapsed ? "w-[72px] px-3" : "w-[228px] px-4"}`}>
+      <aside id="desktop-sidebar" className={`app-sidebar sticky top-0 hidden h-screen shrink-0 flex-col py-5 transition-[width,padding] duration-200 lg:flex ${sidebarCollapsed ? "w-[72px] px-3" : "w-[208px] px-4"}`}>
         <button type="button" onClick={() => setSidebarCollapsed((current) => !current)} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed} className={`flex w-full items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${sidebarCollapsed ? "justify-center" : "gap-3 px-2"}`} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
           <Image src="/plypost-mark.svg" alt="" width={40} height={40} className="h-10 w-10 shrink-0" />
           {!sidebarCollapsed && <span className="text-[22px] font-semibold tracking-[-0.05em]">Plypost<span className="sidebar-accent">.</span></span>}
@@ -1950,7 +1950,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           {legacyWorkspace && <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-[13px] text-[var(--text-secondary)]"><span>Found {legacyWorkspace.drafts.length} drafts, {legacyWorkspace.schedule.length} planned items and {legacyWorkspace.assisted.length} assisted items in older browser storage. Review before moving them into this account.</span><button type="button" onClick={() => { setLegacyImportError(null); setLegacyReviewOpen(true); }} className="font-bold text-[var(--accent-text)]">Review migration →</button></div>}
           {(view === "compose" || batchReviewState.dirty || batchReviewState.busy) && <div id="compose" hidden={view !== "compose"} className="section-anchor compose-workspace mx-auto max-w-[1180px]">
           <div className="compose-title-row mb-7 flex flex-wrap items-center justify-between gap-3">
-            <div><h1 className="text-[28px] font-semibold tracking-[-0.035em] text-[var(--text)]">Create a post</h1></div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2"><h1 className="text-[28px] font-semibold tracking-[-0.035em] text-[var(--text)]">Create a post</h1><span className="compose-draft-status" role="status" data-unconfirmed={Boolean(pendingDraftSave)}>{pendingDraftSave ? "Save unconfirmed" : editorDirty ? "Unsaved changes" : currentDraftId ? "Saved" : "Draft"}</span></div>
             <button type="button" onClick={newDraft} className="compose-new-draft inline-flex min-h-9 items-center gap-2 rounded-lg px-3 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><Plus size={16} aria-hidden="true" />New draft</button>
           </div>
           {otherEditorCopies.length > 0 && <details className="compose-recovery mb-5 text-[13px] text-[var(--text-secondary)]">
@@ -1966,10 +1966,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
           {unreadableEditorCopy !== null && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] leading-5 text-[var(--warning)]">A browser editor copy could not be read. Its original text was kept. <button type="button" onClick={() => downloadBrowserCopy(unreadableEditorCopy)} className="font-bold underline underline-offset-2">Download raw copy</button> and keep the file private.{editorCacheWriteBlockedRef.current && " Browser autosave is unavailable until storage works again; save new work to your account."}</div>}
           <div className="compose-workspace-grid">
               <section className="compose-editor min-w-0" aria-labelledby="draft-heading">
-                <div className="compose-editor-heading">
-                  <h2 id="draft-heading">{currentDraftId ? "Edit draft" : "New post"}</h2>
-                  <span role="status" data-unconfirmed={Boolean(pendingDraftSave)}>{pendingDraftSave ? "Save unconfirmed" : editorDirty ? "Unsaved changes" : currentDraftId ? "Saved" : "Draft"}</span>
-                </div>
+                <h2 id="draft-heading" className="sr-only">Your draft</h2>
                 <div className="compose-editor-body">
                   <div className="compose-channels">
                     <div className="compose-channel-heading"><h3 className="text-[13px] font-medium text-[var(--text-muted)]">Post to</h3></div>
