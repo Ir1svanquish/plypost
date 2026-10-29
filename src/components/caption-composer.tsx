@@ -200,8 +200,8 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
     }
   }
 
-  return <section aria-label="AI writing tools" className="mt-4">
-    <details className="ai-composer group rounded-lg border border-[var(--line)] bg-[var(--surface-muted)] px-4 py-2">
+  return <section aria-label="AI writing tools">
+    <details className="ai-composer group rounded-lg px-4 py-2">
       <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 text-[var(--text)] [&::-webkit-details-marker]:hidden"><Sparkles size={20} className="shrink-0 text-[var(--accent-text)]" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold">Write with AI</span><span className="block text-[12px] leading-5 text-[var(--text-muted)]">Turn notes or a photo into a post</span></span><ChevronDown size={16} className="shrink-0 text-[var(--text-muted)] transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
       <div className="mt-3 space-y-4 border-t border-[var(--line)] pb-2 pt-4">
         <p className="text-[12px] leading-5 text-[var(--text-muted)]">Uses the notes above and one selected photo. A video can stay attached, but AI does not read its frames. Nothing is sent until you click Generate suggestion.</p>

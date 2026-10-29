@@ -127,7 +127,7 @@ export function PlatformPreview({ platform, text, count, limit, mediaIds = [], m
   const shownAlt = mediaAlt.slice(0, shownIds.length);
   return (
     <figure className="mx-auto w-full max-w-[520px]">
-      <div aria-label={`${platforms[platform].name} example post`} className="overflow-hidden rounded-[18px] border border-[var(--line)] bg-[var(--surface)] shadow-sm">
+      <div aria-label={`${platforms[platform].name} example post`} className="overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)]">
         {platform === "bluesky" && <BlueskyPreview text={text} mediaIds={shownIds} mediaAlt={shownAlt} />}
         {platform === "mastodon" && <MastodonPreview text={text} mediaIds={shownIds} mediaAlt={shownAlt} />}
         {platform === "linkedin" && <LinkedInPreview text={text} mediaIds={shownIds} mediaAlt={shownAlt} />}
