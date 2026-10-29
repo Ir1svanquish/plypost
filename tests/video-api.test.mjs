@@ -74,6 +74,14 @@ test("video routes require owner and serve private playback ranges and attachmen
   const suffix = await download(new globalThis.Request(previewUrl, { headers: { cookie, range: "bytes=-12" } }), context(video.id));
   assert.equal(suffix.status, 206);
   assert.deepEqual(Buffer.from(await suffix.arrayBuffer()), mp4.subarray(-12));
+  for (const [requested, start, end] of [["bytes=0-0", 0, 0], [`bytes=${mp4.length - 1}-`, mp4.length - 1, mp4.length - 1],
+    [`bytes=8-${mp4.length + 100}`, 8, mp4.length - 1], [`bytes=-${mp4.length + 100}`, 0, mp4.length - 1]]) {
+    const part = await download(new globalThis.Request(previewUrl, { headers: { cookie, range: requested } }), context(video.id));
+    assert.equal(part.status, 206);
+    assert.equal(part.headers.get("content-range"), `bytes ${start}-${end}/${mp4.length}`);
+    assert.equal(Number(part.headers.get("content-length")), end - start + 1);
+    assert.deepEqual(Buffer.from(await part.arrayBuffer()), mp4.subarray(start, end + 1));
+  }
   for (const invalid of ["bytes=", `bytes=${mp4.length}-`, "bytes=20-10", "bytes=0-2,4-6"]) {
     const rejected = await download(new globalThis.Request(previewUrl, { headers: { cookie, range: invalid } }), context(video.id));
     assert.equal(rejected.status, 416);

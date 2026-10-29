@@ -76,10 +76,23 @@ export function listVideos(userId: string): VideoItem[] {
     .all(userId).map((row) => itemFromRow(row as VideoRow));
 }
 
-export function getVideo(userId: string, id: string): { video: VideoItem; bytes: Buffer } | null {
+export function getVideoMetadata(userId: string, id: string): VideoItem | null {
   if (!VIDEO_ID_PATTERN.test(id)) return null;
-  const row = videoDatabase().prepare("SELECT id,original_name,mime_type,byte_size,created_at,body FROM videos WHERE id=? AND user_id=?")
-    .get(id, userId) as (VideoRow & { body: Uint8Array }) | undefined;
+  const row = videoDatabase().prepare("SELECT id,original_name,mime_type,length(body) AS byte_size,created_at FROM videos WHERE id=? AND user_id=?")
+    .get(id, userId) as VideoRow | undefined;
+  return row ? itemFromRow(row) : null;
+}
+
+export function getVideo(userId: string, id: string, range?: { start: number; end: number }): { video: VideoItem; bytes: Buffer } | null {
+  if (!VIDEO_ID_PATTERN.test(id)) return null;
+  if (range && (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 0 ||
+      range.end < range.start || range.end >= MAX_VIDEO_BYTES)) return null;
+  // Slice the BLOB inside SQLite: a short playback range must not load the whole clip into JavaScript memory.
+  const row = range
+    ? videoDatabase().prepare("SELECT id,original_name,mime_type,byte_size,created_at,substr(body,?,?) AS body FROM videos WHERE id=? AND user_id=?")
+      .get(range.start + 1, range.end - range.start + 1, id, userId) as (VideoRow & { body: Uint8Array }) | undefined
+    : videoDatabase().prepare("SELECT id,original_name,mime_type,byte_size,created_at,body FROM videos WHERE id=? AND user_id=?")
+      .get(id, userId) as (VideoRow & { body: Uint8Array }) | undefined;
   return row ? { video: itemFromRow(row), bytes: Buffer.from(row.body.buffer, row.body.byteOffset, row.body.byteLength) } : null;
 }
 

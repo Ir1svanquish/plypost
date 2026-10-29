@@ -10,7 +10,7 @@ import { closeDatabase } from "../src/lib/server/db.ts";
 import { buildHandoffPackage } from "../src/lib/server/handoff-package.ts";
 import { addAssisted, deleteAssisted, deleteDraft, listWorkspace, prepareAssistedBatch, saveDraft, setAssistedStatus, updateAssistedVideo } from "../src/lib/server/workspace.ts";
 import { assistedContentSnapshot, assistedDeletionSnapshot } from "../src/lib/workspace.ts";
-import { assertOwnedVideo, createVideo, deleteVideo, getVideo, listVideos, MAX_VIDEO_BYTES } from "../src/lib/server/video.ts";
+import { assertOwnedVideo, createVideo, deleteVideo, getVideo, getVideoMetadata, listVideos, MAX_VIDEO_BYTES } from "../src/lib/server/video.ts";
 
 const temporary = mkdtempSync(join(tmpdir(), "plypost-video-"));
 process.env.PLYPOST_DB_PATH = join(temporary, "video.sqlite");
@@ -47,6 +47,24 @@ test("video storage rejects mismatched and oversized uploads", () => {
   assert.throws(() => createVideo(owner, { name: "fake.mp4", type: "video/mp4", bytes: Buffer.from("not a video") }), /valid MP4/);
   assert.throws(() => createVideo(owner, { name: "wrong.mov", type: "video/quicktime", bytes: mp4 }), /valid MP4/);
   assert.throws(() => createVideo(owner, { name: "huge.mp4", type: "video/mp4", bytes: Buffer.alloc(MAX_VIDEO_BYTES + 1) }), /no larger than 32 MiB/);
+});
+
+test("private video slices preserve byte boundaries and ownership", () => {
+  const video = createVideo(owner, { name: "range.mp4", type: "video/mp4", bytes: mp4 }).video;
+  assert.equal(getVideoMetadata(owner, video.id)?.sizeBytes, mp4.length);
+  assert.equal(getVideoMetadata(other, video.id), null);
+  assert.equal(getVideo(other, video.id, { start: 0, end: 0 }), null);
+  for (const [start, end] of [[0, 0], [8, 31], [mp4.length - 1, mp4.length - 1]]) {
+    const slice = getVideo(owner, video.id, { start, end });
+    assert.equal(slice.video.sizeBytes, mp4.length);
+    assert.deepEqual(slice.bytes, mp4.subarray(start, end + 1));
+  }
+  for (const range of [{ start: -1, end: 1 }, { start: 2, end: 1 }, { start: 0.5, end: 1 }, { start: 0, end: MAX_VIDEO_BYTES }]) {
+    assert.equal(getVideo(owner, video.id, range), null);
+  }
+  assert.equal(deleteVideo(owner, video.id), true);
+  assert.equal(getVideoMetadata(owner, video.id), null);
+  assert.equal(getVideo(owner, video.id, { start: 0, end: 0 }), null);
 });
 
 test("queued handoff can replace and detach its clip without losing text or another window's edit", () => {
