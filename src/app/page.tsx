@@ -1954,18 +1954,9 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2"><h1 className="text-[28px] font-semibold tracking-[-0.035em] text-[var(--text)]">Create a post</h1><span className="compose-draft-status" role="status" data-unconfirmed={Boolean(pendingDraftSave)}>{pendingDraftSave ? "Save unconfirmed" : editorDirty ? "Unsaved changes" : currentDraftId ? "Saved" : "Draft"}</span></div>
             <button type="button" onClick={newDraft} className="compose-new-draft inline-flex min-h-9 items-center gap-2 rounded-lg px-3 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><Plus size={16} aria-hidden="true" />New draft</button>
           </div>
-          {otherEditorCopies.length > 0 && <details className="compose-recovery mb-5 text-[13px] text-[var(--text-secondary)]">
-            <summary className="cursor-pointer font-semibold text-[var(--text)]">{otherEditorCopies.length} recoverable browser {otherEditorCopies.length === 1 ? "copy" : "copies"}</summary>
-            <p className="mt-2 text-[12px] text-[var(--text-muted)]">Copies may come from another tab or a closed session. Save current edits first; opening a copy keeps its original. Download unreadable copies to inspect their raw text.</p>
-            <ul className="mt-2 divide-y divide-[var(--line)]">{otherEditorCopies.map((copy) => <li key={copy.tabId} className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between">
-              <span className="min-w-0 truncate" title={copy.preview}>{copy.preview}</span>
-              <span className="flex shrink-0 items-center gap-3">{copy.unreadable
-                ? <button type="button" onClick={() => downloadBrowserCopy(copy.value)} className="font-semibold text-[var(--accent-text)]">Download raw copy</button>
-                : <button type="button" onClick={() => recoverEditorCopy(copy)} className="font-semibold text-[var(--accent-text)]">Open copy</button>}<button type="button" onClick={() => discardEditorCopy(copy)} className="font-semibold text-[var(--danger)]">Remove copy</button></span>
-            </li>)}</ul>
-          </details>}
           {unreadableEditorCopy !== null && <div role="alert" className="mb-5 rounded-xl border border-[var(--warning)] bg-[var(--warning-soft)] px-4 py-3 text-[13px] leading-5 text-[var(--warning)]">A browser editor copy could not be read. Its original text was kept. <button type="button" onClick={() => downloadBrowserCopy(unreadableEditorCopy)} className="font-bold underline underline-offset-2">Download raw copy</button> and keep the file private.{editorCacheWriteBlockedRef.current && " Browser autosave is unavailable until storage works again; save new work to your account."}</div>}
           <div className="compose-workspace-grid">
+            <div className="compose-workbench">
               <section className="compose-editor min-w-0" aria-labelledby="draft-heading">
                 <h2 id="draft-heading" className="sr-only">Your draft</h2>
                 <div className="compose-editor-body">
@@ -2106,12 +2097,23 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
                     </div>
                   </details>
                 </div>
-                </> : <div className="preview-empty"><p className="text-[20px] font-medium tracking-[-0.025em] text-[var(--text)]">See it before you share.</p><p className="max-w-[260px] text-[14px] leading-6 text-[var(--text-muted)]">Choose a channel. Your draft takes its shape here.</p><div className="preview-channel-starts" aria-label="Start a channel preview">{platformDisplayIds.map((id) => <button key={id} type="button" onClick={() => togglePlatform(id)} title={platforms[id].name} aria-label={`Preview on ${platforms[id].name}`}><PlatformMark id={id} size="small" /></button>)}</div></div>}
+                </> : <div className="preview-empty"><p className="text-[20px] font-medium tracking-[-0.025em] text-[var(--text)]">Your post, in context.</p><p className="max-w-[260px] text-[14px] leading-6 text-[var(--text-muted)]">Choose a channel to see its layout as you write.</p><div className="preview-channel-starts" aria-label="Start a channel preview">{platformDisplayIds.map((id) => <button key={id} type="button" onClick={() => togglePlatform(id)} title={platforms[id].name} aria-label={`Preview on ${platforms[id].name}`}><PlatformMark id={id} size="small" /><span>{platforms[id].name}</span><ArrowRight size={14} aria-hidden="true" /></button>)}</div></div>}
               </div></section>
+            </div>
               {showBlueskyLive && selected.includes("bluesky") && active === "bluesky" && <BlueskyLivePanel connection={blueskyConnection} connectionLoading={blueskyLoading} connectionError={blueskyError} selected active text={textFor("bluesky")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} />}
               {showMastodonLive && selected.includes("mastodon") && active === "mastodon" && <><MastodonLivePanel connection={mastodonConnection} connectionLoading={mastodonLoading} connectionError={mastodonError} selected active text={textFor("mastodon")} imageCount={mediaIds.length} mediaBusy={mediaBusy} onOpenAccount={() => openView("account")} /><button type="button" onClick={() => openView("schedule")} className="text-left text-[13px] font-semibold text-[var(--accent-text)]">See Mastodon scheduling status in Plan →</button></>}
               {batchLaunch && (currentDraftId === batchLaunch.draft.id || batchReviewState.dirty || batchReviewState.busy) && <BatchHandoffPanel key={`${batchLaunch.draft.id}:${batchLaunch.token}`} startExpanded draft={batchLaunch.draft} stale={!currentSavedDraft || currentSavedDraft.updatedAt !== batchLaunch.draft.updatedAt} existing={assisted} now={now} editorDirty={editorDirty} busy={assistedBusy || draftSaveBusy || restoringBackup} mediaBusy={mediaBusy || videoBusy} onPrepare={prepareAssistedBatch} onOpenAssisted={() => { setFocusedAssistedId(null); setOpenAssistedComposer(false); setCollapseAssistedComposerToken((token) => token + 1); openView("assisted"); }} onOpenLatest={currentSavedDraft ? () => void openLatestDraft() : undefined} onStateChange={setBatchReviewState} />}
           </div>
+          {otherEditorCopies.length > 0 && <details className="compose-recovery mt-5 text-[13px] text-[var(--text-secondary)]">
+            <summary className="cursor-pointer font-semibold text-[var(--text)]">{otherEditorCopies.length} recoverable browser {otherEditorCopies.length === 1 ? "copy" : "copies"}</summary>
+            <p className="mt-2 text-[12px] text-[var(--text-muted)]">Copies may come from another tab or a closed session. Save current edits first; opening a copy keeps its original. Download unreadable copies to inspect their raw text.</p>
+            <ul className="mt-2 divide-y divide-[var(--line)]">{otherEditorCopies.map((copy) => <li key={copy.tabId} className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between">
+              <span className="min-w-0 truncate" title={copy.preview}>{copy.preview}</span>
+              <span className="flex shrink-0 items-center gap-3">{copy.unreadable
+                ? <button type="button" onClick={() => downloadBrowserCopy(copy.value)} className="font-semibold text-[var(--accent-text)]">Download raw copy</button>
+                : <button type="button" onClick={() => recoverEditorCopy(copy)} className="font-semibold text-[var(--accent-text)]">Open copy</button>}<button type="button" onClick={() => discardEditorCopy(copy)} className="font-semibold text-[var(--danger)]">Remove copy</button></span>
+            </li>)}</ul>
+          </details>}
               <details className="mt-4 px-1 text-[12px] text-[var(--text-muted)]"><summary className="cursor-pointer font-semibold">More actions</summary><div className="mt-3 flex flex-wrap items-center gap-4"><button type="button" onClick={() => openView("drafts")} className="font-semibold text-[var(--accent-text)]">Draft library</button><button type="button" onClick={() => openManualComposer()} className="font-semibold text-[var(--accent-text)]">Prepare one manual post</button><button type="button" onClick={simulatePublish} disabled={!canPublish} className="font-semibold text-[var(--accent-text)] disabled:opacity-45">{publishing ? "Simulating…" : "Run demo simulation"}</button></div></details>
           </div>
 

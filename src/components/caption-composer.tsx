@@ -214,7 +214,7 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
 
   return <section aria-label="AI writing tools">
     <details className="ai-composer group">
-      <summary className="ai-composer-summary"><span className="ai-composer-trigger"><Sparkles size={17} aria-hidden="true" /><span>Write with AI</span><ChevronDown size={14} className="ai-composer-chevron" aria-hidden="true" /></span><span className="ai-composer-hint">From notes or a photo</span></summary>
+      <summary className="ai-composer-summary"><span className="ai-composer-trigger"><Sparkles size={17} aria-hidden="true" /><span>Write with AI</span></span><span className="ai-composer-hint">From notes or a photo</span><ChevronDown size={16} className="ai-composer-chevron" aria-hidden="true" /></summary>
       <div className="ai-composer-options mt-4 space-y-4 border-t border-[var(--line)] pb-2 pt-4">
         <p className="text-[12px] leading-5 text-[var(--text-muted)]">Uses the notes above and one selected photo. A video can stay attached, but AI does not read its frames. Nothing is sent until you click Generate suggestion.</p>
         <fieldset aria-describedby="caption-style-description"><legend className="text-[13px] font-medium text-[var(--text)]">Writing style</legend>
