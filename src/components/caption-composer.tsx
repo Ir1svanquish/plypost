@@ -200,10 +200,10 @@ export function CaptionComposer({ source, revision, editorEpoch, profileRefreshE
     }
   }
 
-  return <section aria-label="AI writing tools" className="mt-3">
-    <details className="rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-3 sm:p-4">
-      <summary className="gradient-button flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-4 text-[13px] font-bold text-white [&::-webkit-details-marker]:hidden"><span className="inline-flex items-center gap-2"><Sparkles size={16} aria-hidden="true" />Generate caption</span><ChevronDown size={16} aria-hidden="true" /></summary>
-      <div className="mt-4 space-y-4">
+  return <section aria-label="AI writing tools" className="mt-4">
+    <details className="group rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)]/55 px-4 py-3 sm:px-4">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 text-[var(--text)] [&::-webkit-details-marker]:hidden"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-white"><Sparkles size={17} aria-hidden="true" /></span><span className="min-w-0 flex-1"><span className="block text-[13px] font-bold">Generate caption</span><span className="block text-[11px] leading-4 text-[var(--text-muted)]">Write from notes or a photo, then adapt for each network</span></span><ChevronDown size={16} className="shrink-0 text-[var(--text-muted)] transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+      <div className="mt-4 space-y-4 border-t border-[var(--accent-border)] pt-4">
         <p className="text-[12px] leading-5 text-[var(--text-muted)]">Uses the notes above and one selected photo. A video can stay attached, but AI does not read its frames. Nothing is sent until you click Generate suggestion.</p>
         <fieldset><legend className="text-[12px] font-bold text-[var(--text)]">Writing style</legend>
           <div className="mt-3"><p className="text-[11px] font-semibold text-[var(--text-muted)]">Start here</p>{styleOptions(["default", "personal"])}</div>
