@@ -4,7 +4,6 @@ import { useRef } from "react";
 import { Clock3, Download, LogOut, Upload, UserRound } from "lucide-react";
 import { platforms, type PlatformId } from "@/lib/platforms";
 import { MastodonConnectionPanel, type MastodonConnection } from "@/components/mastodon-live-panel";
-import { BlueskyConnectionPanel, type BlueskyConnection } from "@/components/bluesky-live-panel";
 
 type AuditEntry = { action: string; subject_id: string | null; detail: string | null; created_at: string };
 type SimulationReceipt = { platform: PlatformId; id: string; status: "simulated"; publishedAt: string; content: string };
@@ -21,11 +20,6 @@ type Props = {
   mastodonLoading: boolean;
   mastodonError: string | null;
   onRefreshMastodon: () => Promise<void>;
-  blueskyConnection: BlueskyConnection | null;
-  blueskyLoading: boolean;
-  blueskyError: string | null;
-  onRefreshBluesky: () => Promise<void>;
-  editorDirty: boolean;
   onExport: () => void;
   onImport: (file: File) => Promise<void>;
   onFullExport: () => Promise<void>;
@@ -39,7 +33,7 @@ function formatTime(iso: string) {
   });
 }
 
-export function AccountPanel({ email, auditLog, activity, onClearActivity, onLogout, logoutBusy, logoutError, mastodonConnection, mastodonLoading, mastodonError, onRefreshMastodon, blueskyConnection, blueskyLoading, blueskyError, onRefreshBluesky, editorDirty, onExport, onImport, onFullExport, onFullImport, backupBusy }: Props) {
+export function AccountPanel({ email, auditLog, activity, onClearActivity, onLogout, logoutBusy, logoutError, mastodonConnection, mastodonLoading, mastodonError, onRefreshMastodon, onExport, onImport, onFullExport, onFullImport, backupBusy }: Props) {
   const fullInput = useRef<HTMLInputElement>(null);
   const textInput = useRef<HTMLInputElement>(null);
   return <div id="account" className="section-anchor space-y-6">
@@ -54,7 +48,6 @@ export function AccountPanel({ email, auditLog, activity, onClearActivity, onLog
     </section>
     {logoutError && <p role="alert" className="rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[12px] text-[var(--danger)]">{logoutError}</p>}
     <MastodonConnectionPanel connection={mastodonConnection} loading={mastodonLoading} loadError={mastodonError} onRefresh={onRefreshMastodon} />
-    <BlueskyConnectionPanel connection={blueskyConnection} loading={blueskyLoading} loadError={blueskyError} onRefresh={onRefreshBluesky} editorDirty={editorDirty} />
     <details className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)]" aria-label="Backup and restore">
       <summary className="cursor-pointer px-6 py-5 text-[17px] font-bold sm:px-7">Backup and restore</summary>
       <div className="space-y-4 border-t border-[var(--line)] px-6 py-5 sm:px-7">

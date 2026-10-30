@@ -20,7 +20,7 @@ Mastodon 的[混合素材问题](https://github.com/mastodon/mastodon/issues/236
 
 | 平台 | 当前实现 | 继续接入前要确认 |
 | --- | --- | --- |
-| [Bluesky](https://atproto.com/specs/oauth) | 本地账号连接、逐条确认的纯文字发帖；未用真实账号验收。 | 本地 OAuth 回调、发帖回执与撤销；公网使用还需 HTTPS 客户端元数据。图片另需上传及权限。 |
+| [Bluesky](https://atproto.com/specs/oauth) | 文案编辑、预览和人工发布；授权与直接发布入口已移除。 | 本地 OAuth 回调、发帖回执与撤销；公网使用还需 HTTPS 客户端元数据。图片另需上传及权限。 |
 | [Mastodon](https://docs.joinmastodon.org/methods/statuses/) | 本地账号连接、逐条确认的纯文字发帖和定时队列；未用真实账号验收。 | 目标实例的账号、OAuth 回调、权限、字数限制和故障恢复。定时任务由本机 worker 执行。 |
 | [LinkedIn](https://learn.microsoft.com/en-us/linkedin/consumer/integrations/self-serve/share-on-linkedin) | 人工发布清单。 | 开发者应用实际获得的 `w_member_social` 权限，以及 [Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api) 对该应用是否可用；Web 回调要 HTTPS。 |
 | [Threads](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api) | 人工发布清单。 | Meta 应用、`threads_content_publish`、用户授权及外部用户审核；媒体还需平台可读取的公网 URL。 |

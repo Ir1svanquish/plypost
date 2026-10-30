@@ -42,7 +42,7 @@ Plypost 是一个多平台发帖工作台。写一份草稿，再按平台改文
 
 写法选项参考了 [TikTok 的 2026 趋势报告](https://ads.tiktok.com/business/en-US/next)对真实过程和幕后内容的观察、[Buffer 的 2026 平台数据](https://buffer.com/resources/state-of-social-media-engagement-2026/)对互动的分析，以及 [LinkedIn 的内容建议](https://business.linkedin.com/marketing-solutions/strategy-guides/linkedin-marketing-tactical-plan)中对实用观点的强调。它们是编辑方式，不是实时热词或效果排名；模型不能凭风格选项编出经历或结果。
 
-另有 Bluesky 和 Mastodon 的纯文字发帖入口，以及 Mastodon 的本机定时队列。这些入口**尚未经过真实账号验收**。定时队列依赖本机 worker；电脑休眠或进程关闭时不会准时执行。图片目前只用于人工发布。
+另有 Mastodon 的纯文字发帖入口和本机定时队列。Bluesky 仅保留文案编辑、预览和人工发布待办，账号授权与直接发布入口已移除。这些入口**尚未经过真实账号验收**。定时队列依赖本机 worker；电脑休眠或进程关闭时不会准时执行。图片目前只用于人工发布。
 
 短视频可随草稿保存，并带入人工发布待办；不会随模拟或纯文字直发上传。支持 MP4、WebM、MOV，单个不超过 32 MiB，本机视频库最多 12 个、共 64 MiB。选中视频后可在浏览器里播放检查；浏览器不能解码时仍可下载原文件。应用按原样保存视频，不转码或清除元数据，也不保证目标平台接受该文件。**Account → Backup and restore → Download full backup** 包含草稿引用的图片、视频和已保存的写作风格指南，上限 192 MiB；普通文本 JSON 不含素材文件。恢复前会确认替换已保存内容；未保存的编辑内容也会被丢弃。备份里有私有内容，请妥善保管。
 
@@ -73,7 +73,7 @@ npm run hash-password
 | --- | --- |
 | AI 写作 | 统一使用 Nebius Token Factory 和 `NEBIUS_API_KEY`。文字任务用 `nvidia/nemotron-3-super-120b-a12b`；图片起稿用 `nvidia/Nemotron-3.5-Super-VL`。点击生成文案只发送当前正文；若选了图片，则另发送明确选中的一张图片；选个人风格时加上已保存的风格指南。视频文件不会发送给模型。手动分析旧帖会发送选中的文字；逐平台改写会发送当前草稿及选中的个人风格指南；人工发布文案旁的改写只发送该框文字与目标平台；逐平台 AI 检查会发送保存的草稿正文、当前平台文案和目标平台；生成周计划只发送品牌资料，不发送发帖结果。密钥只留在服务端。 |
 | AI 调用额度 | 每个账号每小时最多请求 10 次，所有 AI 功能共用额度，记录存在 SQLite 中。公开演示可额外设置 `PLYPOST_AI_DAILY_LIMIT`（1–240）限制滚动 24 小时内的总请求；留空则只用每小时限制。这不是 Nebius 账户的费用上限。 |
-| Bluesky 账号（仅本机） | 当前 OAuth 实现只接受 `http://127.0.0.1:<端口>` 作为 `PLYPOST_BLUESKY_ORIGIN`。另需设置 `PLYPOST_BLUESKY_SECRET`，然后在 **Account** 中连接；浏览器地址须与配置一致。公开 Render 站不能启用此连接，且依赖告警尚未解决。 |
+| Bluesky 账号（仅本机） | 账号授权与直接发布入口已从界面移除；当前仅支持文案准备和人工发布。仓库中保留的实验性 OAuth 后端仅适用于本机，未完成公网授权及依赖修复。 |
 | Mastodon 账号 | 有账号时再填写 `PLYPOST_MASTODON_INSTANCE`、`PLYPOST_PUBLIC_ORIGIN` 和 `PLYPOST_MASTODON_SECRET`。可用 `PLYPOST_MASTODON_SCHEDULE_ENABLED=false` 暂停新的定时任务和后续派发，改动后须重启应用与 worker。 |
 
 两个 `*_SECRET` 应分别使用独立的 32 字节随机密钥。具体格式见 [.env.example](.env.example)。恢复备份不会取消本机已经排入真实发布队列的 Mastodon 帖子。
