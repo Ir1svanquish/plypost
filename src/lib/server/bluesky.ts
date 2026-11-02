@@ -4,7 +4,7 @@ import {
   type NodeSavedSession, type NodeSavedSessionStore, type NodeSavedState, type NodeSavedStateStore,
   type OAuthSession,
 } from "@atproto/oauth-client-node";
-import { owner } from "./auth";
+import { sessionUser } from "./auth";
 import { audit, database, transaction } from "./db";
 import { validatePlatformText } from "../platform-validation";
 import { boundedBlueskyFetch } from "./bounded-bluesky-fetch";
@@ -179,7 +179,7 @@ function consumePending(nonce: string, config: Configuration): PendingRow {
   return transaction((db) => {
     const row = db.prepare("SELECT * FROM bluesky_oauth_pending WHERE nonce_hash=?")
       .get(digest(nonce)) as PendingRow | undefined;
-    if (!row || row.expires_at <= new Date().toISOString() || row.user_id !== owner() ||
+    if (!row || row.expires_at <= new Date().toISOString() || sessionUser(row.session_hash) !== row.user_id ||
         !db.prepare("SELECT 1 FROM sessions WHERE token_hash=? AND user_id=? AND expires_at>?")
           .get(row.session_hash, row.user_id, new Date().toISOString()) ||
         !config.redirectUri) throw new BlueskyError("Bluesky authorization could not be verified.");

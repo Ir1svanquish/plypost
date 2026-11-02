@@ -46,6 +46,16 @@ AI is optional. Drafts, media, planning and manual publishing preparation work w
 
 Assisted publishing prepares content; it does not sign in or publish for you. Calendar dates and reminders do not trigger automatic posts. An optional Mastodon integration supports text posting and confirmed scheduled tasks, but remains experimental. Bluesky account authorization is not available in the interface.
 
+## Accounts
+
+Create an account from the sign-in screen. Each account has its own drafts, media, plans and writing guide. Save the recovery code shown after registration in a password manager: it lets you reset your password without email, and each use replaces it with a new code. Email addresses are login identifiers and are not verified; this installation does not send password-reset emails.
+
+In **Account → Password and security**, you can change your password, replace your recovery code or sign out other sessions. Password changes end earlier sessions. Treat browser profiles as personal: unsaved editor copies are stored locally and separated by account, but are not encrypted against someone with access to that browser profile.
+
+The configured owner account and existing workspace remain available after upgrading. Changing its password in the app takes effect immediately. Changing `PLYPOST_OWNER_PASSWORD_HASH` on the server later resets that owner's password and invalidates its recovery code.
+
+Set `PLYPOST_REGISTRATION_ENABLED=false` to close registration without disabling existing accounts. This release caps the installation at 100 accounts and 10 new accounts per hour. AI requests are limited per account and also by a site-wide rolling 24-hour allowance (`PLYPOST_AI_GLOBAL_DAILY_LIMIT`, default 40). Account administration, email verification and email delivery are not included.
+
 ## Getting started
 
 Requires **Node.js 24.14 or later within the 24.x release line**, and npm.
@@ -84,7 +94,7 @@ To explore a separate workspace with fictional sample content:
 npm run demo
 ```
 
-The demo creates its own database and writes its local login details to `data/demo/login.txt`. The hosted demo uses a separate account and requires access credentials.
+The demo creates its own database and writes its local login details to `data/demo/login.txt`. The hosted demo supports registration when enabled by its operator; the judging account remains separate.
 
 ## AI models
 

@@ -790,6 +790,10 @@ export function migrateLegacyBrowserWorkspace(userId: string, raw: unknown, expe
 type AiQuotaDecision = { allowed: true } | { allowed: false; status: 429 | 503; error: string };
 
 export function reserveAiRequest(userId: string, now = Date.now()): AiQuotaDecision {
+  const globalLimit = Number(process.env.PLYPOST_AI_GLOBAL_DAILY_LIMIT || "40");
+  if (!Number.isSafeInteger(globalLimit) || globalLimit < 1 || globalLimit > 10000) {
+    return { allowed: false, status: 503, error: "The site AI quota is misconfigured." };
+  }
   const rawDailyLimit = process.env.PLYPOST_AI_DAILY_LIMIT?.trim();
   const dailyLimit = rawDailyLimit && /^[1-9]\d*$/.test(rawDailyLimit) ? Number(rawDailyLimit) : null;
   if (rawDailyLimit && (dailyLimit === null || !Number.isSafeInteger(dailyLimit) || dailyLimit > 240)) {
@@ -799,6 +803,8 @@ export function reserveAiRequest(userId: string, now = Date.now()): AiQuotaDecis
     const hourSince = new Date(now - 60 * 60_000).toISOString();
     const daySince = new Date(now - 24 * 60 * 60_000).toISOString();
     db.prepare("DELETE FROM ai_usage WHERE created_at < ?").run(daySince);
+    const total = db.prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE created_at>=?").get(daySince) as { count: number };
+    if (total.count >= globalLimit) return { allowed: false, status: 429, error: "This site's AI allowance is used up for now. You can keep editing and saving drafts." };
     const hourly = db.prepare("SELECT COUNT(*) AS count FROM ai_usage WHERE user_id=? AND created_at>=?")
       .get(userId, hourSince) as { count: number };
     if (hourly.count >= 10) return { allowed: false, status: 429, error: "AI limit reached: 10 requests per hour. Try again later." };

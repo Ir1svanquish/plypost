@@ -70,7 +70,7 @@ export function forkUnreadableEditorCache(storage: EditorStorage, session: TabSt
 }
 
 /** The pre-account cache can be claimed once; later owners only read their own editor. */
-export function readOwnerEditorCache(storage: EditorStorage, email: string, tabId: string): string | null {
+export function readOwnerEditorCache(storage: EditorStorage, email: string, tabId: string, allowLegacy = true): string | null {
   const saved = storage.getItem(ownerTabKey(email, tabId));
   if (saved !== null) return saved;
   const previous = storage.getItem(legacyOwnerKey(email));
@@ -79,13 +79,13 @@ export function readOwnerEditorCache(storage: EditorStorage, email: string, tabI
     const key = storage.key(index);
     if (key?.startsWith(legacyOwnerKeyPrefix) || key?.startsWith(ownerKeyPrefix)) return null;
   }
-  return storage.getItem(legacyKey);
+  return allowLegacy ? storage.getItem(legacyKey) : null;
 }
 
-export function writeOwnerEditorCache(storage: EditorStorage, email: string, tabId: string, value: string): void {
+export function writeOwnerEditorCache(storage: EditorStorage, email: string, tabId: string, value: string, allowLegacy = true): void {
   storage.setItem(ownerTabKey(email, tabId), value);
   storage.removeItem(legacyOwnerKey(email));
-  storage.removeItem(legacyKey);
+  if (allowLegacy) storage.removeItem(legacyKey);
 }
 
 /** Show recoverable edits without replacing the editor in another open tab. */

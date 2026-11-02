@@ -1,6 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import { accountFetch } from "@/lib/account-fetch";
+import { AccountAccess } from "@/components/account-forms";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
@@ -189,7 +191,13 @@ function PlatformMark({ id, size = "normal" }: { id: PlatformId; size?: "small" 
   );
 }
 
-function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: string; onLogout: () => Promise<void>; logoutBusy: boolean; logoutError: string }) {
+function WorkspaceApp({ email, onLogout, logoutBusy, logoutError, legacyImportAllowed = false }: { legacyImportAllowed?: boolean; email: string; onLogout: () => Promise<void>; logoutBusy: boolean; logoutError: string }) {
+  useEffect(() => {
+    const original = window.fetch;
+    const scoped = accountFetch(original.bind(window), email, window.location.origin);
+    window.fetch = scoped;
+    return () => { if (window.fetch === scoped) window.fetch = original; };
+  }, [email]);
   const [view, setView] = useState<WorkspaceView>("compose");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -554,7 +562,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     }
     let saved: string | null = null;
     try {
-      saved = readOwnerEditorCache(recovery.storage, email, editorTabIdRef.current);
+      saved = readOwnerEditorCache(recovery.storage, email, editorTabIdRef.current, legacyImportAllowed);
       if (saved) {
         const data = JSON.parse(saved) as {
           source?: unknown;
@@ -630,7 +638,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
       }
     }
     try {
-      const saved = localStorage.getItem(WORKSPACE_KEY);
+      const saved = legacyImportAllowed ? localStorage.getItem(WORKSPACE_KEY) : null;
       if (saved) {
         const raw = JSON.parse(saved) as Record<string, unknown>;
         const workspace = parseWorkspace(raw);
@@ -680,7 +688,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     try {
       const tabId = editorTabIdRef.current;
       if (!tabId || !recovery) throw new Error("Editor storage is not ready.");
-      writeOwnerEditorCache(recovery.storage, email, tabId, reopenedEditorValue(copy.value, Date.now()));
+      writeOwnerEditorCache(recovery.storage, email, tabId, reopenedEditorValue(copy.value, Date.now()), legacyImportAllowed);
       window.location.reload();
     } catch {
       setNotice({ kind: "error", text: "Could not open that browser copy. Its original copy was kept." });
@@ -704,7 +712,7 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
     if (!tabId || !recovery) throw new Error("Editor storage is not ready.");
     writeOwnerEditorCache(recovery.storage, email, tabId, JSON.stringify({ source, selected, variants, mediaIds, mediaAlt, videoId,
       plannedDate, placeLabel, activity, title, currentDraftId, currentDraftVersion, editorOrigin, pendingDraftSave: pending,
-      hasUnsavedWork: editorDirty || needsDraftRecovery || Boolean(pending), cachedAt: Date.now() }));
+      hasUnsavedWork: editorDirty || needsDraftRecovery || Boolean(pending), cachedAt: Date.now() }), legacyImportAllowed);
   }
 
   useEffect(() => {
@@ -2143,11 +2151,8 @@ function WorkspaceApp({ email, onLogout, logoutBusy, logoutError }: { email: str
 }
 
 export default function Home() {
-  const [session, setSession] = useState<{ email: string | null; configured: boolean } | null>(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [session, setSession] = useState<{ email: string | null; configured: boolean; legacyImportAllowed?: boolean; registrationOpen?: boolean } | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState("");
 
@@ -2157,21 +2162,6 @@ export default function Home() {
       .then(setSession)
       .catch(() => setError("Could not reach the server."));
   }, []);
-
-  async function signIn(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Sign-in failed.");
-      setSession({ email: data.email, configured: true });
-      setPassword("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Sign-in failed.");
-    } finally { setBusy(false); }
-  }
 
   async function signOut() {
     if (logoutBusy) return;
@@ -2187,7 +2177,7 @@ export default function Home() {
       if (!latest || typeof latest !== "object" || !("email" in latest) || latest.email !== null) {
         throw new Error("The session is still active.");
       }
-      setSession({ email: null, configured: "configured" in latest && typeof latest.configured === "boolean" ? latest.configured : true });
+      setSession({ email: null, configured: true, registrationOpen: "registrationOpen" in latest && latest.registrationOpen === true });
     } catch {
       setLogoutError("Sign-out was not confirmed. Retry and wait for the sign-in screen before leaving this device.");
     } finally {
@@ -2195,17 +2185,7 @@ export default function Home() {
     }
   }
 
-  if (session?.email) return <WorkspaceApp key={session.email} email={session.email} onLogout={signOut} logoutBusy={logoutBusy} logoutError={logoutError} />;
-  return <div className="app-shell flex min-h-screen items-center justify-center px-5 py-10"><div className="panel-border soft-shadow w-full max-w-md rounded-[22px] bg-[var(--surface)] p-8">
-    <div className="mb-7 flex items-center gap-3"><Image src="/plypost-mark.svg" alt="" width={44} height={44} className="h-11 w-11 shrink-0" /><span className="text-[25px] font-bold tracking-[-0.05em]">Plypost<span className="text-[var(--accent-text)]">.</span></span></div>
-    <h1 className="text-[22px] font-bold text-[var(--text)]">Sign in to Plypost</h1>
-    <p className="mt-2 text-[13px] leading-5 text-[var(--text-muted)]">Open your drafts, media and posting plan.</p>
-    {!session?.configured && session !== null ? <p role="alert" className="mt-5 rounded-xl bg-[var(--warning-soft)] p-3 text-[13px] text-[var(--warning)]">Owner sign-in is not configured. Follow the setup steps in README.md.</p> : <form onSubmit={signIn} className="mt-7 space-y-4">
-      <div><label htmlFor="login-email" className="mb-1.5 block text-[12px] font-bold text-[var(--text-secondary)]">Email</label><input id="login-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[16px] outline-none focus:border-[var(--accent-border)]" /></div>
-      <div><label htmlFor="login-password" className="mb-1.5 block text-[12px] font-bold text-[var(--text-secondary)]">Password</label><input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-xl border border-[var(--line)] bg-[var(--field)] px-4 py-3 text-[16px] outline-none focus:border-[var(--accent-border)]" /></div>
-      <button type="submit" disabled={busy || session === null} className="gradient-button w-full rounded-xl py-3 text-[14px] font-bold text-white disabled:opacity-50">{busy ? "Signing in..." : "Sign in"}</button>
-    </form>}
-    {error && <p role="alert" className="mt-4 text-[13px] text-[var(--danger)]">{error}</p>}
-    <div className="mt-6 flex justify-end"><ThemeSwitcher /></div>
-  </div></div>;
+  if (session?.email) return <WorkspaceApp key={session.email} email={session.email} legacyImportAllowed={session.legacyImportAllowed} onLogout={signOut} logoutBusy={logoutBusy} logoutError={logoutError} />;
+  if (!session && !error) return <div className="app-shell flex min-h-screen items-center justify-center" role="status"><div><h1>Sign in to Plypost</h1><p>Loading your account…</p></div></div>;
+  return <AccountAccess registrationOpen={session?.registrationOpen === true} initialError={error} onSignedIn={(email) => { setError(""); void fetch("/api/auth/session", { cache: "no-store" }).then((r) => r.json()).then(setSession).catch(() => setSession({ email, configured: true })); }} />;
 }

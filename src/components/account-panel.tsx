@@ -1,5 +1,6 @@
 "use client";
 
+import { AccountSecurity } from "./account-forms";
 import { useRef } from "react";
 import { Clock3, Download, LogOut, Upload, UserRound } from "lucide-react";
 import { platforms, type PlatformId } from "@/lib/platforms";
@@ -47,6 +48,7 @@ export function AccountPanel({ email, auditLog, activity, onClearActivity, onLog
       <button type="button" onClick={() => { void onLogout(); }} disabled={logoutBusy} className="inline-flex items-center gap-2 rounded-xl border border-[var(--line)] px-4 py-2.5 text-[13px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50"><LogOut size={15} /> {logoutBusy ? "Checking sign-out…" : "Sign out"}</button>
     </section>
     {logoutError && <p role="alert" className="rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-[12px] text-[var(--danger)]">{logoutError}</p>}
+    <AccountSecurity />
     <MastodonConnectionPanel connection={mastodonConnection} loading={mastodonLoading} loadError={mastodonError} onRefresh={onRefreshMastodon} />
     <details className="panel-border soft-shadow rounded-[18px] bg-[var(--surface)]" aria-label="Backup and restore">
       <summary className="cursor-pointer px-6 py-5 text-[17px] font-bold sm:px-7">Backup and restore</summary>

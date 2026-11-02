@@ -17,6 +17,10 @@ export function database(): DatabaseSync {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
+    CREATE TABLE IF NOT EXISTS accounts (
+      email TEXT PRIMARY KEY, password_hash TEXT NOT NULL, recovery_hash TEXT,
+      bootstrap_hash TEXT, created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL
     );

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { isIP } from "node:net";
-import { owner } from "./auth";
+import { sessionUser } from "./auth";
 import { audit, database, transaction } from "./db";
 
 const OAUTH_COOKIE = "plypost_mastodon_oauth";
@@ -216,7 +216,7 @@ function consumeOAuthState(state: string, nonce: string, config: Configuration):
       .get(digest(state)) as StateRow | undefined;
     if (!row || row.expires_at <= new Date().toISOString() || row.nonce_hash !== digest(nonce) ||
         row.instance !== config.instance || row.redirect_uri !== config.redirectUri ||
-        row.user_id !== owner() || !row.session_hash ||
+        !row.session_hash || sessionUser(row.session_hash) !== row.user_id ||
         !db.prepare("SELECT 1 FROM sessions WHERE token_hash=? AND user_id=? AND expires_at > ?")
           .get(row.session_hash, row.user_id, new Date().toISOString())) {
       throw new MastodonError("Mastodon authorization could not be verified.", 400);
